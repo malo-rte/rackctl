@@ -5,6 +5,7 @@ mod bridge;
 mod channel;
 mod config;
 mod curves;
+mod output;
 mod routing;
 
 use anyhow::Result;

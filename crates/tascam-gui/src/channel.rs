@@ -20,6 +20,10 @@ use crate::curves::{self, EqBand};
 /// Full-scale meter sample for the gain-reduction bar.
 const METER_FULL_SCALE: f32 = 32768.0;
 
+/// Column widths for the INPUT / EQ / COMPRESSOR boxes.
+const INPUT_WIDTH: f32 = 220.0;
+const DSP_WIDTH: f32 = 320.0;
+
 /// Render the editor for the currently selected channel.
 pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     let selected = u32::from(app.selected);
@@ -28,57 +32,84 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     // When linked, edit/display via the lower channel of the pair.
     let ch = if linked { low } else { selected };
 
-    if linked {
-        ui.heading(format!("Channels {}-{} (linked)", low + 1, low + 2));
-    } else {
-        ui.heading(format!("Channel {}", selected + 1));
-    }
-
-    let mut link_on = linked;
-    if ui
-        .checkbox(&mut link_on, format!("Stereo link {}-{}", low + 1, low + 2))
-        .changed()
-    {
-        app.toggle_link(selected);
-    }
-
-    ui.horizontal(|ui| {
-        control(app, ui, "Phase", Control::PhaseSwitch, ch);
-        control(app, ui, "Mute", Control::MuteSwitch, ch);
+    ui.horizontal_top(|ui| {
+        input_box(app, ui, ch, selected, linked, low);
+        eq_box(app, ui, ch);
+        comp_box(app, ui, ch);
     });
+}
 
-    control(app, ui, "Volume", Control::LineVolume, ch);
-    control(
-        app,
-        ui,
-        if linked { "Balance" } else { "Pan" },
-        Control::Pan,
-        ch,
-    );
+/// The INPUT box: channel identity, link, phase, mute, fader, pan/balance.
+fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: bool, low: u32) {
+    ui.group(|ui| {
+        ui.set_width(INPUT_WIDTH);
+        ui.vertical(|ui| {
+            if linked {
+                ui.heading(format!("INPUT {}-{}", low + 1, low + 2));
+            } else {
+                ui.heading(format!("INPUT {}", selected + 1));
+            }
 
-    ui.collapsing("EQ", |ui| {
-        eq_curve(app, ui, ch);
-        control(app, ui, "EQ enable", Control::EqSwitch, ch);
-        control(app, ui, "Low gain", Control::EqLowVolume, ch);
-        control(app, ui, "Low freq", Control::EqLowFreq, ch);
-        control(app, ui, "Mid-low gain", Control::EqMidLowVolume, ch);
-        control(app, ui, "Mid-low freq", Control::EqMidLowFreq, ch);
-        control(app, ui, "Mid-low Q", Control::EqMidLowQ, ch);
-        control(app, ui, "Mid-high gain", Control::EqMidHighVolume, ch);
-        control(app, ui, "Mid-high freq", Control::EqMidHighFreq, ch);
-        control(app, ui, "Mid-high Q", Control::EqMidHighQ, ch);
-        control(app, ui, "High gain", Control::EqHighVolume, ch);
-        control(app, ui, "High freq", Control::EqHighFreq, ch);
+            let mut link_on = linked;
+            if ui
+                .checkbox(&mut link_on, format!("Stereo link {}-{}", low + 1, low + 2))
+                .changed()
+            {
+                app.toggle_link(selected);
+            }
+
+            ui.horizontal(|ui| {
+                control(app, ui, "Phase", Control::PhaseSwitch, ch);
+                control(app, ui, "Mute", Control::MuteSwitch, ch);
+            });
+            control(app, ui, "Volume", Control::LineVolume, ch);
+            control(
+                app,
+                ui,
+                if linked { "Balance" } else { "Pan" },
+                Control::Pan,
+                ch,
+            );
+        });
     });
+}
 
-    ui.collapsing("Compressor", |ui| {
-        comp_curve(app, ui, ch);
-        control(app, ui, "Comp enable", Control::CompSwitch, ch);
-        control(app, ui, "Threshold", Control::CompThreshold, ch);
-        control(app, ui, "Ratio", Control::CompRatio, ch);
-        control(app, ui, "Attack", Control::CompAttack, ch);
-        control(app, ui, "Release", Control::CompRelease, ch);
-        control(app, ui, "Gain", Control::CompGain, ch);
+/// The EQ box: response graph on top, then the band controls.
+fn eq_box(app: &mut App, ui: &mut egui::Ui, ch: u32) {
+    ui.group(|ui| {
+        ui.set_width(DSP_WIDTH);
+        ui.vertical(|ui| {
+            ui.heading("EQ");
+            eq_curve(app, ui, ch);
+            control(app, ui, "EQ enable", Control::EqSwitch, ch);
+            control(app, ui, "Low gain", Control::EqLowVolume, ch);
+            control(app, ui, "Low freq", Control::EqLowFreq, ch);
+            control(app, ui, "Mid-low gain", Control::EqMidLowVolume, ch);
+            control(app, ui, "Mid-low freq", Control::EqMidLowFreq, ch);
+            control(app, ui, "Mid-low Q", Control::EqMidLowQ, ch);
+            control(app, ui, "Mid-high gain", Control::EqMidHighVolume, ch);
+            control(app, ui, "Mid-high freq", Control::EqMidHighFreq, ch);
+            control(app, ui, "Mid-high Q", Control::EqMidHighQ, ch);
+            control(app, ui, "High gain", Control::EqHighVolume, ch);
+            control(app, ui, "High freq", Control::EqHighFreq, ch);
+        });
+    });
+}
+
+/// The COMPRESSOR box: transfer graph and GR on top, then the parameters.
+fn comp_box(app: &mut App, ui: &mut egui::Ui, ch: u32) {
+    ui.group(|ui| {
+        ui.set_width(DSP_WIDTH);
+        ui.vertical(|ui| {
+            ui.heading("Compressor");
+            comp_curve(app, ui, ch);
+            control(app, ui, "Comp enable", Control::CompSwitch, ch);
+            control(app, ui, "Threshold", Control::CompThreshold, ch);
+            control(app, ui, "Ratio", Control::CompRatio, ch);
+            control(app, ui, "Attack", Control::CompAttack, ch);
+            control(app, ui, "Release", Control::CompRelease, ch);
+            control(app, ui, "Gain", Control::CompGain, ch);
+        });
     });
 }
 

@@ -8,7 +8,7 @@ use eframe::egui;
 use tascam_us16x08::{Backend, Control, Kind, Meters, Preset, Scope, Us16x08, Value, Watcher};
 
 use crate::config::{self, GuiConfig};
-use crate::{bridge, channel, routing};
+use crate::{bridge, channel, output, routing};
 
 /// Which editor the central panel shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -186,20 +186,12 @@ impl App {
         }
     }
 
-    /// Tab selector and the global DSP switches.
+    /// Tab selector and the Presets menu. (The global DSP switches live in the
+    /// OUTPUT panel.)
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.tab, Tab::Channel, "Channel");
             ui.selectable_value(&mut self.tab, Tab::Routing, "Routing");
-            ui.separator();
-            let bypass = self.cached_bool(Control::DspBypass, 0);
-            if ui.selectable_label(bypass, "DSP bypass").clicked() {
-                self.set(Control::DspBypass, 0, Value::Bool(!bypass));
-            }
-            let buss = self.cached_bool(Control::BussOut, 0);
-            if ui.selectable_label(buss, "Buss out").clicked() {
-                self.set(Control::BussOut, 0, Value::Bool(!buss));
-            }
             ui.separator();
             self.presets_menu(ui);
         });
@@ -268,8 +260,10 @@ impl eframe::App for App {
             });
         });
 
+        egui::SidePanel::right("output").show(ctx, |ui| output::show(self, ui));
+
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| match self.tab {
+            egui::ScrollArea::both().show(ui, |ui| match self.tab {
                 Tab::Channel => channel::show(self, ui),
                 Tab::Routing => routing::show(self, ui),
             });
