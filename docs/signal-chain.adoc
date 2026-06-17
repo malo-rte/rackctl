@@ -81,23 +81,10 @@ PB --> RT : direct
 [[sec-channel-chain]]
 == Per-input-channel chain
 
-The per-channel stages, in signal order. The stages and their roles are
-_(manual)_; the exact EQ-vs-compressor ordering is _(inferred)_ — see the note.
-
-[#tbl-channel-chain]
-.Per-channel processing stages
-[cols="1,3,3",options="header"]
-|===
-| Stage | Controls in this project | Notes
-
-| Phase | `phase` | Reverse channel phase. _(manual)_
-| Low-cut filter (LCF) | — | Per-channel high-pass. On the device _(manual)_ but *not exposed by the Linux driver* — no ALSA control, so this project cannot set it. _(driver)_
-| EQ (4-band) | `eq-enable`, `eq-{low,midlow,midhigh,high}-volume`, `eq-…-freq`, `eq-{midlow,midhigh}-q` | Gain ±12 dB per band; mids have Q (0.25–16.0). _(manual/driver)_
-| Compressor | `comp-enable`, `comp-threshold`, `comp-ratio`, `comp-attack`, `comp-release`, `comp-gain` | Threshold −32…0 dB, ratio 1.0:1…inf:1, attack 2–200 ms, release 10–1000 ms, make-up gain 0–20 dB; meters expose INPUT/OUTPUT and gain reduction (GR). _(manual)_
-| Mute | `mute` | _(manual/driver)_
-| Fader | `line-volume` | Channel level sent to the stereo bus (logarithmic dB curve). _(manual/driver)_
-| Pan | `pan` | Position into the stereo bus; centre = −3 dB to both sides; hard L/R sends to one side only. _(manual)_
-|===
+The per-channel stages, in signal order, one table per stage. The stages and their
+roles are _(manual)_; the exact EQ-vs-compressor ordering is _(inferred)_ — see the
+note. Raw control ranges are _(driver)_; the human units (dB, Hz, Q, ms) are
+_(manual)_. The *Range* column shows the raw control's `min–max (default)`.
 
 NOTE: The manual presents EQ as channel module 1 and the compressor as module 2,
 and the compressor acts on the channel "input volume" — consistent with *phase →
@@ -106,19 +93,134 @@ analog I/O path (mic/line → preamp → A/D), not the internal DSP order, so
 EQ-before-compressor is strongly implied but not drawn as an explicit DSP block.
 _(inferred)_
 
+[[sec-stage-phase]]
+=== Phase
+
+[#tbl-phase]
+.Phase stage
+[cols="2,3,2,4",options="header"]
+|===
+| Control | ALSA name | Range | Notes
+
+| `phase` | Phase Switch | on / off | Reverse the channel's phase.
+|===
+
+[[sec-stage-lcf]]
+=== Low-cut filter (LCF)
+
+The device has a per-channel low-cut (high-pass) filter, but the Linux driver
+registers *no control* for it, so this project cannot set it — there is no row to
+list. _(driver)_
+
+[[sec-stage-eq]]
+=== EQ (4 bands)
+
+[#tbl-eq]
+.EQ stage
+[cols="2,3,2,4",options="header"]
+|===
+| Control | ALSA name | Range | Notes
+
+| `eq-enable` | EQ Switch | on / off | Enable the channel equalizer.
+| `eq-low-volume` | EQ Low Volume | 0–24 (12) | Low band gain; 12 = 0 dB (±12 dB).
+| `eq-low-freq` | EQ Low Frequency | 0–31 (5) | Low band frequency (32 Hz–1.6 kHz).
+| `eq-midlow-volume` | EQ MidLow Volume | 0–24 (12) | Mid-low band gain (±12 dB).
+| `eq-midlow-freq` | EQ MidLow Frequency | 0–63 (14) | Mid-low band frequency.
+| `eq-midlow-q` | EQ MidLow Q | 0–6 (2) | Mid-low band width (Q 0.25–16.0).
+| `eq-midhigh-volume` | EQ MidHigh Volume | 0–24 (12) | Mid-high band gain (±12 dB).
+| `eq-midhigh-freq` | EQ MidHigh Frequency | 0–63 (27) | Mid-high band frequency.
+| `eq-midhigh-q` | EQ MidHigh Q | 0–6 (2) | Mid-high band width (Q 0.25–16.0).
+| `eq-high-volume` | EQ High Volume | 0–24 (12) | High band gain (±12 dB).
+| `eq-high-freq` | EQ High Frequency | 0–31 (15) | High band frequency.
+|===
+
+[[sec-stage-comp]]
+=== Compressor
+
+[#tbl-comp]
+.Compressor stage
+[cols="2,3,2,4",options="header"]
+|===
+| Control | ALSA name | Range | Notes
+
+| `comp-enable` | Compressor Switch | on / off | Enable the channel compressor.
+| `comp-threshold` | Compressor Threshold Volume | 0–32 (32) | Threshold; 0 = −32 dB, 32 = 0 dB.
+| `comp-ratio` | Compressor Ratio | enum 0–14 (0) | 1.0:1 … inf:1 (15 steps).
+| `comp-attack` | Compressor Attack | 0–198 (0) | Attack 2–200 ms.
+| `comp-release` | Compressor Release | 0–99 (0) | Release 10–1000 ms.
+| `comp-gain` | Compressor Volume | 0–20 (0) | Make-up gain 0–20 dB.
+|===
+
+The compressor meters expose INPUT, OUTPUT, and gain reduction (GR). _(manual)_
+
+[[sec-stage-mute]]
+=== Mute
+
+[#tbl-mute]
+.Mute stage
+[cols="2,3,2,4",options="header"]
+|===
+| Control | ALSA name | Range | Notes
+
+| `mute` | Mute Switch | on / off | Mute the channel.
+|===
+
+[[sec-stage-fader]]
+=== Fader
+
+[#tbl-fader]
+.Fader stage
+[cols="2,3,2,4",options="header"]
+|===
+| Control | ALSA name | Range | Notes
+
+| `line-volume` | Line Volume | 0–133 (127) | Channel level sent to the stereo bus; logarithmic dB curve.
+|===
+
+[[sec-stage-pan]]
+=== Pan
+
+[#tbl-pan]
+.Pan stage
+[cols="2,3,2,4",options="header"]
+|===
+| Control | ALSA name | Range | Notes
+
+| `pan` | Pan Left-Right Volume | 0–254 (127) | 0 = hard left, 127 = centre, 254 = hard right; centre = −3 dB to both sides.
+|===
+
 [[sec-master]]
 == Master bus
 
-The 16 channels are summed into a stereo master. `master-volume` sets the master
-output level and `master-mute` mutes it; the master meters show the mixed signal.
-_(manual/driver)_ The compressor can also operate on the master stereo signal.
-_(manual)_
+The 16 channels are summed into a stereo master; the master meters show the mixed
+signal. The compressor can also operate on the master stereo signal. _(manual)_
+
+[#tbl-master]
+.Master controls
+[cols="2,3,2,4",options="header"]
+|===
+| Control | ALSA name | Range | Notes
+
+| `master-volume` | Master Volume | 0–133 (127) | Master output level (same dB curve as the channel faders).
+| `master-mute` | Master Mute Switch | on / off | Mute the master output.
+|===
 
 [[sec-routing]]
 == Output routing
 
 Each `LINE OUT 1–8` selects *one* source through the `route` control (one instance
 per output, indices 0–7). _(manual)_
+
+[#tbl-route]
+.Routing control
+[cols="2,3,2,4",options="header"]
+|===
+| Control | ALSA name | Range | Notes
+
+| `route` | Line Out Route | enum 0–9, per output (0–7) | Source for one physical line output.
+|===
+
+The 10 sources fall into two groups:
 
 Master L / Master R:: The *Stereo BUS* — "the signals input through each input jack
 and by USB output from the computer are mixed and output in stereo."
@@ -133,15 +235,27 @@ into the stereo master. Only the eight outputs are routed.
 [[sec-globals]]
 == Global switches
 
-`buss-out`:: "Buss Out Switch" _(driver)_; "Computer out to Stereo BUS" in the
-legacy UI. Folds the computer/DAW playback into the stereo master bus so it is
-monitored together with the live inputs. Confirmed by the manual's Stereo BUS
-definition. _(manual/inferred)_
-`dsp-bypass`:: "DSP Bypass Switch" _(driver)_. Bypasses the channel DSP
-(EQ/compressor) for dry monitoring. The Settings-Panel section documents
-per-channel `eq-enable`/`comp-enable` rather than a single global bypass, so the
-precise scope of this switch is not manual-verified; the legacy app treated it as a
-global/true bypass. _(inferred)_
+[#tbl-globals]
+.Global DSP switches
+[cols="2,3,2,4",options="header"]
+|===
+| Control | ALSA name | Range | Notes
+
+| `buss-out` | Buss Out Switch | on / off | Fold the computer/DAW playback into the stereo master bus ("Computer out to Stereo BUS"). _(manual/inferred)_
+| `dsp-bypass` | DSP Bypass Switch | on / off | Bypass the channel DSP (EQ/compressor) for dry monitoring; exact scope not manual-verified. _(inferred)_
+|===
+
+[[sec-metering]]
+== Metering
+
+[#tbl-meter]
+.Metering
+[cols="2,3,2,4",options="header"]
+|===
+| Control | ALSA name | Range | Notes
+
+| `meter` | Level Meter | read-only, 34 ints | Per-channel input levels (0–15), master L/R (16–17), per-channel compressor gain reduction (18–33). Read via the `meters` command.
+|===
 
 [[sec-not-exposed]]
 == Not exposed / out of scope
