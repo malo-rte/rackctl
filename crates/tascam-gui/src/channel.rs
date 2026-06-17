@@ -87,10 +87,10 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                         bridge::meter_bar(ui, bridge::fraction(level));
                         ui.spacing_mut().slider_width = VOLUME_FADER_LENGTH;
                         let mut volume = app.cached_int(Control::LineVolume, ch);
-                        if ui
-                            .add(egui::Slider::new(&mut volume, 0..=133).vertical())
-                            .changed()
-                        {
+                        let fader = egui::Slider::new(&mut volume, 0..=133)
+                            .vertical()
+                            .custom_formatter(|n, _| human_text(Control::LineVolume, n));
+                        if ui.add(fader).changed() {
                             app.set(Control::LineVolume, ch, Value::Int(volume));
                         }
                     });
@@ -282,6 +282,8 @@ fn control(app: &mut App, ui: &mut egui::Ui, label: &str, control: Control, inde
 fn human_text(control: Control, raw: f64) -> String {
     let raw = raw as i32;
     match control {
+        // Fader/level controls store dB offset by 127 (127 = 0 dB).
+        Control::LineVolume | Control::MasterVolume => format!("{:+} dB", raw - 127),
         Control::EqLowVolume
         | Control::EqMidLowVolume
         | Control::EqMidHighVolume
