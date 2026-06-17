@@ -34,9 +34,8 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
 fn channel_strip(app: &mut App, ui: &mut egui::Ui, ch: u32) {
     ui.vertical(|ui| {
         ui.set_width(COLUMN_WIDTH);
-        let level = app.meters().channel_db(ch).unwrap_or(0);
-        meter_bar(ui, fraction(level));
 
+        // Label above the meter, matching the master strip's layout.
         let selected = u32::from(app.selected) == ch;
         if ui
             .selectable_label(selected, format!("{}", ch + 1))
@@ -44,6 +43,9 @@ fn channel_strip(app: &mut App, ui: &mut egui::Ui, ch: u32) {
         {
             app.selected = u8::try_from(ch).unwrap_or(0);
         }
+
+        let level = app.meters().channel_db(ch).unwrap_or(0);
+        meter_bar(ui, fraction(level));
 
         let muted = app.cached_bool(Control::MuteSwitch, ch);
         if ui.selectable_label(muted, "M").clicked() {
