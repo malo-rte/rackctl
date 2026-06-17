@@ -21,7 +21,7 @@ use crate::curves::{self, EqBand};
 const METER_FULL_SCALE: f32 = 32768.0;
 
 /// Column widths for the INPUT / EQ / COMPRESSOR boxes.
-const INPUT_WIDTH: f32 = 220.0;
+const INPUT_WIDTH: f32 = 300.0;
 const DSP_WIDTH: f32 = 320.0;
 /// Length of the INPUT volume fader.
 const VOLUME_FADER_LENGTH: f32 = 160.0;
@@ -52,46 +52,45 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                 ui.heading(format!("INPUT {}", selected + 1));
             }
 
-            let mut link_on = linked;
-            if ui
-                .checkbox(&mut link_on, format!("Stereo link {}-{}", low + 1, low + 2))
-                .changed()
-            {
-                app.toggle_link(selected);
-            }
+            ui.horizontal_top(|ui| {
+                // Switches and pan stacked on the left.
+                ui.vertical(|ui| {
+                    let mut link_on = linked;
+                    if ui
+                        .checkbox(&mut link_on, format!("Stereo link {}-{}", low + 1, low + 2))
+                        .changed()
+                    {
+                        app.toggle_link(selected);
+                    }
+                    let mut phase = app.cached_bool(Control::PhaseSwitch, ch);
+                    if ui.checkbox(&mut phase, "Phase").changed() {
+                        app.set(Control::PhaseSwitch, ch, Value::Bool(phase));
+                    }
+                    let mut mute = app.cached_bool(Control::MuteSwitch, ch);
+                    if ui.checkbox(&mut mute, "Mute").changed() {
+                        app.set(Control::MuteSwitch, ch, Value::Bool(mute));
+                    }
+                    ui.horizontal(|ui| {
+                        ui.label(if linked { "Balance" } else { "Pan" });
+                        let mut pan = app.cached_int(Control::Pan, ch);
+                        if ui.add(egui::Slider::new(&mut pan, 0..=254)).changed() {
+                            app.set(Control::Pan, ch, Value::Int(pan));
+                        }
+                    });
+                });
 
-            ui.horizontal(|ui| {
-                let mut phase = app.cached_bool(Control::PhaseSwitch, ch);
-                if ui.checkbox(&mut phase, "Phase").changed() {
-                    app.set(Control::PhaseSwitch, ch, Value::Bool(phase));
-                }
-                let mut mute = app.cached_bool(Control::MuteSwitch, ch);
-                if ui.checkbox(&mut mute, "Mute").changed() {
-                    app.set(Control::MuteSwitch, ch, Value::Bool(mute));
-                }
-            });
-
-            // Volume as a vertical fader. Scoped so the longer slider length
-            // does not leak to the horizontal pan slider below.
-            ui.label("Volume");
-            ui.scope(|ui| {
-                ui.spacing_mut().slider_width = VOLUME_FADER_LENGTH;
-                let mut volume = app.cached_int(Control::LineVolume, ch);
-                if ui
-                    .add(egui::Slider::new(&mut volume, 0..=133).vertical())
-                    .changed()
-                {
-                    app.set(Control::LineVolume, ch, Value::Int(volume));
-                }
-            });
-
-            // Pan / balance as a horizontal slider.
-            ui.horizontal(|ui| {
-                ui.label(if linked { "Balance" } else { "Pan" });
-                let mut pan = app.cached_int(Control::Pan, ch);
-                if ui.add(egui::Slider::new(&mut pan, 0..=254)).changed() {
-                    app.set(Control::Pan, ch, Value::Int(pan));
-                }
+                // Volume as a vertical fader on the right.
+                ui.vertical(|ui| {
+                    ui.label("Volume");
+                    ui.spacing_mut().slider_width = VOLUME_FADER_LENGTH;
+                    let mut volume = app.cached_int(Control::LineVolume, ch);
+                    if ui
+                        .add(egui::Slider::new(&mut volume, 0..=133).vertical())
+                        .changed()
+                    {
+                        app.set(Control::LineVolume, ch, Value::Int(volume));
+                    }
+                });
             });
         });
     });
