@@ -31,6 +31,11 @@ struct Cli {
 enum Command {
     /// List every control with its key, scope, kind, and ALSA name.
     List,
+    /// Show details for one control (scope, range, enum values).
+    Info {
+        /// Control key (see `list`).
+        control: String,
+    },
     /// Read a control's current value.
     Get {
         /// Control key (see `list`).
@@ -101,6 +106,7 @@ fn run_command<B: Backend>(dev: &mut Us16x08<B>, command: Command) -> Result<()>
             commands::list();
             Ok(())
         }
+        Command::Info { control } => commands::info(&control),
         Command::Get { control, channel } => commands::get(dev, &control, channel),
         Command::Set {
             control,
@@ -116,10 +122,14 @@ fn run_command<B: Backend>(dev: &mut Us16x08<B>, command: Command) -> Result<()>
 fn run() -> Result<()> {
     let cli = Cli::parse();
 
-    // `list` is backend-independent; don't require a device (or hardware) for it.
-    if matches!(cli.command, Command::List) {
-        commands::list();
-        return Ok(());
+    // `list` and `info` are backend-independent; don't open a device for them.
+    match &cli.command {
+        Command::List => {
+            commands::list();
+            return Ok(());
+        }
+        Command::Info { control } => return commands::info(control),
+        _ => {}
     }
 
     match open_device(cli.mock)? {

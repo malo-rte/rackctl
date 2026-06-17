@@ -35,6 +35,36 @@ fn get_returns_seeded_defaults() {
 }
 
 #[test]
+fn info_enum_lists_values() {
+    tascamctl()
+        .args(["--mock", "info", "comp-ratio"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("enum"))
+        .stdout(predicate::str::contains("0=1.0:1"))
+        .stdout(predicate::str::contains("14=inf:1"));
+}
+
+#[test]
+fn info_int_shows_range() {
+    tascamctl()
+        .args(["--mock", "info", "master-volume"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("int"))
+        .stdout(predicate::str::contains("0..=133"));
+}
+
+#[test]
+fn info_unknown_control_fails() {
+    tascamctl()
+        .args(["--mock", "info", "nonsuch"])
+        .assert()
+        .failure()
+        .code(1);
+}
+
+#[test]
 fn get_enum_shows_label() {
     tascamctl()
         .args(["--mock", "get", "route", "-c", "0"])

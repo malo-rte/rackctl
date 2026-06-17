@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use tascam_us16x08::{
-    Backend, Control, Kind, Meters, NUM_CHANNELS, Scope, Us16x08, Value, Watcher,
+    Backend, Control, Kind, Meters, NUM_CHANNELS, NUM_OUTPUTS, Scope, Us16x08, Value, Watcher,
 };
 
 use crate::value::{format_value, parse_value};
@@ -24,6 +24,32 @@ pub(crate) fn list() {
             c.alsa_name()
         );
     }
+}
+
+/// Print detailed metadata for one control. Backend-independent.
+pub(crate) fn info(key: &str) -> Result<()> {
+    let control = resolve(key)?;
+    println!("{}  ({})", control.cli_key(), control.alsa_name());
+    println!("  scope: {}", scope_detail(control.scope()));
+    match control.kind() {
+        Kind::Bool => println!("  kind:  bool (on/off/true/false/1/0/yes/no, or toggle)"),
+        Kind::Int { min, max, default } => {
+            println!("  kind:  int");
+            println!("  range: {min}..={max} (default {default}); relative +N/-N supported");
+        }
+        Kind::Enum { values, default } => {
+            println!("  kind:  enum (default {default})");
+            let listed: Vec<String> = values
+                .iter()
+                .enumerate()
+                .map(|(i, v)| format!("{i}={v}"))
+                .collect();
+            println!("  values: {}", listed.join("  "));
+        }
+        Kind::Meter => println!("  kind:  meter (read-only; use the `meters` command)"),
+        _ => println!("  kind:  ?"),
+    }
+    Ok(())
 }
 
 /// Read and print one control's value.
@@ -156,6 +182,15 @@ fn scope_str(scope: Scope) -> &'static str {
         Scope::Channel => "channel",
         Scope::Output => "output",
         _ => "?",
+    }
+}
+
+fn scope_detail(scope: Scope) -> String {
+    match scope {
+        Scope::Global => "global".to_owned(),
+        Scope::Channel => format!("channel (0..{NUM_CHANNELS})"),
+        Scope::Output => format!("output (0..{NUM_OUTPUTS})"),
+        _ => "?".to_owned(),
     }
 }
 
