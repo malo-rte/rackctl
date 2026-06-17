@@ -1,0 +1,141 @@
+= Tascam US-16x08 — Signal Chain Reference
+:doc-version:   0.1
+:doc-status:    Draft
+:doc-date:      2026-06-17
+:doc-authors:   Mats Loman
+:revnumber:     {doc-version}
+:revdate:       {doc-date}
+:toc:           left
+:toclevels:     3
+:sectnums:
+:sectnumlevels: 4
+:icons:         font
+:source-highlighter: rouge
+:experimental:
+
+A verified description of how audio flows through the US-16x08's built-in DSP
+mixer, and how that maps onto the controls this project exposes. It is the single
+source behind the CLI's `topology` output, the control catalog's doc comments, and
+the future GUI.
+
+Each claim is tagged _(manual)_, _(driver)_, or _(inferred)_ — see <<sec-sources>>.
+
+[[sec-sources]]
+== Sources
+
+* *Reference Manual* D01247020B (TASCAM US-16x08): section _6 — Using the Settings
+  Panel_, the _OUTPUT SETTING page_ (p. 18), and _Block diagrams_ / _Level
+  diagrams_ (pp. 31–32).
+* *Linux kernel driver* `sound/usb/mixer_us16x08.c` (the `snd-usb-audio` US-16x08
+  quirk) — authoritative for which controls exist and their types.
+* The original `tascamgtk` application (now under `legacy/`) for the author's
+  control labels.
+
+Provenance tags: _(manual)_ from the Reference Manual, _(driver)_ from the kernel
+driver, _(inferred)_ reasoned from those but not stated outright.
+
+[[sec-overview]]
+== Overview
+
+The US-16x08 is a 16-in / 8-out USB interface whose on-board BlackFin DSP runs a
+*monitor mixer*: the 16 inputs are processed per channel and summed into a single
+*stereo master bus*. The computer's eight USB playback streams (`COMPUTER 1–8`)
+can be folded into that bus and/or sent straight to outputs. Each of the eight
+physical line outputs independently selects one source. _(manual)_
+
+.US-16x08 signal flow
+[mermaid, fig-signal-chain, svg]
+----
+flowchart LR
+    IN["16 inputs"] --> PH[phase] --> EQ["LCF + EQ"] --> CO[compressor] --> FA[fader] --> PA[pan] --> MB["MASTER bus L / R"]
+    PB["computer playback<br/>(COMPUTER 1..8)"]
+    PB -- buss-out --> MB
+    MB --> RT["route<br/>(per output)"]
+    PB -- direct --> RT
+    RT --> OUT["line out 1..8"]
+----
+
+[[sec-channel-chain]]
+== Per-input-channel chain
+
+The per-channel stages, in signal order. The stages and their roles are
+_(manual)_; the exact EQ-vs-compressor ordering is _(inferred)_ — see the note.
+
+[#tbl-channel-chain]
+.Per-channel processing stages
+[cols="1,3,3",options="header"]
+|===
+| Stage | Controls in this project | Notes
+
+| Phase | `phase` | Reverse channel phase. _(manual)_
+| Low-cut filter (LCF) | — | Per-channel high-pass. On the device _(manual)_ but *not exposed by the Linux driver* — no ALSA control, so this project cannot set it. _(driver)_
+| EQ (4-band) | `eq-enable`, `eq-{low,midlow,midhigh,high}-volume`, `eq-…-freq`, `eq-{midlow,midhigh}-q` | Gain ±12 dB per band; mids have Q (0.25–16.0). _(manual/driver)_
+| Compressor | `comp-enable`, `comp-threshold`, `comp-ratio`, `comp-attack`, `comp-release`, `comp-gain` | Threshold −32…0 dB, ratio 1.0:1…inf:1, attack 2–200 ms, release 10–1000 ms, make-up gain 0–20 dB; meters expose INPUT/OUTPUT and gain reduction (GR). _(manual)_
+| Mute | `mute` | _(manual/driver)_
+| Fader | `line-volume` | Channel level sent to the stereo bus (logarithmic dB curve). _(manual/driver)_
+| Pan | `pan` | Position into the stereo bus; centre = −3 dB to both sides; hard L/R sends to one side only. _(manual)_
+|===
+
+NOTE: The manual presents EQ as channel module 1 and the compressor as module 2,
+and the compressor acts on the channel "input volume" — consistent with *phase →
+LCF/EQ → compressor → mute → fader → pan*. The _Block diagrams_ (p. 31) depict the
+analog I/O path (mic/line → preamp → A/D), not the internal DSP order, so
+EQ-before-compressor is strongly implied but not drawn as an explicit DSP block.
+_(inferred)_
+
+[[sec-master]]
+== Master bus
+
+The 16 channels are summed into a stereo master. `master-volume` sets the master
+output level and `master-mute` mutes it; the master meters show the mixed signal.
+_(manual/driver)_ The compressor can also operate on the master stereo signal.
+_(manual)_
+
+[[sec-routing]]
+== Output routing
+
+Each `LINE OUT 1–8` selects *one* source through the `route` control (one instance
+per output, indices 0–7). _(manual)_
+
+Master L / Master R:: The *Stereo BUS* — "the signals input through each input jack
+and by USB output from the computer are mixed and output in stereo."
+COMPUTER 1–8 (this project's `Output 1..8`):: The *Computer BUS* — DAW playback
+streams sent directly to a jack.
+
+`LINE OUT 1` and `LINE OUT 2` are mirrored to the PHONES jack. _(manual)_
+
+IMPORTANT: The 16 inputs are *not* routed to outputs individually — they are summed
+into the stereo master. Only the eight outputs are routed.
+
+[[sec-globals]]
+== Global switches
+
+`buss-out`:: "Buss Out Switch" _(driver)_; "Computer out to Stereo BUS" in the
+legacy UI. Folds the computer/DAW playback into the stereo master bus so it is
+monitored together with the live inputs. Confirmed by the manual's Stereo BUS
+definition. _(manual/inferred)_
+`dsp-bypass`:: "DSP Bypass Switch" _(driver)_. Bypasses the channel DSP
+(EQ/compressor) for dry monitoring. The Settings-Panel section documents
+per-channel `eq-enable`/`comp-enable` rather than a single global bypass, so the
+precise scope of this switch is not manual-verified; the legacy app treated it as a
+global/true bypass. _(inferred)_
+
+[[sec-not-exposed]]
+== Not exposed / out of scope
+
+Low-cut filter (LCF):: On the device, but the kernel driver registers no control
+for it. _(driver)_
+Stereo LINK:: Combining two adjacent channels into a stereo pair is a
+mixer-software grouping (it ganged the GTK widgets); the driver has no link
+control, so on the hardware each channel is independent. This is GUI state for the
+future GUI, not a hardware control. _(driver/manual)_
+Mic preamp gain, phantom power, sample rate:: Front-panel / interface functions,
+not DSP-mixer controls; outside this project's control surface.
+
+[[sec-open-items]]
+== Open items
+
+* Confirm the EQ-before-compressor ordering (study the level diagrams more closely,
+  or verify audibly on hardware).
+* Confirm the exact behaviour of `dsp-bypass` (per channel, or the whole DSP path
+  including the master?).
