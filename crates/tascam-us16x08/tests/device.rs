@@ -59,6 +59,16 @@ fn every_control_is_readable_at_every_index() {
 }
 
 #[test]
+fn boxed_backend_drives_the_device() {
+    // A Us16x08<Box<dyn Backend>> can hold either backend chosen at runtime.
+    let backend: Box<dyn Backend> = Box::new(MockBackend::new());
+    let mut dev = Us16x08::new(backend);
+    dev.set(Control::MuteSwitch, 4, Value::Bool(true)).unwrap();
+    assert_eq!(dev.get(Control::MuteSwitch, 4).unwrap(), Value::Bool(true));
+    assert_eq!(dev.meters().unwrap().master_raw(), (0, 0));
+}
+
+#[test]
 fn bool_roundtrip() {
     let mut dev = dev();
     dev.set(Control::MuteSwitch, 5, Value::Bool(true)).unwrap();

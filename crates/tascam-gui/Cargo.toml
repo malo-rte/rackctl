@@ -1,0 +1,33 @@
+[package]
+name = "tascam-gui"
+version = "0.1.0"
+description = "Graphical mixer (tascam-mixer) for the Tascam US-16x08 USB audio interface."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "tascam-mixer"
+path = "src/main.rs"
+
+[features]
+# The real ALSA backend is on by default; `--mock` swaps in the in-memory
+# backend at runtime. Build with `--no-default-features` for a mock-only binary.
+default = ["alsa"]
+alsa = ["tascam-us16x08/alsa"]
+
+[dependencies]
+tascam-us16x08 = { path = "../tascam-us16x08", default-features = false }
+eframe.workspace = true
+egui.workspace = true
+egui_plot.workspace = true
+rfd.workspace = true
+directories.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+anyhow.workspace = true
+
+[lints]
+workspace = true

@@ -38,3 +38,26 @@ pub trait Backend {
     /// the loaded card actually exposes.
     fn elem_names(&self) -> Vec<String>;
 }
+
+/// Lets a `Us16x08<Box<dyn Backend>>` hold either backend chosen at runtime
+/// (e.g. mock vs hardware behind a command-line flag) without a wrapper enum.
+impl Backend for Box<dyn Backend> {
+    fn get_int(&self, name: &str, index: u32) -> Result<i32> {
+        (**self).get_int(name, index)
+    }
+    fn set_int(&mut self, name: &str, index: u32, val: i32) -> Result<()> {
+        (**self).set_int(name, index, val)
+    }
+    fn get_bool(&self, name: &str, index: u32) -> Result<bool> {
+        (**self).get_bool(name, index)
+    }
+    fn set_bool(&mut self, name: &str, index: u32, val: bool) -> Result<()> {
+        (**self).set_bool(name, index, val)
+    }
+    fn get_ints(&self, name: &str, out: &mut [i32]) -> Result<usize> {
+        (**self).get_ints(name, out)
+    }
+    fn elem_names(&self) -> Vec<String> {
+        (**self).elem_names()
+    }
+}
