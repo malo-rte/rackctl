@@ -515,6 +515,30 @@ impl Control {
     pub fn from_key(key: &str) -> Option<Control> {
         Self::ALL.iter().copied().find(|c| c.cli_key() == key)
     }
+
+    /// A one-line description for controls whose behaviour is not obvious from
+    /// the name. `None` means the name and kind already say it.
+    ///
+    /// The global-switch and routing wording reflects the original author's
+    /// reverse engineering (see the `tascamgtk` UI labels), not an official
+    /// Tascam block diagram.
+    #[must_use]
+    pub const fn description(self) -> Option<&'static str> {
+        Some(match self {
+            Self::LineVolume => "Channel fader level (logarithmic dB curve).",
+            Self::Pan => "Stereo position: 0 = hard left, 127 = center, 254 = hard right.",
+            Self::MasterVolume => "Master output level (same dB curve as the channel faders).",
+            Self::DspBypass => "Bypass the per-channel EQ and compressor (monitor the dry signal).",
+            Self::BussOut => "Fold the computer/DAW playback into the stereo master bus.",
+            Self::MasterMute => "Mute the master output.",
+            Self::LineOutRoute => {
+                "Source for this physical line output: the master mix (L/R) or a computer \
+                 playback stream (Output 1..8)."
+            }
+            Self::LevelMeter => "Read-only level-meter block (use the meters command).",
+            _ => return None,
+        })
+    }
 }
 
 #[cfg(test)]

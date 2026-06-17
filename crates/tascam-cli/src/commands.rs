@@ -53,8 +53,8 @@ Notes
     are mixed into the stereo master. Only the 8 outputs are routed, and
     each carries a single source.
   * `Output 1..8` are the computer/DAW playback streams.
-  * `dsp-bypass` and `buss-out` affect the DSP path; consult the device
-    manual for their exact placement in the chain.
+  * `buss-out` folds the computer/DAW playback into the stereo master bus.
+  * `dsp-bypass` bypasses the per-channel EQ and compressor (dry monitor).
 "
     );
 }
@@ -81,6 +81,9 @@ pub(crate) fn info(key: &str) -> Result<()> {
         }
         Kind::Meter => println!("  kind:  meter (read-only; use the `meters` command)"),
         _ => println!("  kind:  ?"),
+    }
+    if let Some(about) = control.description() {
+        println!("  about: {about}");
     }
     Ok(())
 }

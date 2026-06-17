@@ -68,6 +68,16 @@ fn info_enum_lists_values() {
 }
 
 #[test]
+fn info_shows_description_for_global_switches() {
+    tascamctl()
+        .args(["--mock", "info", "buss-out"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("about:"))
+        .stdout(predicate::str::contains("stereo master bus"));
+}
+
+#[test]
 fn info_int_shows_range() {
     tascamctl()
         .args(["--mock", "info", "master-volume"])
