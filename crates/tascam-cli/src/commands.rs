@@ -33,34 +33,21 @@ pub(crate) fn list() {
 pub(crate) fn topology() {
     print!(
         "\
-                        TASCAM US-16x08  ·  signal flow
+                         TASCAM US-16x08  ·  signal flow    (left ──▶ right)
 
- One input channel  (× 16)
-              ┌───────┐   ┌───────────┐   ┌────────────┐   ┌───────┐   ┌─────┐
-   in ───────▶│ phase │──▶│ EQ 4-band │──▶│ compressor │──▶│ fader │──▶│ pan │──┐
-              └───────┘   └───────────┘   └────────────┘   └───────┘   └─────┘  │
-                          └──── bypassed by `dsp-bypass` ────┘                  │
-                                                                                ▼
- Mixing & output routing                                              to MASTER bus
+              ┌───────┐  ┌───────────┐  ┌────────────┐  ┌───────┐  ┌─────┐   ┌────────────┐   ┌──────────┐
+ 16 inputs ──▶│ phase │─▶│ EQ 4-band │─▶│ compressor │─▶│ fader │─▶│ pan │─▶│ MASTER L/R │─▶│  route   │─▶ line out 1..8
+              └───────┘  └───────────┘  └────────────┘  └───────┘  └─────┘   └────────────┘   └──────────┘
+                         └──── dsp-bypass ────┘       (per channel, × 16)     master-volume    per output
+                                                                             master-mute
 
-   16 channels ────────────────────────┐
-                                        ▼
-                              ┌──────────────────┐
-                              │  MASTER bus  L│R  │  `master-volume`, `master-mute`
-   computer playback ────────▶│   (via buss-out) │
-   (Output 1..8) ──┐          └────────┬─────────┘
-                   │                   │ Master L / Master R
-                   │                   ▼
-                   │         ┌────────────────────┐
-                   └────────▶│  route (per output)│  each of the 8 outputs
-                             └──────────┬─────────┘  picks ONE source
-                                        ▼
-            line out 1..8  ◀──  {{ Master L │ Master R │ Output 1..8 }}
+ computer playback (Output 1..8)
+     ├─ buss-out ─▶ folded into the MASTER bus
+     └─ direct   ─▶ selectable as a `route` source on any output
 
-   · 16 inputs are summed into the stereo master; they are not routed to
-     outputs individually. Only the 8 outputs are routed.
-   · `buss-out` folds the computer/DAW playback into the master bus; outputs
-     can also take a playback stream directly via `route`.
+   · The 16 channels are summed into the stereo master; they are not routed
+     individually. Only the 8 outputs are routed.
+   · Each of the 8 outputs picks ONE `route` source: Master L │ Master R │ Output 1..8
 "
     );
 }
