@@ -32,7 +32,11 @@ fn main() -> Result<()> {
     eframe::run_native(
         "Tascam US-16x08 Mixer",
         options,
-        Box::new(move |_cc| Ok(Box::new(app::App::new(device, mock)))),
+        Box::new(move |cc| {
+            // Start zoomed in for larger controls; Ctrl +/- adjusts from here.
+            cc.egui_ctx.set_zoom_factor(1.5);
+            Ok(Box::new(app::App::new(device, mock)))
+        }),
     )
     .map_err(|e| anyhow::anyhow!("GUI error: {e}"))?;
     Ok(())

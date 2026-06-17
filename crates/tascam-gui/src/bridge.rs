@@ -15,7 +15,11 @@ use crate::app::App;
 
 /// Full-scale meter sample (see `Meters` / `convert::meter_scale`).
 const METER_FULL_SCALE: f32 = 32768.0;
-const METER_SIZE: egui::Vec2 = egui::vec2(12.0, 80.0);
+const METER_SIZE: egui::Vec2 = egui::vec2(18.0, 130.0);
+/// Width of each channel column in the bridge.
+const COLUMN_WIDTH: f32 = 44.0;
+/// Length of the master volume fader.
+const FADER_LENGTH: f32 = 140.0;
 
 pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
@@ -29,7 +33,7 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
 
 fn channel_strip(app: &mut App, ui: &mut egui::Ui, ch: u32) {
     ui.vertical(|ui| {
-        ui.set_width(30.0);
+        ui.set_width(COLUMN_WIDTH);
         let level = app.meters().channel_db(ch).unwrap_or(0);
         meter_bar(ui, fraction(level));
 
@@ -58,6 +62,7 @@ fn master_strip(app: &mut App, ui: &mut egui::Ui) {
         });
 
         let mut volume = app.cached_int(Control::MasterVolume, 0);
+        ui.spacing_mut().slider_width = FADER_LENGTH;
         if ui
             .add(
                 egui::Slider::new(&mut volume, 0..=133)
