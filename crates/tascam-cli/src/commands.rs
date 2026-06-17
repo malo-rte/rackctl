@@ -28,33 +28,39 @@ pub(crate) fn list() {
     }
 }
 
-/// Print the card's signal flow and routing model. Backend-independent.
+/// Print the card's signal flow and routing model as a block diagram.
+/// Backend-independent.
 pub(crate) fn topology() {
     print!(
         "\
-Tascam US-16x08 signal flow
-===========================
+                        TASCAM US-16x08  ·  signal flow
 
-  16 inputs --> per channel: phase, EQ, compressor, fader, pan
-                                  |
-                                  v
-                       summed into the stereo MASTER bus (L / R)
+ One input channel  (× 16)
+              ┌───────┐   ┌───────────┐   ┌────────────┐   ┌───────┐   ┌─────┐
+   in ───────▶│ phase │──▶│ EQ 4-band │──▶│ compressor │──▶│ fader │──▶│ pan │──┐
+              └───────┘   └───────────┘   └────────────┘   └───────┘   └─────┘  │
+                          └──── bypassed by `dsp-bypass` ────┘                  │
+                                                                                ▼
+ Mixing & output routing                                              to MASTER bus
 
-  computer playback (USB from the host) --> Output 1..8
+   16 channels ────────────────────────┐
+                                        ▼
+                              ┌──────────────────┐
+                              │  MASTER bus  L│R  │  `master-volume`, `master-mute`
+   computer playback ────────▶│   (via buss-out) │
+   (Output 1..8) ──┐          └────────┬─────────┘
+                   │                   │ Master L / Master R
+                   │                   ▼
+                   │         ┌────────────────────┐
+                   └────────▶│  route (per output)│  each of the 8 outputs
+                             └──────────┬─────────┘  picks ONE source
+                                        ▼
+            line out 1..8  ◀──  {{ Master L │ Master R │ Output 1..8 }}
 
-  The 8 physical line outputs are the only routing point. Each one
-  independently selects ONE source via `set route <src> -c <out>`:
-
-      line out <out 0..8>  <--  Master Left | Master Right | Output 1..8
-
-Notes
------
-  * The 16 input channels are NOT routed individually to outputs; they
-    are mixed into the stereo master. Only the 8 outputs are routed, and
-    each carries a single source.
-  * `Output 1..8` are the computer/DAW playback streams.
-  * `buss-out` folds the computer/DAW playback into the stereo master bus.
-  * `dsp-bypass` bypasses the per-channel EQ and compressor (dry monitor).
+   · 16 inputs are summed into the stereo master; they are not routed to
+     outputs individually. Only the 8 outputs are routed.
+   · `buss-out` folds the computer/DAW playback into the master bus; outputs
+     can also take a playback stream directly via `route`.
 "
     );
 }
