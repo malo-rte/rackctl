@@ -95,31 +95,22 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                         let mut volume = app.cached_int(Control::LineVolume, ch);
                         let fader = egui::Slider::new(&mut volume, 0..=133)
                             .vertical()
-                            .show_value(false);
+                            .custom_formatter(|n, _| human_text(Control::LineVolume, n));
                         if ui.add(fader).changed() {
                             app.set(Control::LineVolume, ch, Value::Int(volume));
                         }
                     });
-                    // dB value box, right-aligned to the box edge.
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        value_box(app, ui, Control::LineVolume, ch);
-                    });
                 });
             });
 
-            // Pan / balance along the bottom; the value box sits at the right
-            // edge to match the volume value box above it.
+            // Pan / balance along the bottom.
             ui.horizontal(|ui| {
                 ui.label(if linked { "Balance" } else { "Pan" });
                 ui.spacing_mut().slider_width = INPUT_WIDTH - 130.0;
                 let mut pan = app.cached_int(Control::Pan, ch);
-                if ui
-                    .add(egui::Slider::new(&mut pan, 0..=254).show_value(false))
-                    .changed()
-                {
+                if ui.add(egui::Slider::new(&mut pan, 0..=254)).changed() {
                     app.set(Control::Pan, ch, Value::Int(pan));
                 }
-                value_box(app, ui, Control::Pan, ch);
             });
         });
     });
@@ -291,22 +282,6 @@ fn control(app: &mut App, ui: &mut egui::Ui, label: &str, control: Control, inde
         _ => {}
     }
     ui.end_row();
-}
-
-/// A fixed-width, editable numeric value box for an integer control, formatted
-/// in human units. Used where the slider's built-in value box is hidden.
-fn value_box(app: &mut App, ui: &mut egui::Ui, control: Control, index: u32) {
-    let range = match control.kind() {
-        Kind::Int { min, max, .. } => min..=max,
-        _ => 0..=0,
-    };
-    let mut value = app.cached_int(control, index);
-    let drag = egui::DragValue::new(&mut value)
-        .range(range)
-        .custom_formatter(move |n, _| human_text(control, n));
-    if ui.add(drag).changed() {
-        app.set(control, index, Value::Int(value));
-    }
 }
 
 /// Format a raw control value in human units for the slider readout.
