@@ -4,6 +4,7 @@ mod app;
 mod bridge;
 mod channel;
 mod curves;
+mod routing;
 
 use anyhow::Result;
 use tascam_us16x08::{Backend, MockBackend, Us16x08};

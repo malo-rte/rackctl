@@ -6,7 +6,14 @@ use std::time::Duration;
 use eframe::egui;
 use tascam_us16x08::{Backend, Control, Meters, Us16x08, Value, Watcher};
 
-use crate::{bridge, channel};
+use crate::{bridge, channel, routing};
+
+/// Which editor the central panel shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Tab {
+    Channel,
+    Routing,
+}
 
 /// Meter repaint cadence (~30 Hz).
 const METER_INTERVAL: Duration = Duration::from_millis(33);
@@ -25,6 +32,7 @@ pub(crate) struct App {
     next_watch: f64,
     /// The channel shown in the editor.
     pub(crate) selected: u8,
+    tab: Tab,
     status: String,
 }
 
@@ -43,6 +51,7 @@ impl App {
             meters: Meters::default(),
             next_watch: 0.0,
             selected: 0,
+            tab: Tab::Channel,
             status: String::new(),
         };
         app.sync_controls();
@@ -90,6 +99,23 @@ impl App {
     pub(crate) fn meters(&self) -> &Meters {
         &self.meters
     }
+
+    /// Tab selector and the global DSP switches.
+    fn toolbar(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.tab, Tab::Channel, "Channel");
+            ui.selectable_value(&mut self.tab, Tab::Routing, "Routing");
+            ui.separator();
+            let bypass = self.cached_bool(Control::DspBypass, 0);
+            if ui.selectable_label(bypass, "DSP bypass").clicked() {
+                self.set(Control::DspBypass, 0, Value::Bool(!bypass));
+            }
+            let buss = self.cached_bool(Control::BussOut, 0);
+            if ui.selectable_label(buss, "Buss out").clicked() {
+                self.set(Control::BussOut, 0, Value::Bool(!buss));
+            }
+        });
+    }
 }
 
 impl eframe::App for App {
@@ -104,6 +130,7 @@ impl eframe::App for App {
         }
 
         egui::TopBottomPanel::top("bridge").show(ctx, |ui| bridge::show(self, ui));
+        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| self.toolbar(ui));
 
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -116,7 +143,10 @@ impl eframe::App for App {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| channel::show(self, ui));
+            egui::ScrollArea::vertical().show(ui, |ui| match self.tab {
+                Tab::Channel => channel::show(self, ui),
+                Tab::Routing => routing::show(self, ui),
+            });
         });
 
         ctx.request_repaint_after(METER_INTERVAL);
