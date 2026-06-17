@@ -1,6 +1,7 @@
 //! `tascam-mixer` — graphical mixer for the Tascam US-16x08.
 
 mod app;
+mod bridge;
 
 use anyhow::Result;
 use tascam_us16x08::{Backend, MockBackend, Us16x08};
