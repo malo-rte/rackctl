@@ -37,8 +37,10 @@ fn channel_strip(app: &mut App, ui: &mut egui::Ui, ch: u32) {
     ui.vertical(|ui| {
         ui.set_width(COLUMN_WIDTH);
 
-        // Label above the meter, matching the master strip's layout.
-        let selected = u32::from(app.selected) == ch;
+        // Label above the meter, matching the master strip's layout. A linked
+        // pair highlights together when either channel is selected.
+        let sel = u32::from(app.selected);
+        let selected = sel == ch || (app.linked(ch) && sel ^ 1 == ch);
         if ui
             .selectable_label(selected, format!("{}", ch + 1))
             .clicked()
@@ -52,6 +54,10 @@ fn channel_strip(app: &mut App, ui: &mut egui::Ui, ch: u32) {
         let muted = app.cached_bool(Control::MuteSwitch, ch);
         if ui.selectable_label(muted, "M").clicked() {
             app.set(Control::MuteSwitch, ch, Value::Bool(!muted));
+        }
+
+        if app.linked(ch) {
+            ui.small("link");
         }
     });
 }

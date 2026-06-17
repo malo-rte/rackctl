@@ -22,8 +22,25 @@ const METER_FULL_SCALE: f32 = 32768.0;
 
 /// Render the editor for the currently selected channel.
 pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
-    let ch = u32::from(app.selected);
-    ui.heading(format!("Channel {}", ch + 1));
+    let selected = u32::from(app.selected);
+    let linked = app.linked(selected);
+    let low = selected & !1;
+    // When linked, edit/display via the lower channel of the pair.
+    let ch = if linked { low } else { selected };
+
+    if linked {
+        ui.heading(format!("Channels {}-{} (linked)", low + 1, low + 2));
+    } else {
+        ui.heading(format!("Channel {}", selected + 1));
+    }
+
+    let mut link_on = linked;
+    if ui
+        .checkbox(&mut link_on, format!("Stereo link {}-{}", low + 1, low + 2))
+        .changed()
+    {
+        app.toggle_link(selected);
+    }
 
     ui.horizontal(|ui| {
         control(app, ui, "Phase", Control::PhaseSwitch, ch);
@@ -31,7 +48,13 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     });
 
     control(app, ui, "Volume", Control::LineVolume, ch);
-    control(app, ui, "Pan", Control::Pan, ch);
+    control(
+        app,
+        ui,
+        if linked { "Balance" } else { "Pan" },
+        Control::Pan,
+        ch,
+    );
 
     ui.collapsing("EQ", |ui| {
         eq_curve(app, ui, ch);

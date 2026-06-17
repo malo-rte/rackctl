@@ -3,6 +3,7 @@
 mod app;
 mod bridge;
 mod channel;
+mod config;
 mod curves;
 mod routing;
 

@@ -4,8 +4,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use eframe::egui;
-use tascam_us16x08::{Backend, Control, Meters, Us16x08, Value, Watcher};
+use tascam_us16x08::{Backend, Control, Kind, Meters, Scope, Us16x08, Value, Watcher};
 
+use crate::config::{self, GuiConfig};
 use crate::{bridge, channel, routing};
 
 /// Which editor the central panel shows.
@@ -33,6 +34,8 @@ pub(crate) struct App {
     /// The channel shown in the editor.
     pub(crate) selected: u8,
     tab: Tab,
+    /// Stereo-link state for the eight channel pairs (GUI-only).
+    links: [bool; 8],
     status: String,
 }
 
@@ -52,6 +55,7 @@ impl App {
             next_watch: 0.0,
             selected: 0,
             tab: Tab::Channel,
+            links: config::load().links,
             status: String::new(),
         };
         app.sync_controls();
@@ -85,13 +89,55 @@ impl App {
         }
     }
 
-    /// Write a control to the device and update the cache, recording any error.
+    /// Write a control to the device and update the cache. Per-channel controls
+    /// on a linked pair are written to both channels.
     pub(crate) fn set(&mut self, control: Control, index: u32, value: Value) {
+        self.write_one(control, index, value);
+        if matches!(control.scope(), Scope::Channel) && self.linked(index) {
+            self.write_one(control, index ^ 1, value);
+        }
+    }
+
+    fn write_one(&mut self, control: Control, index: u32, value: Value) {
         match self.device.set(control, index, value) {
             Ok(()) => {
                 self.cache.insert((control, index), value);
             }
             Err(e) => self.status = format!("write error ({}): {e}", control.cli_key()),
+        }
+    }
+
+    /// Whether `channel`'s stereo pair is linked.
+    pub(crate) fn linked(&self, channel: u32) -> bool {
+        self.links
+            .get((channel / 2) as usize)
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Toggle the stereo link for `channel`'s pair, persisting the change. When
+    /// enabling, copy the lower channel's settings to the upper one.
+    pub(crate) fn toggle_link(&mut self, channel: u32) {
+        let pair = (channel / 2) as usize;
+        let Some(slot) = self.links.get_mut(pair) else {
+            return;
+        };
+        *slot = !*slot;
+        let now_linked = *slot;
+        config::save(&GuiConfig { links: self.links });
+        if now_linked {
+            self.sync_pair(channel & !1);
+        }
+    }
+
+    /// Copy every per-channel control from `low` to its partner `low + 1`.
+    fn sync_pair(&mut self, low: u32) {
+        for &control in Control::ALL {
+            if matches!(control.scope(), Scope::Channel) && !matches!(control.kind(), Kind::Meter) {
+                if let Some(&value) = self.cache.get(&(control, low)) {
+                    self.write_one(control, low + 1, value);
+                }
+            }
         }
     }
 
