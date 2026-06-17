@@ -29,6 +29,9 @@ const VOLUME_FADER_LENGTH: f32 = bridge::METER_HEIGHT;
 /// Footprint reserved for the meter+fader strip, so the switch column's width
 /// pushes the strip flush to the right edge.
 const VOLUME_STRIP_WIDTH: f32 = 90.0;
+/// Minimum width for the numeric value boxes, wide enough for the longest
+/// readout (e.g. `-127 dB`, `1000 ms`) so they are a fixed, uniform size.
+pub(crate) const VALUE_BOX_WIDTH: f32 = 60.0;
 
 /// Render the editor for the currently selected channel.
 pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
@@ -37,6 +40,9 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     let low = selected & !1;
     // When linked, edit/display via the lower channel of the pair.
     let ch = if linked { low } else { selected };
+
+    // Fixed-width numeric value boxes across the editor.
+    ui.spacing_mut().interact_size.x = VALUE_BOX_WIDTH;
 
     ui.horizontal_top(|ui| {
         input_box(app, ui, ch, selected, linked, low);

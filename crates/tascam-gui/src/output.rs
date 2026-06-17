@@ -11,6 +11,8 @@ use crate::bridge::{METER_HEIGHT, fraction, meter_bar};
 
 pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     ui.heading("Output");
+    // Fixed-width numeric value boxes, matching the editor.
+    ui.spacing_mut().interact_size.x = crate::channel::VALUE_BOX_WIDTH;
 
     ui.label("Master");
     // Meters on the left; the fader column (vol label, fader, mute) on the right.
