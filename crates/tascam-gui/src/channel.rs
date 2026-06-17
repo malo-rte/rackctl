@@ -70,13 +70,6 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                     if ui.checkbox(&mut mute, "Mute").changed() {
                         app.set(Control::MuteSwitch, ch, Value::Bool(mute));
                     }
-                    ui.horizontal(|ui| {
-                        ui.label(if linked { "Balance" } else { "Pan" });
-                        let mut pan = app.cached_int(Control::Pan, ch);
-                        if ui.add(egui::Slider::new(&mut pan, 0..=254)).changed() {
-                            app.set(Control::Pan, ch, Value::Int(pan));
-                        }
-                    });
                 });
 
                 // Volume as a vertical fader on the right.
@@ -91,6 +84,15 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                         app.set(Control::LineVolume, ch, Value::Int(volume));
                     }
                 });
+            });
+
+            // Pan / balance along the bottom of the section.
+            ui.horizontal(|ui| {
+                ui.label(if linked { "Balance" } else { "Pan" });
+                let mut pan = app.cached_int(Control::Pan, ch);
+                if ui.add(egui::Slider::new(&mut pan, 0..=254)).changed() {
+                    app.set(Control::Pan, ch, Value::Int(pan));
+                }
             });
         });
     });
