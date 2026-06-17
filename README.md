@@ -16,6 +16,10 @@ The work proceeds in three stages:
 The original GTKmm C++ application is preserved under
 [`legacy/`](legacy/) for reference until the Rust mixer reaches feature parity.
 
+[`docs/signal-chain.md`](docs/signal-chain.md) describes the card's verified
+signal flow (per-channel DSP, master bus, output routing) and how it maps onto
+the controls — the source of truth behind `tascamctl topology`.
+
 ## Workspace layout
 
 ```
