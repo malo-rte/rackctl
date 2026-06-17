@@ -15,16 +15,17 @@ use egui_plot::{Line, Plot, PlotPoints};
 use tascam_us16x08::{COMP_RATIO_VALUES, Control, Kind, Value};
 
 use crate::app::App;
+use crate::bridge;
 use crate::curves::{self, EqBand};
 
 /// Full-scale meter sample for the gain-reduction bar.
 const METER_FULL_SCALE: f32 = 32768.0;
 
 /// Column widths for the INPUT / EQ / COMPRESSOR boxes.
-const INPUT_WIDTH: f32 = 300.0;
+const INPUT_WIDTH: f32 = 260.0;
 const DSP_WIDTH: f32 = 320.0;
-/// Length of the INPUT volume fader.
-const VOLUME_FADER_LENGTH: f32 = 160.0;
+/// Length of the INPUT volume fader — matched to the meter height beside it.
+const VOLUME_FADER_LENGTH: f32 = bridge::METER_HEIGHT;
 
 /// Render the editor for the currently selected channel.
 pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
@@ -72,17 +73,22 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                     }
                 });
 
-                // Volume as a vertical fader on the right.
+                // Volume fader strip on the right: the channel meter beside the
+                // vertical fader, both the same height.
                 ui.vertical(|ui| {
                     ui.label("Volume");
-                    ui.spacing_mut().slider_width = VOLUME_FADER_LENGTH;
-                    let mut volume = app.cached_int(Control::LineVolume, ch);
-                    if ui
-                        .add(egui::Slider::new(&mut volume, 0..=133).vertical())
-                        .changed()
-                    {
-                        app.set(Control::LineVolume, ch, Value::Int(volume));
-                    }
+                    ui.horizontal(|ui| {
+                        let level = app.meters().channel_db(ch).unwrap_or(0);
+                        bridge::meter_bar(ui, bridge::fraction(level));
+                        ui.spacing_mut().slider_width = VOLUME_FADER_LENGTH;
+                        let mut volume = app.cached_int(Control::LineVolume, ch);
+                        if ui
+                            .add(egui::Slider::new(&mut volume, 0..=133).vertical())
+                            .changed()
+                        {
+                            app.set(Control::LineVolume, ch, Value::Int(volume));
+                        }
+                    });
                 });
             });
 
