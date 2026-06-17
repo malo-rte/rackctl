@@ -59,7 +59,9 @@ fn master_strip(app: &mut App, ui: &mut egui::Ui) {
         ui.label("MASTER");
         // Meters on the left; the fader column (vol label, fader, mute) on the
         // right, so the section stays short and mirrors the channel strips.
-        ui.horizontal(|ui| {
+        // Top-aligned so the `vol` label sits above the fader, not above the
+        // meters.
+        ui.horizontal_top(|ui| {
             let (l, r) = app.meters().master_db();
             meter_bar(ui, fraction(l));
             meter_bar(ui, fraction(r));
