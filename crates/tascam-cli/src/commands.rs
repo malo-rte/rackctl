@@ -33,21 +33,20 @@ pub(crate) fn list() {
 pub(crate) fn topology() {
     print!(
         "\
-                         TASCAM US-16x08  ·  signal flow    (left ──▶ right)
+                       TASCAM US-16x08  -  signal flow   (left --> right)
 
-              ┌───────┐  ┌───────────┐  ┌────────────┐  ┌───────┐  ┌─────┐   ┌────────────┐   ┌──────────┐
- 16 inputs ──▶│ phase │─▶│ EQ 4-band │─▶│ compressor │─▶│ fader │─▶│ pan │─▶│ MASTER L/R │─▶│  route   │─▶ line out 1..8
-              └───────┘  └───────────┘  └────────────┘  └───────┘  └─────┘   └────────────┘   └──────────┘
-                         └──── dsp-bypass ────┘       (per channel, × 16)     master-volume    per output
-                                                                             master-mute
+              +-------+   +-----------+   +------------+   +-------+   +-----+   +------------+   +----------+
+ 16 inputs -->| phase |-->| EQ 4-band |-->| compressor |-->| fader |-->| pan |-->| MASTER L/R |-->|  route   |--> line out 1..8
+              +-------+   +-----------+   +------------+   +-------+   +-----+   +------------+   +----------+
+                         (dsp-bypass skips EQ + compressor)        per channel x16    summed     per output
 
  computer playback (Output 1..8)
-     ├─ buss-out ─▶ folded into the MASTER bus
-     └─ direct   ─▶ selectable as a `route` source on any output
+     |- buss-out --> folded into the MASTER bus
+     '- direct   --> selectable as a `route` source on any output
 
-   · The 16 channels are summed into the stereo master; they are not routed
-     individually. Only the 8 outputs are routed.
-   · Each of the 8 outputs picks ONE `route` source: Master L │ Master R │ Output 1..8
+   * The 16 channels are summed into the stereo master; they are not routed
+     individually -- only the 8 outputs are routed.
+   * Each of the 8 outputs picks ONE `route` source: Master L | Master R | Output 1..8
 "
     );
 }
