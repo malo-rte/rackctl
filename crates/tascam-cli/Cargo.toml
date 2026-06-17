@@ -22,10 +22,12 @@ alsa = ["tascam-us16x08/alsa"]
 tascam-us16x08 = { path = "../tascam-us16x08", default-features = false }
 clap.workspace = true
 anyhow.workspace = true
+serde_json.workspace = true
 
 [dev-dependencies]
 assert_cmd.workspace = true
 predicates.workspace = true
+tempfile.workspace = true
 
 [lints]
 workspace = true

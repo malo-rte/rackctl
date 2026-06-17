@@ -77,6 +77,22 @@ enum Command {
         #[arg(long, default_value_t = 500)]
         interval: u64,
     },
+    /// Save state to a JSON file: the whole mixer, or one strip with --channel.
+    Save {
+        /// Output file path.
+        file: String,
+        /// Save only this channel's strip instead of the whole mixer.
+        #[arg(short, long)]
+        channel: Option<u32>,
+    },
+    /// Restore state from a JSON file (apply a strip preset to --channel).
+    Load {
+        /// Input file path.
+        file: String,
+        /// Target channel for a strip preset.
+        #[arg(short, long)]
+        channel: Option<u32>,
+    },
 }
 
 /// The selected backend, resolved once at startup.
@@ -116,6 +132,8 @@ fn run_command<B: Backend>(dev: &mut Us16x08<B>, command: Command) -> Result<()>
         Command::Meters { raw } => commands::meters(dev, raw),
         Command::Monitor { interval, raw } => commands::monitor(dev, interval, raw),
         Command::Watch { interval } => commands::watch(dev, interval),
+        Command::Save { file, channel } => commands::save(dev, &file, channel),
+        Command::Load { file, channel } => commands::load(dev, &file, channel),
     }
 }
 

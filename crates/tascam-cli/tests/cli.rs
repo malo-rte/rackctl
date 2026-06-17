@@ -9,6 +9,16 @@ fn tascamctl() -> Command {
     Command::cargo_bin("tascamctl").expect("binary builds")
 }
 
+/// Run `save` to `path` (optionally a single strip), asserting success.
+fn save_to(path: &str, channel: Option<&str>) {
+    let mut cmd = tascamctl();
+    cmd.arg("--mock").arg("save").arg(path);
+    if let Some(ch) = channel {
+        cmd.arg("-c").arg(ch);
+    }
+    cmd.assert().success();
+}
+
 #[test]
 fn list_succeeds_and_shows_known_keys() {
     tascamctl()
@@ -152,6 +162,72 @@ fn missing_argument_is_a_usage_error() {
         .assert()
         .failure()
         .code(2);
+}
+
+#[test]
+fn save_writes_mixer_and_strip_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let mixer = dir.path().join("mix.json");
+    let strip = dir.path().join("strip.json");
+
+    save_to(mixer.to_str().unwrap(), None);
+    save_to(strip.to_str().unwrap(), Some("0"));
+
+    let mixer_json = std::fs::read_to_string(&mixer).unwrap();
+    assert!(mixer_json.contains("\"kind\": \"mixer\""));
+    assert!(mixer_json.contains("master-volume"));
+    assert!(mixer_json.contains("channels"));
+
+    let strip_json = std::fs::read_to_string(&strip).unwrap();
+    assert!(strip_json.contains("\"kind\": \"strip\""));
+    assert!(strip_json.contains("comp-ratio"));
+}
+
+#[test]
+fn load_strip_requires_a_channel() {
+    let dir = tempfile::tempdir().unwrap();
+    let strip = dir.path().join("strip.json");
+    save_to(strip.to_str().unwrap(), Some("0"));
+    let strip = strip.to_str().unwrap();
+
+    // Applying a strip to a channel works.
+    tascamctl()
+        .args(["--mock", "load", strip, "-c", "5"])
+        .assert()
+        .success();
+    // Without a target channel it is an error.
+    tascamctl()
+        .args(["--mock", "load", strip])
+        .assert()
+        .failure()
+        .code(1);
+}
+
+#[test]
+fn load_mixer_rejects_a_channel() {
+    let dir = tempfile::tempdir().unwrap();
+    let mixer = dir.path().join("mix.json");
+    save_to(mixer.to_str().unwrap(), None);
+    let mixer = mixer.to_str().unwrap();
+
+    tascamctl()
+        .args(["--mock", "load", mixer])
+        .assert()
+        .success();
+    tascamctl()
+        .args(["--mock", "load", mixer, "-c", "0"])
+        .assert()
+        .failure()
+        .code(1);
+}
+
+#[test]
+fn load_missing_file_fails() {
+    tascamctl()
+        .args(["--mock", "load", "/no/such/preset.json"])
+        .assert()
+        .failure()
+        .code(1);
 }
 
 #[test]

@@ -45,7 +45,16 @@ tascamctl set  route "Output 3" -c 0 # enum by label or index
 tascamctl meters                     # one-shot meter read (--raw for linear samples)
 tascamctl monitor                    # live meters until Ctrl-C
 tascamctl watch                      # print control changes as they happen
+tascamctl save mix.json              # save the whole mixer to JSON
+tascamctl save strip.json -c 0       # save just channel 0's strip
+tascamctl load mix.json              # restore the whole mixer
+tascamctl load strip.json -c 5       # apply a saved strip to channel 5
 ```
+
+Presets are JSON. A whole-mixer preset holds the master controls, the routing,
+and all 16 channel strips; a strip preset holds one channel's controls and can
+be applied to any channel. Controls the device doesn't expose are skipped on
+load (reported on stderr).
 
 Run without a device using `cargo run -p tascam-cli -- --mock <command>`. Exit
 codes: `0` success, `1` runtime error (card missing, unknown control, value out

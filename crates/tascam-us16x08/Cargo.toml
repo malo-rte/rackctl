@@ -17,7 +17,11 @@ alsa = ["dep:alsa"]
 
 [dependencies]
 thiserror.workspace = true
+serde = { workspace = true }
 alsa = { workspace = true, optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true

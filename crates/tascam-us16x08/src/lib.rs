@@ -51,6 +51,7 @@ mod device;
 mod error;
 mod event;
 mod meter;
+mod preset;
 
 pub mod convert;
 
@@ -64,3 +65,4 @@ pub use device::Us16x08;
 pub use error::{Error, Result};
 pub use event::{ControlChange, Watcher};
 pub use meter::{METER_COUNT, Meters};
+pub use preset::{ApplyReport, PRESET_VERSION, Preset};

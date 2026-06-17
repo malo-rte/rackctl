@@ -61,4 +61,9 @@ pub enum Error {
     /// The underlying hardware backend failed; the string carries its message.
     #[error("device backend error: {0}")]
     Backend(String),
+
+    /// A preset could not be applied (wrong kind for the target, or a value that
+    /// does not fit its control).
+    #[error("preset error: {0}")]
+    Preset(String),
 }

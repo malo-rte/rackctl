@@ -1,13 +1,15 @@
 //! Command handlers, generic over the [`Backend`] so the same logic drives the
 //! mock and the real ALSA device.
 
+use std::fs;
 use std::io::Write;
 use std::thread::sleep;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use tascam_us16x08::{
-    Backend, Control, Kind, Meters, NUM_CHANNELS, NUM_OUTPUTS, Scope, Us16x08, Value, Watcher,
+    Backend, Control, Kind, Meters, NUM_CHANNELS, NUM_OUTPUTS, Preset, Scope, Us16x08, Value,
+    Watcher,
 };
 
 use crate::value::{format_value, parse_value};
@@ -115,6 +117,40 @@ fn resolve_value<B: Backend>(
 
     // Otherwise it's an absolute value.
     parse_value(control.kind(), raw)
+}
+
+/// Save mixer state to a JSON file: the whole mixer, or one channel's strip if
+/// `channel` is given.
+pub(crate) fn save<B: Backend>(dev: &Us16x08<B>, path: &str, channel: Option<u32>) -> Result<()> {
+    let preset = match channel {
+        Some(ch) => dev.capture_strip(ch)?,
+        None => dev.capture_mixer()?,
+    };
+    let json = serde_json::to_string_pretty(&preset).context("serializing preset")?;
+    fs::write(path, json).with_context(|| format!("writing {path:?}"))?;
+    Ok(())
+}
+
+/// Restore mixer state from a JSON file. A mixer preset restores everything (no
+/// `channel`); a strip preset is applied to `channel`.
+pub(crate) fn load<B: Backend>(
+    dev: &mut Us16x08<B>,
+    path: &str,
+    channel: Option<u32>,
+) -> Result<()> {
+    let text = fs::read_to_string(path).with_context(|| format!("reading {path:?}"))?;
+    let preset: Preset =
+        serde_json::from_str(&text).with_context(|| format!("parsing {path:?}"))?;
+    let report = dev.apply(&preset, channel)?;
+    eprintln!("applied {} control(s)", report.applied);
+    if !report.skipped.is_empty() {
+        eprintln!(
+            "skipped {}: {}",
+            report.skipped.len(),
+            report.skipped.join(", ")
+        );
+    }
+    Ok(())
 }
 
 /// Read and print the level meters once.
