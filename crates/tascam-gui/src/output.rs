@@ -1,13 +1,11 @@
 //! The OUTPUT panel: master meters/fader/mute and the global DSP switches.
-//!
-//! The dB readout truncates the control value to an int; the loss is irrelevant.
-#![allow(clippy::cast_possible_truncation)]
 
 use eframe::egui;
 use tascam_us16x08::{Control, Value};
 
 use crate::app::App;
 use crate::bridge::METER_HEIGHT;
+use crate::channel::{human_text, parse_human};
 
 pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     ui.heading("Output");
@@ -21,7 +19,8 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     ui.spacing_mut().slider_width = METER_HEIGHT;
     let fader = egui::Slider::new(&mut volume, 0..=133)
         .vertical()
-        .custom_formatter(|n, _| format!("{:+} dB", n as i32 - 127));
+        .custom_formatter(|n, _| human_text(Control::MasterVolume, n))
+        .custom_parser(|s| parse_human(Control::MasterVolume, s));
     if ui.add(fader).changed() {
         app.set(Control::MasterVolume, 0, Value::Int(volume));
     }

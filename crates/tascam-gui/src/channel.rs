@@ -95,7 +95,8 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                         let mut volume = app.cached_int(Control::LineVolume, ch);
                         let fader = egui::Slider::new(&mut volume, 0..=133)
                             .vertical()
-                            .custom_formatter(|n, _| human_text(Control::LineVolume, n));
+                            .custom_formatter(|n, _| human_text(Control::LineVolume, n))
+                            .custom_parser(|s| parse_human(Control::LineVolume, s));
                         if ui.add(fader).changed() {
                             app.set(Control::LineVolume, ch, Value::Int(volume));
                         }
@@ -272,7 +273,8 @@ fn control(app: &mut App, ui: &mut egui::Ui, label: &str, control: Control, inde
         Kind::Int { min, max, .. } => {
             let mut value = app.cached_int(control, index);
             let slider = egui::Slider::new(&mut value, min..=max)
-                .custom_formatter(move |n, _| human_text(control, n));
+                .custom_formatter(move |n, _| human_text(control, n))
+                .custom_parser(move |s| parse_human(control, s));
             if ui.add(slider).changed() {
                 app.set(control, index, Value::Int(value));
             }
@@ -319,8 +321,36 @@ fn parse_pan(text: &str) -> Option<f64> {
     Some((127.0 + sign * percent / 100.0 * 127.0).clamp(0.0, 254.0))
 }
 
+/// Inverse of [`human_text`]: parse a typed human value back to the raw control
+/// value, so editing a value box uses the same units it displays.
+pub(crate) fn parse_human(control: Control, text: &str) -> Option<f64> {
+    if matches!(control, Control::Pan) {
+        return parse_pan(text);
+    }
+    // Take the leading number, ignoring a `+` sign and any unit suffix.
+    let trimmed = text.trim().trim_start_matches('+');
+    let number: String = trimmed
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '-' || *c == '.')
+        .collect();
+    let value: f64 = number.parse().ok()?;
+    let raw = match control {
+        Control::LineVolume | Control::MasterVolume => value + 127.0,
+        Control::EqLowVolume
+        | Control::EqMidLowVolume
+        | Control::EqMidHighVolume
+        | Control::EqHighVolume => value + 12.0,
+        Control::CompThreshold => value + 32.0,
+        Control::CompAttack => value - 2.0,
+        Control::CompRelease => value / 10.0 - 1.0,
+        // CompGain, frequencies, Q, etc. display the raw value directly.
+        _ => value,
+    };
+    Some(raw)
+}
+
 /// Format a raw control value in human units for the slider readout.
-fn human_text(control: Control, raw: f64) -> String {
+pub(crate) fn human_text(control: Control, raw: f64) -> String {
     let raw = raw as i32;
     match control {
         // Fader/level controls store dB offset by 127 (127 = 0 dB).
