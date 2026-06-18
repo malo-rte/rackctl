@@ -16,7 +16,7 @@ use tascam_us16x08::{COMP_RATIO_VALUES, Control, Kind, Value};
 
 use crate::app::App;
 use crate::bridge;
-use crate::curves::{self, EqBand};
+use crate::curves::{self, BandType, EqBand};
 
 /// Full-scale meter sample for the gain-reduction bar.
 const METER_FULL_SCALE: f32 = 32768.0;
@@ -172,26 +172,40 @@ fn comp_box(app: &mut App, ui: &mut egui::Ui, ch: u32) {
     });
 }
 
-/// The EQ response curve for the channel's current band settings (indicative).
+/// The EQ response curve for the channel's current band settings. Bands are
+/// modelled as biquads: low/high as shelves, the two mids as peaking filters.
 fn eq_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
-    let band = |freq: Control, gain: Control, q: f64| EqBand {
+    let band = |kind: BandType, freq: Control, gain: Control, q: f64| EqBand {
+        kind,
         f0: freq_hz(freq, app.cached_int(freq, ch)).unwrap_or(1000.0),
         q,
         gain_db: curves::eq_gain_db(app.cached_int(gain, ch)),
     };
     let bands = [
-        band(Control::EqLowFreq, Control::EqLowVolume, 0.7),
         band(
+            BandType::LowShelf,
+            Control::EqLowFreq,
+            Control::EqLowVolume,
+            0.7,
+        ),
+        band(
+            BandType::Peaking,
             Control::EqMidLowFreq,
             Control::EqMidLowVolume,
             curves::q_value(app.cached_int(Control::EqMidLowQ, ch)),
         ),
         band(
+            BandType::Peaking,
             Control::EqMidHighFreq,
             Control::EqMidHighVolume,
             curves::q_value(app.cached_int(Control::EqMidHighQ, ch)),
         ),
-        band(Control::EqHighFreq, Control::EqHighVolume, 0.7),
+        band(
+            BandType::HighShelf,
+            Control::EqHighFreq,
+            Control::EqHighVolume,
+            0.7,
+        ),
     ];
 
     // x is log10(Hz) over ~20 Hz .. 20 kHz.
