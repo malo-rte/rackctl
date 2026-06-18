@@ -481,9 +481,9 @@ The toolbar's *Presets* menu saves and loads presets through a file dialog:
 The output panel's *Save default* and *Load default* buttons capture the current
 mixer as the shared default preset, or restore it. This is the same default file
 that `tascamctl default` uses (see <<sec-cli-default>>). *Save default* also
-records the current interface zoom, and *Load default* and the next startup
-restore it, so the zoom is part of the saved setup. The zoom is a GUI setting, so
-`tascamctl default` does not change it.
+records the current interface zoom and window size, and *Load default* and the
+next startup restore them, so they are part of the saved setup. The zoom and
+window size are GUI settings, so `tascamctl default` does not change them.
 
 [[sec-gui-keyboard]]
 === Keyboard and zoom

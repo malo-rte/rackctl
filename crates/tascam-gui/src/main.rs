@@ -33,7 +33,16 @@ fn main() -> Result<()> {
     let mock = std::env::args().skip(1).any(|a| a == "--mock");
     let device = open_device(mock)?;
 
-    let options = eframe::NativeOptions::default();
+    // Restore the saved window size before creating the window; an absent size
+    // falls back to eframe's default.
+    let mut viewport = eframe::egui::ViewportBuilder::default();
+    if let Some([w, h]) = config::load().window {
+        viewport = viewport.with_inner_size([w, h]);
+    }
+    let options = eframe::NativeOptions {
+        viewport,
+        ..Default::default()
+    };
     eframe::run_native(
         "Tascam US-16x08 Mixer",
         options,

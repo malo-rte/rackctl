@@ -45,12 +45,22 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
 
     // The shared default preset: whole-mixer state saved to / restored from the
     // config directory, also reachable via `tascamctl default`. The interface
-    // zoom is saved and restored alongside it as part of the user's setup.
+    // zoom and window size are saved and restored alongside it as part of the
+    // user's setup.
     if ui.button("Save default").clicked() {
-        app.save_default(ui.ctx().zoom_factor());
+        let ctx = ui.ctx();
+        let zoom = ctx.zoom_factor();
+        // screen_rect is in egui points (scaled by zoom); the window inner size
+        // is logical points = points * zoom.
+        let size = ctx.screen_rect().size() * zoom;
+        app.save_default(zoom, [size.x, size.y]);
     }
     if ui.button("Load default").clicked() {
-        let zoom = app.load_default();
-        ui.ctx().set_zoom_factor(zoom);
+        let (zoom, window) = app.load_default();
+        let ctx = ui.ctx();
+        ctx.set_zoom_factor(zoom);
+        if let Some([w, h]) = window {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w, h)));
+        }
     }
 }

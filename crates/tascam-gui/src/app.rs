@@ -41,6 +41,8 @@ pub(crate) struct App {
     links: [bool; 8],
     /// Persisted interface zoom factor, saved with the default preset.
     zoom: f32,
+    /// Persisted window inner size (logical points), saved with the default.
+    window: Option<[f32; 2]>,
     status: String,
 }
 
@@ -63,6 +65,7 @@ impl App {
             tab: Tab::Channel,
             links: cfg.links,
             zoom: cfg.zoom,
+            window: cfg.window,
             status: String::new(),
         };
         app.sync_controls();
@@ -173,11 +176,12 @@ impl App {
         }
     }
 
-    /// Persist the GUI-only state (stereo links and the zoom factor).
+    /// Persist the GUI-only state (stereo links, zoom, and window size).
     fn save_config(&self) {
         config::save(&GuiConfig {
             links: self.links,
             zoom: self.zoom,
+            window: self.window,
         });
     }
 
@@ -249,9 +253,10 @@ impl App {
 
     /// Save the whole mixer as the shared default preset (read back by the CLI
     /// `default` command and by `Load default`), and remember the current zoom
-    /// as part of the saved setup.
-    pub(crate) fn save_default(&mut self, zoom: f32) {
+    /// and window size as part of the saved setup.
+    pub(crate) fn save_default(&mut self, zoom: f32, window: [f32; 2]) {
         self.zoom = zoom;
+        self.window = Some(window);
         self.save_config();
         match config::default_preset_path() {
             Some(path) => self.save_preset(&path, None),
@@ -260,14 +265,16 @@ impl App {
     }
 
     /// Load the shared default preset into the whole mixer and return the
-    /// persisted zoom factor for the caller to apply.
-    pub(crate) fn load_default(&mut self) -> f32 {
-        self.zoom = config::load().zoom;
+    /// persisted zoom factor and window size for the caller to apply.
+    pub(crate) fn load_default(&mut self) -> (f32, Option<[f32; 2]>) {
+        let cfg = config::load();
+        self.zoom = cfg.zoom;
+        self.window = cfg.window;
         match config::default_preset_path() {
             Some(path) => self.load_preset(&path, None),
             None => "load failed: no config directory".clone_into(&mut self.status),
         }
-        self.zoom
+        (self.zoom, self.window)
     }
 
     /// Tab selector and the Presets menu. (The global DSP switches live in the

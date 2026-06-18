@@ -19,6 +19,10 @@ pub(crate) struct GuiConfig {
     /// Interface zoom factor, restored on startup and on `Load default`.
     #[serde(default = "default_zoom")]
     pub zoom: f32,
+    /// Saved window inner size in logical points (`[width, height]`), or `None`
+    /// to use the default size. Restored on startup and on `Load default`.
+    #[serde(default)]
+    pub window: Option<[f32; 2]>,
 }
 
 impl Default for GuiConfig {
@@ -26,6 +30,7 @@ impl Default for GuiConfig {
         Self {
             links: [false; 8],
             zoom: DEFAULT_ZOOM,
+            window: None,
         }
     }
 }
