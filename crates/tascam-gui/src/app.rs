@@ -230,6 +230,23 @@ impl App {
         }
     }
 
+    /// Save the whole mixer as the shared default preset (read back by the CLI
+    /// `default` command and by `Load default`).
+    pub(crate) fn save_default(&mut self) {
+        match config::default_preset_path() {
+            Some(path) => self.save_preset(&path, None),
+            None => "save failed: no config directory".clone_into(&mut self.status),
+        }
+    }
+
+    /// Load the shared default preset into the whole mixer.
+    pub(crate) fn load_default(&mut self) {
+        match config::default_preset_path() {
+            Some(path) => self.load_preset(&path, None),
+            None => "load failed: no config directory".clone_into(&mut self.status),
+        }
+    }
+
     /// Tab selector and the Presets menu. (The global DSP switches live in the
     /// OUTPUT panel.)
     fn toolbar(&mut self, ui: &mut egui::Ui) {

@@ -61,7 +61,13 @@ tascamctl save mix.json              # save the whole mixer to JSON
 tascamctl save strip.json -c 0       # save just channel 0's strip
 tascamctl load mix.json              # restore the whole mixer
 tascamctl load strip.json -c 5       # apply a saved strip to channel 5
+tascamctl default                    # load the shared default mixer preset
+tascamctl default --save             # save the current mixer as the default
 ----
+
+The `default` preset is a whole-mixer snapshot stored in the user config directory
+(shared with the GUI's *Save default* / *Load default* buttons), so a known starting
+state can be recalled with a single command.
 
 Integer controls read and accept their *display units* — dB for the faders, EQ
 gains, and compressor threshold/gain; Hz/kHz for EQ frequencies; ms for the

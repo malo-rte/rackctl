@@ -267,3 +267,31 @@ fn meters_prints_all_channels() {
             .stdout(predicate::str::contains("master"));
     }
 }
+
+#[test]
+fn default_preset_round_trips() {
+    // Point the config dir at a temp location (XDG, Linux) so the test does not
+    // touch the user's real default preset.
+    let dir = tempfile::tempdir().unwrap();
+
+    // Loading before one exists is an error.
+    tascamctl()
+        .env("XDG_CONFIG_HOME", dir.path())
+        .args(["--mock", "default"])
+        .assert()
+        .failure()
+        .code(1);
+
+    // Save the current mixer as the default, then load it back.
+    tascamctl()
+        .env("XDG_CONFIG_HOME", dir.path())
+        .args(["--mock", "default", "--save"])
+        .assert()
+        .success();
+    assert!(dir.path().join("tascam-mixer/default-preset.json").exists());
+    tascamctl()
+        .env("XDG_CONFIG_HOME", dir.path())
+        .args(["--mock", "default"])
+        .assert()
+        .success();
+}

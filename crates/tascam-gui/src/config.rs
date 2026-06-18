@@ -20,6 +20,13 @@ fn config_path() -> Option<PathBuf> {
         .map(|dirs| dirs.config_dir().join("config.json"))
 }
 
+/// Path to the shared default-mixer preset, in the same config directory the
+/// CLI's `default` command uses. `None` if no home directory can be determined.
+pub(crate) fn default_preset_path() -> Option<PathBuf> {
+    ProjectDirs::from("de", "paraair", "tascam-mixer")
+        .map(|dirs| dirs.config_dir().join("default-preset.json"))
+}
+
 /// Load the saved config, falling back to defaults on any error.
 pub(crate) fn load() -> GuiConfig {
     let Some(path) = config_path() else {

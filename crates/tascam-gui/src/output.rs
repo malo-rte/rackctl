@@ -40,4 +40,15 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     if ui.checkbox(&mut buss, "Buss out").changed() {
         app.set(Control::BussOut, 0, Value::Bool(buss));
     }
+
+    ui.separator();
+
+    // The shared default preset: whole-mixer state saved to / restored from the
+    // config directory, also reachable via `tascamctl default`.
+    if ui.button("Save default").clicked() {
+        app.save_default();
+    }
+    if ui.button("Load default").clicked() {
+        app.load_default();
+    }
 }

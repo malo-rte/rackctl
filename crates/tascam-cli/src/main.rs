@@ -95,6 +95,14 @@ enum Command {
         #[arg(short, long)]
         channel: Option<u32>,
     },
+    /// Load the shared default mixer preset, or save the current mixer as the
+    /// default with --save. The preset lives in the config directory and is
+    /// shared with the GUI's "Save default" / "Load default" buttons.
+    Default {
+        /// Save the current mixer state as the default instead of loading it.
+        #[arg(long)]
+        save: bool,
+    },
 }
 
 /// The selected backend, resolved once at startup.
@@ -140,6 +148,7 @@ fn run_command<B: Backend>(dev: &mut Us16x08<B>, command: Command) -> Result<()>
         Command::Watch { interval } => commands::watch(dev, interval),
         Command::Save { file, channel } => commands::save(dev, &file, channel),
         Command::Load { file, channel } => commands::load(dev, &file, channel),
+        Command::Default { save } => commands::default_preset(dev, save),
     }
 }
 

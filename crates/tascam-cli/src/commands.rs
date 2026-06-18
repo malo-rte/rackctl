@@ -3,10 +3,12 @@
 
 use std::fs;
 use std::io::Write;
+use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
+use directories::ProjectDirs;
 use tascam_us16x08::{
     Backend, Control, Kind, Meters, NUM_CHANNELS, NUM_OUTPUTS, Preset, Scope, Us16x08, Value,
     Watcher, units,
@@ -200,6 +202,37 @@ pub(crate) fn load<B: Backend>(
         );
     }
     Ok(())
+}
+
+/// Path to the shared default-mixer preset, in the same config directory the
+/// GUI uses for its "Save default" / "Load default" buttons.
+fn default_preset_path() -> Result<PathBuf> {
+    ProjectDirs::from("de", "paraair", "tascam-mixer")
+        .map(|dirs| dirs.config_dir().join("default-preset.json"))
+        .context("could not determine the configuration directory")
+}
+
+/// Load the shared default mixer preset, or (with `save`) capture the current
+/// mixer state as the default. Creates the config directory on save.
+pub(crate) fn default_preset<B: Backend>(dev: &mut Us16x08<B>, save: bool) -> Result<()> {
+    let path = default_preset_path()?;
+    if save {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
+        }
+        let preset = dev.capture_mixer()?;
+        let json = serde_json::to_string_pretty(&preset).context("serializing preset")?;
+        fs::write(&path, json).with_context(|| format!("writing {}", path.display()))?;
+        eprintln!("saved default preset to {}", path.display());
+        return Ok(());
+    }
+    if !path.exists() {
+        bail!(
+            "no default preset at {} (create it with `default --save` or the GUI)",
+            path.display()
+        );
+    }
+    load(dev, &path.to_string_lossy(), None)
 }
 
 /// Read and print the level meters once.
