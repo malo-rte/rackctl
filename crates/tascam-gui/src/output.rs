@@ -44,11 +44,13 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     ui.separator();
 
     // The shared default preset: whole-mixer state saved to / restored from the
-    // config directory, also reachable via `tascamctl default`.
+    // config directory, also reachable via `tascamctl default`. The interface
+    // zoom is saved and restored alongside it as part of the user's setup.
     if ui.button("Save default").clicked() {
-        app.save_default();
+        app.save_default(ui.ctx().zoom_factor());
     }
     if ui.button("Load default").clicked() {
-        app.load_default();
+        let zoom = app.load_default();
+        ui.ctx().set_zoom_factor(zoom);
     }
 }

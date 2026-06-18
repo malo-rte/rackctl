@@ -480,14 +480,18 @@ The toolbar's *Presets* menu saves and loads presets through a file dialog:
 
 The output panel's *Save default* and *Load default* buttons capture the current
 mixer as the shared default preset, or restore it. This is the same default file
-that `tascamctl default` uses (see <<sec-cli-default>>).
+that `tascamctl default` uses (see <<sec-cli-default>>). *Save default* also
+records the current interface zoom, and *Load default* and the next startup
+restore it, so the zoom is part of the saved setup. The zoom is a GUI setting, so
+`tascamctl default` does not change it.
 
 [[sec-gui-keyboard]]
 === Keyboard and zoom
 
 With no control focused, the Left and Right arrow keys move the focused channel,
 treating a linked pair as one step. Ctrl with the plus or minus key zooms the
-whole interface in or out.
+whole interface in or out. The zoom is remembered by *Save default* (see
+<<sec-gui-presets>>).
 
 [[sec-cli-ref]]
 == Command-line reference

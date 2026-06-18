@@ -39,12 +39,15 @@ pub(crate) struct App {
     tab: Tab,
     /// Stereo-link state for the eight channel pairs (GUI-only).
     links: [bool; 8],
+    /// Persisted interface zoom factor, saved with the default preset.
+    zoom: f32,
     status: String,
 }
 
 impl App {
     /// Build the app around an opened device and seed the control cache.
     pub(crate) fn new(device: Us16x08<Box<dyn Backend>>, mock: bool) -> Self {
+        let cfg = config::load();
         let mut app = Self {
             device,
             source: if mock {
@@ -58,7 +61,8 @@ impl App {
             next_watch: 0.0,
             selected: 0,
             tab: Tab::Channel,
-            links: config::load().links,
+            links: cfg.links,
+            zoom: cfg.zoom,
             status: String::new(),
         };
         app.sync_controls();
@@ -163,10 +167,23 @@ impl App {
         };
         *slot = !*slot;
         let now_linked = *slot;
-        config::save(&GuiConfig { links: self.links });
+        self.save_config();
         if now_linked {
             self.sync_pair(channel & !1);
         }
+    }
+
+    /// Persist the GUI-only state (stereo links and the zoom factor).
+    fn save_config(&self) {
+        config::save(&GuiConfig {
+            links: self.links,
+            zoom: self.zoom,
+        });
+    }
+
+    /// The persisted interface zoom factor, applied at startup.
+    pub(crate) fn zoom(&self) -> f32 {
+        self.zoom
     }
 
     /// Copy every per-channel control from `low` to its partner `low + 1`, then
@@ -231,20 +248,26 @@ impl App {
     }
 
     /// Save the whole mixer as the shared default preset (read back by the CLI
-    /// `default` command and by `Load default`).
-    pub(crate) fn save_default(&mut self) {
+    /// `default` command and by `Load default`), and remember the current zoom
+    /// as part of the saved setup.
+    pub(crate) fn save_default(&mut self, zoom: f32) {
+        self.zoom = zoom;
+        self.save_config();
         match config::default_preset_path() {
             Some(path) => self.save_preset(&path, None),
             None => "save failed: no config directory".clone_into(&mut self.status),
         }
     }
 
-    /// Load the shared default preset into the whole mixer.
-    pub(crate) fn load_default(&mut self) {
+    /// Load the shared default preset into the whole mixer and return the
+    /// persisted zoom factor for the caller to apply.
+    pub(crate) fn load_default(&mut self) -> f32 {
+        self.zoom = config::load().zoom;
         match config::default_preset_path() {
             Some(path) => self.load_preset(&path, None),
             None => "load failed: no config directory".clone_into(&mut self.status),
         }
+        self.zoom
     }
 
     /// Tab selector and the Presets menu. (The global DSP switches live in the

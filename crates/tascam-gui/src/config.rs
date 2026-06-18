@@ -7,12 +7,31 @@ use std::path::PathBuf;
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 
+/// Default interface zoom factor (egui zoom), used when no config exists.
+pub(crate) const DEFAULT_ZOOM: f32 = 1.5;
+
 /// GUI state saved between runs.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct GuiConfig {
     /// Stereo-link state for the eight adjacent channel pairs (0/1 .. 14/15).
     #[serde(default)]
     pub links: [bool; 8],
+    /// Interface zoom factor, restored on startup and on `Load default`.
+    #[serde(default = "default_zoom")]
+    pub zoom: f32,
+}
+
+impl Default for GuiConfig {
+    fn default() -> Self {
+        Self {
+            links: [false; 8],
+            zoom: DEFAULT_ZOOM,
+        }
+    }
+}
+
+fn default_zoom() -> f32 {
+    DEFAULT_ZOOM
 }
 
 fn config_path() -> Option<PathBuf> {

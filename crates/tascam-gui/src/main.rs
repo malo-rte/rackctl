@@ -38,12 +38,14 @@ fn main() -> Result<()> {
         "Tascam US-16x08 Mixer",
         options,
         Box::new(move |cc| {
-            // Start zoomed in for larger controls; Ctrl +/- adjusts from here.
-            cc.egui_ctx.set_zoom_factor(1.5);
+            let app = app::App::new(device, mock);
+            // Apply the saved zoom; Ctrl +/- adjusts from here and Save default
+            // remembers it.
+            cc.egui_ctx.set_zoom_factor(app.zoom());
             // Uniform slider length so the editor's value boxes line up.
             cc.egui_ctx
                 .style_mut(|style| style.spacing.slider_width = 120.0);
-            Ok(Box::new(app::App::new(device, mock)))
+            Ok(Box::new(app))
         }),
     )
     .map_err(|e| anyhow::anyhow!("GUI error: {e}"))?;
