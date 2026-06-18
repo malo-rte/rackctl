@@ -121,10 +121,9 @@ fn eq_box(app: &mut App, ui: &mut egui::Ui, ch: u32) {
     ui.group(|ui| {
         ui.set_width(DSP_WIDTH);
         ui.vertical(|ui| {
-            ui.heading("EQ");
+            title_row(app, ui, "EQ", Control::EqSwitch, ch);
             eq_curve(app, ui, ch);
             egui::Grid::new("eq_grid").num_columns(2).show(ui, |ui| {
-                control(app, ui, "EQ enable", Control::EqSwitch, ch);
                 control(app, ui, "Low gain", Control::EqLowVolume, ch);
                 control(app, ui, "Low freq", Control::EqLowFreq, ch);
                 control(app, ui, "Mid-low gain", Control::EqMidLowVolume, ch);
@@ -145,10 +144,9 @@ fn comp_box(app: &mut App, ui: &mut egui::Ui, ch: u32) {
     ui.group(|ui| {
         ui.set_width(DSP_WIDTH);
         ui.vertical(|ui| {
-            ui.heading("Compressor");
+            title_row(app, ui, "Compressor", Control::CompSwitch, ch);
             comp_curve(app, ui, ch);
             egui::Grid::new("comp_grid").num_columns(2).show(ui, |ui| {
-                control(app, ui, "Comp enable", Control::CompSwitch, ch);
                 control(app, ui, "Threshold", Control::CompThreshold, ch);
                 control(app, ui, "Ratio", Control::CompRatio, ch);
                 control(app, ui, "Attack", Control::CompAttack, ch);
@@ -238,6 +236,19 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
         let fraction = (gr.max(0) as f32 / METER_FULL_SCALE).clamp(0.0, 1.0);
         ui.add(egui::ProgressBar::new(fraction).text("gain reduction"));
     }
+}
+
+/// A box title with its enable checkbox right-aligned on the same row.
+fn title_row(app: &mut App, ui: &mut egui::Ui, title: &str, enable: Control, ch: u32) {
+    ui.horizontal(|ui| {
+        ui.heading(title);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let mut enabled = app.cached_bool(enable, ch);
+            if ui.checkbox(&mut enabled, "Enable").changed() {
+                app.set(enable, ch, Value::Bool(enabled));
+            }
+        });
+    });
 }
 
 /// Render one control as the widget its kind calls for, writing through on edit.
