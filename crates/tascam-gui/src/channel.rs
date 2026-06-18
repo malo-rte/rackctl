@@ -108,7 +108,9 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                 ui.label(if linked { "Balance" } else { "Pan" });
                 ui.spacing_mut().slider_width = INPUT_WIDTH - 130.0;
                 let mut pan = app.cached_int(Control::Pan, ch);
-                if ui.add(egui::Slider::new(&mut pan, 0..=254)).changed() {
+                let slider = egui::Slider::new(&mut pan, 0..=254)
+                    .custom_formatter(|n, _| human_text(Control::Pan, n));
+                if ui.add(slider).changed() {
                     app.set(Control::Pan, ch, Value::Int(pan));
                 }
             });
@@ -313,6 +315,20 @@ fn human_text(control: Control, raw: f64) -> String {
         Control::CompGain => format!("+{raw} dB"),
         Control::CompAttack => format!("{} ms", raw + 2),
         Control::CompRelease => format!("{} ms", (raw + 1) * 10),
+        // Pan: 0..254 with 127 centred; show C / L..% / R..%.
+        Control::Pan => {
+            let offset = raw - 127;
+            if offset == 0 {
+                "C".to_owned()
+            } else {
+                let percent = (offset.abs() * 100 + 63) / 127;
+                if offset < 0 {
+                    format!("L{percent}%")
+                } else {
+                    format!("R{percent}%")
+                }
+            }
+        }
         _ => format!("{raw}"),
     }
 }
