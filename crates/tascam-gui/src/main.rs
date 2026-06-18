@@ -34,8 +34,9 @@ fn main() -> Result<()> {
     let device = open_device(mock)?;
 
     // Restore the saved window size before creating the window; an absent size
-    // falls back to eframe's default.
-    let mut viewport = eframe::egui::ViewportBuilder::default();
+    // falls back to eframe's default. The app id is the Wayland app_id (the
+    // window "class" in Hyprland/sway), so compositor rules can target it.
+    let mut viewport = eframe::egui::ViewportBuilder::default().with_app_id("tascam-mixer");
     if let Some([w, h]) = config::load().window {
         viewport = viewport.with_inner_size([w, h]);
     }

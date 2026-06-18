@@ -563,6 +563,15 @@ For channel controls the channel index is 0...15; for output controls it is
 tascam-mixer [--mock]
 ----
 
+On Wayland the window sets its `app_id` to `tascam-mixer` (the window class in
+compositors such as Hyprland and sway), so a compositor rule can target it. For
+example, to float the window in Hyprland:
+
+[source]
+----
+windowrulev2 = float, class:^(tascam-mixer)$
+----
+
 [[sec-gui-ref-layout]]
 === Window layout
 
