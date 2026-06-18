@@ -565,11 +565,12 @@ tascam-mixer [--mock]
 
 On Wayland the window sets its `app_id` to `tascam-mixer` (the window class in
 compositors such as Hyprland and sway), so a compositor rule can target it. For
-example, to float the window in Hyprland:
+example, to float the window in Hyprland (0.53 or later, whose window rules use
+the `hl.window_rule` function with a `match` table):
 
-[source]
+[source,lua]
 ----
-windowrule = float, class:^(tascam-mixer)$
+hl.window_rule({ match = { class = "tascam-mixer" }, float = true })
 ----
 
 [[sec-gui-ref-layout]]
