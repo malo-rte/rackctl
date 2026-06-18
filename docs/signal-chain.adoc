@@ -26,13 +26,17 @@ Each claim is tagged _(manual)_, _(driver)_, or _(inferred)_ — see <<sec-sourc
 * *Reference Manual* D01247020B (TASCAM US-16x08): section _6 — Using the Settings
   Panel_, the _OUTPUT SETTING page_ (p. 18), and _Block diagrams_ / _Level
   diagrams_ (pp. 31–32).
+* *Manufacturer product page* (TASCAM US-16x08 feature page,
+  https://tascam.jp/int/product/us-16x08/feature) — for the DSP mixer's role and
+  the capture (USB record) path.
 * *Linux kernel driver* `sound/usb/mixer_us16x08.c` (the `snd-usb-audio` US-16x08
   quirk) — authoritative for which controls exist and their types.
 * The original `tascamgtk` GTKmm application (the pre-rewrite reference) for the
   author's control labels.
 
-Provenance tags: _(manual)_ from the Reference Manual, _(driver)_ from the kernel
-driver, _(inferred)_ reasoned from those but not stated outright.
+Provenance tags: _(manual)_ from TASCAM's published documentation (Reference
+Manual or product page), _(driver)_ from the kernel driver, _(inferred)_ reasoned
+from those but not stated outright.
 
 [[sec-overview]]
 == Overview
@@ -42,6 +46,11 @@ The US-16x08 is a 16-in / 8-out USB interface whose on-board BlackFin DSP runs a
 *stereo master bus*. The computer's eight USB playback streams (`COMPUTER 1–8`)
 can be folded into that bus and/or sent straight to outputs. Each of the eight
 physical line outputs independently selects one source. _(manual)_
+
+The DSP is a *monitor* processor only. The 16 channels the device records to the
+computer are tapped *before* the DSP — they are the dry inputs — so the EQ,
+compressor, and fader affect monitoring and the outputs but never the recording.
+See <<sec-capture>>. _(manual)_
 
 .US-16x08 signal flow
 [plantuml, fig-signal-chain, svg]
@@ -64,6 +73,7 @@ rectangle "MASTER bus\nL / R"            as MB
 rectangle "route\n(per output)"          as RT
 rectangle "line out 1..8"                as OUT
 rectangle "computer playback\n(COMPUTER 1..8)" as PB
+rectangle "computer capture\n(record, 16 ch)"  as CAP
 
 IN -> PH
 PH -> EQ
@@ -75,6 +85,7 @@ MB -> RT
 RT -> OUT
 PB --> MB : buss-out
 PB --> RT : direct
+IN --> CAP : capture (dry, pre-DSP)
 @enduml
 ----
 
@@ -231,6 +242,26 @@ streams sent directly to a jack.
 
 IMPORTANT: The 16 inputs are *not* routed to outputs individually — they are summed
 into the stereo master. Only the eight outputs are routed.
+
+[[sec-capture]]
+== Capture (USB record) path
+
+The 16 channels the device sends to the computer are tapped *before* the DSP
+block: the recorded signal is the dry input (post-preamp / A-D, but pre phase,
+EQ, compressor, fader, and pan). The on-board DSP is a monitor processor — it
+shapes the stereo master bus and the line/phones outputs only, not what the DAW
+records. _(manual)_
+
+There is therefore no way to record the processed signal directly, and no control
+to move the capture tap: the kernel driver registers no capture-source or
+pre/post-DSP element, so neither this project nor any other ALSA client can change
+it. _(driver)_ To capture the EQ/compressor, print the processed monitor mix by
+other means (for example, re-record the stereo master through a `route`d output)
+or apply the processing in the DAW.
+
+NOTE: This is the opposite direction from `buss-out` and `route` (see
+<<sec-globals>> and the routing section), which only choose what the *outputs* and
+the master bus carry — never what the computer records.
 
 [[sec-globals]]
 == Global switches
