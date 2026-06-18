@@ -339,15 +339,19 @@ impl eframe::App for App {
             self.next_watch = now + WATCH_INTERVAL_SECS;
         }
 
-        // Arrow keys step the focused channel, but only when no widget (e.g. a
-        // slider) holds keyboard focus, so editing a value never moves channel.
+        // Keyboard shortcuts, only when no widget (e.g. a slider) holds keyboard
+        // focus, so editing a value never moves channel or quits. Esc/Q quit the
+        // program; the arrow keys step the focused channel.
         if ctx.memory(egui::Memory::focused).is_none() {
-            let (mut prev, mut next) = (false, false);
+            let (mut prev, mut next, mut quit) = (false, false, false);
             ctx.input(|i| {
                 prev = i.key_pressed(egui::Key::ArrowLeft);
                 next = i.key_pressed(egui::Key::ArrowRight);
+                quit = i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::Q);
             });
-            if next {
+            if quit {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            } else if next {
                 self.nav(true);
             } else if prev {
                 self.nav(false);

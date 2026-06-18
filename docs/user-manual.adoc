@@ -494,9 +494,9 @@ window size are GUI settings, so `tascamctl default` does not change them.
 === Keyboard and zoom
 
 With no control focused, the Left and Right arrow keys move the focused channel,
-treating a linked pair as one step. Ctrl with the plus or minus key zooms the
-whole interface in or out. The zoom is remembered by *Save default* (see
-<<sec-gui-presets>>).
+treating a linked pair as one step, and Esc or Q quits the program. Ctrl with the
+plus or minus key zooms the whole interface in or out. The zoom is remembered by
+*Save default* (see <<sec-gui-presets>>).
 
 [[sec-cli-ref]]
 == Command-line reference
@@ -623,6 +623,7 @@ A Lua-configured Hyprland uses the equivalent
 | Key | Action
 
 | Left / Right arrow | Move the focused channel (no control focused). A linked pair is one step.
+| Esc / Q | Quit the program (no control focused).
 | Ctrl + / Ctrl - | Zoom the interface in or out.
 |===
 
