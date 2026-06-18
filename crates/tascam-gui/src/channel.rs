@@ -163,32 +163,24 @@ fn comp_box(app: &mut App, ui: &mut egui::Ui, ch: u32) {
 
 /// The EQ response curve for the channel's current band settings (indicative).
 fn eq_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
+    let band = |freq: Control, gain: Control, q: f64| EqBand {
+        f0: freq_hz(freq, app.cached_int(freq, ch)).unwrap_or(1000.0),
+        q,
+        gain_db: curves::eq_gain_db(app.cached_int(gain, ch)),
+    };
     let bands = [
-        EqBand {
-            f0: curves::log_freq(app.cached_int(Control::EqLowFreq, ch), 31, 32.0, 1600.0),
-            q: 0.7,
-            gain_db: curves::eq_gain_db(app.cached_int(Control::EqLowVolume, ch)),
-        },
-        EqBand {
-            f0: curves::log_freq(app.cached_int(Control::EqMidLowFreq, ch), 63, 100.0, 3200.0),
-            q: curves::q_value(app.cached_int(Control::EqMidLowQ, ch)),
-            gain_db: curves::eq_gain_db(app.cached_int(Control::EqMidLowVolume, ch)),
-        },
-        EqBand {
-            f0: curves::log_freq(
-                app.cached_int(Control::EqMidHighFreq, ch),
-                63,
-                500.0,
-                8000.0,
-            ),
-            q: curves::q_value(app.cached_int(Control::EqMidHighQ, ch)),
-            gain_db: curves::eq_gain_db(app.cached_int(Control::EqMidHighVolume, ch)),
-        },
-        EqBand {
-            f0: curves::log_freq(app.cached_int(Control::EqHighFreq, ch), 31, 1600.0, 16000.0),
-            q: 0.7,
-            gain_db: curves::eq_gain_db(app.cached_int(Control::EqHighVolume, ch)),
-        },
+        band(Control::EqLowFreq, Control::EqLowVolume, 0.7),
+        band(
+            Control::EqMidLowFreq,
+            Control::EqMidLowVolume,
+            curves::q_value(app.cached_int(Control::EqMidLowQ, ch)),
+        ),
+        band(
+            Control::EqMidHighFreq,
+            Control::EqMidHighVolume,
+            curves::q_value(app.cached_int(Control::EqMidHighQ, ch)),
+        ),
+        band(Control::EqHighFreq, Control::EqHighVolume, 0.7),
     ];
 
     // x is log10(Hz) over ~20 Hz .. 20 kHz.
@@ -328,12 +320,25 @@ pub(crate) fn parse_human(control: Control, text: &str) -> Option<f64> {
         return parse_pan(text);
     }
     // Take the leading number, ignoring a `+` sign and any unit suffix.
-    let trimmed = text.trim().trim_start_matches('+');
+    let lower = text.trim().to_ascii_lowercase();
+    let trimmed = lower.trim_start_matches('+');
     let number: String = trimmed
         .chars()
         .take_while(|c| c.is_ascii_digit() || *c == '-' || *c == '.')
         .collect();
     let value: f64 = number.parse().ok()?;
+
+    // EQ frequencies: parse Hz (or kHz) back to the raw band index.
+    if let Some((max_raw, lo, hi)) = freq_range(control) {
+        let hz = if lower.contains('k') {
+            value * 1000.0
+        } else {
+            value
+        };
+        let raw = f64::from(max_raw) * (hz / lo).ln() / (hi / lo).ln();
+        return Some(raw.clamp(0.0, f64::from(max_raw)));
+    }
+
     let raw = match control {
         Control::LineVolume | Control::MasterVolume => value + 127.0,
         Control::EqLowVolume
@@ -343,10 +348,37 @@ pub(crate) fn parse_human(control: Control, text: &str) -> Option<f64> {
         Control::CompThreshold => value + 32.0,
         Control::CompAttack => value - 2.0,
         Control::CompRelease => value / 10.0 - 1.0,
-        // CompGain, frequencies, Q, etc. display the raw value directly.
+        // CompGain, Q, etc. display the raw value directly.
         _ => value,
     };
     Some(raw)
+}
+
+/// The `(max_raw, lo_hz, hi_hz)` mapping for an EQ frequency control, or `None`
+/// for any other control. The ranges are indicative — only the LOW band's
+/// 32 Hz-1.6 kHz span is confirmed by the manual (see `docs/signal-chain.adoc`).
+fn freq_range(control: Control) -> Option<(i32, f64, f64)> {
+    match control {
+        Control::EqLowFreq => Some((31, 32.0, 1600.0)),
+        Control::EqMidLowFreq => Some((63, 100.0, 3200.0)),
+        Control::EqMidHighFreq => Some((63, 500.0, 8000.0)),
+        Control::EqHighFreq => Some((31, 1600.0, 16000.0)),
+        _ => None,
+    }
+}
+
+/// The centre frequency (Hz) of an EQ frequency control at its raw value.
+fn freq_hz(control: Control, raw: i32) -> Option<f64> {
+    freq_range(control).map(|(max_raw, lo, hi)| curves::log_freq(raw, max_raw, lo, hi))
+}
+
+/// Format a frequency in Hz / kHz.
+fn format_hz(hz: f64) -> String {
+    if hz >= 1000.0 {
+        format!("{:.1} kHz", hz / 1000.0)
+    } else {
+        format!("{hz:.0} Hz")
+    }
 }
 
 /// Format a raw control value in human units for the slider readout.
@@ -363,6 +395,10 @@ pub(crate) fn human_text(control: Control, raw: f64) -> String {
         Control::CompGain => format!("+{raw} dB"),
         Control::CompAttack => format!("{} ms", raw + 2),
         Control::CompRelease => format!("{} ms", (raw + 1) * 10),
+        Control::EqLowFreq
+        | Control::EqMidLowFreq
+        | Control::EqMidHighFreq
+        | Control::EqHighFreq => freq_hz(control, raw).map_or_else(|| format!("{raw}"), format_hz),
         // Pan: 0..254 with 127 centred; show C / L..% / R..%.
         Control::Pan => {
             let offset = raw - 127;
