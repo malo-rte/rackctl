@@ -11,7 +11,7 @@
 )]
 
 use eframe::egui;
-use egui_plot::{Line, Plot, PlotPoints};
+use egui_plot::{Line, Plot, PlotBounds, PlotPoints};
 use tascam_us16x08::{COMP_RATIO_VALUES, Control, Kind, Value};
 
 use crate::app::App;
@@ -226,11 +226,15 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
 
     Plot::new("comp_curve")
         .height(130.0)
-        .data_aspect(1.0)
         .allow_drag(false)
         .allow_zoom(false)
         .allow_scroll(false)
-        .show(ui, |plot| plot.line(Line::new(PlotPoints::from(points))));
+        .show(ui, |plot| {
+            // Fixed scale: input/output -60..0 dB, so the view does not jump as
+            // the parameters change.
+            plot.set_plot_bounds(PlotBounds::from_min_max([-60.0, -60.0], [0.0, 0.0]));
+            plot.line(Line::new(PlotPoints::from(points)));
+        });
 
     if let Some(gr) = app.meters().reduction_db(ch) {
         let fraction = (gr.max(0) as f32 / METER_FULL_SCALE).clamp(0.0, 1.0);
