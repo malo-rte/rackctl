@@ -340,14 +340,23 @@ impl eframe::App for App {
         }
 
         // Keyboard shortcuts, only when no widget (e.g. a slider) holds keyboard
-        // focus, so editing a value never moves channel or quits. Esc/Q quit the
-        // program; the arrow keys step the focused channel.
+        // focus, so editing a value never triggers them. Esc/Q quit; the arrow
+        // keys step the focused channel; `m` mutes the selected channel and `M`
+        // (Shift+m) mutes the master.
         if ctx.memory(egui::Memory::focused).is_none() {
             let (mut prev, mut next, mut quit) = (false, false, false);
+            let (mut mute_channel, mut mute_master) = (false, false);
             ctx.input(|i| {
                 prev = i.key_pressed(egui::Key::ArrowLeft);
                 next = i.key_pressed(egui::Key::ArrowRight);
                 quit = i.key_pressed(egui::Key::Escape) || i.key_pressed(egui::Key::Q);
+                if i.key_pressed(egui::Key::M) {
+                    if i.modifiers.shift {
+                        mute_master = true;
+                    } else {
+                        mute_channel = true;
+                    }
+                }
             });
             if quit {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -355,6 +364,15 @@ impl eframe::App for App {
                 self.nav(true);
             } else if prev {
                 self.nav(false);
+            }
+            if mute_channel {
+                let ch = u32::from(self.selected);
+                let muted = self.cached_bool(Control::MuteSwitch, ch);
+                self.set(Control::MuteSwitch, ch, Value::Bool(!muted));
+            }
+            if mute_master {
+                let muted = self.cached_bool(Control::MasterMute, 0);
+                self.set(Control::MasterMute, 0, Value::Bool(!muted));
             }
         }
 
