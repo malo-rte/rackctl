@@ -43,9 +43,15 @@ fn master_meters(app: &mut App, ui: &mut egui::Ui) {
             meter_bar(ui, fraction(l));
             meter_bar(ui, fraction(r));
         });
-        // Mute button under the meters, matching the channel strips.
+        // Mute button centred under the two meter bars (a single left-aligned
+        // "M" would sit under the left bar only).
         let muted = app.cached_bool(Control::MasterMute, 0);
-        if ui.selectable_label(muted, "M").clicked() {
+        let width = 2.0 * METER_SIZE.x + ui.spacing().item_spacing.x;
+        let height = ui.spacing().interact_size.y;
+        if ui
+            .add_sized([width, height], egui::SelectableLabel::new(muted, "M"))
+            .clicked()
+        {
             app.set(Control::MasterMute, 0, Value::Bool(!muted));
         }
     });
