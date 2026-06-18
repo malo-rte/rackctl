@@ -104,16 +104,27 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                 });
             });
 
-            // Pan / balance along the bottom.
+            // Pan along the bottom. A linked pair shows a balance that tilts
+            // the hard-panned stereo image instead of a single pan position.
             ui.horizontal(|ui| {
                 ui.label(if linked { "Balance" } else { "Pan" });
                 ui.spacing_mut().slider_width = INPUT_WIDTH - 130.0;
-                let mut pan = app.cached_int(Control::Pan, ch);
-                let slider = egui::Slider::new(&mut pan, 0..=254)
-                    .custom_formatter(|n, _| human_text(Control::Pan, n))
-                    .custom_parser(parse_pan);
-                if ui.add(slider).changed() {
-                    app.set(Control::Pan, ch, Value::Int(pan));
+                if linked {
+                    let mut balance = app.pair_balance(ch);
+                    let slider = egui::Slider::new(&mut balance, 0..=254)
+                        .custom_formatter(|n, _| human_text(Control::Pan, n))
+                        .custom_parser(parse_pan);
+                    if ui.add(slider).changed() {
+                        app.set_balance(ch, balance);
+                    }
+                } else {
+                    let mut pan = app.cached_int(Control::Pan, ch);
+                    let slider = egui::Slider::new(&mut pan, 0..=254)
+                        .custom_formatter(|n, _| human_text(Control::Pan, n))
+                        .custom_parser(parse_pan);
+                    if ui.add(slider).changed() {
+                        app.set(Control::Pan, ch, Value::Int(pan));
+                    }
                 }
             });
         });

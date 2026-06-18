@@ -110,6 +110,25 @@ impl App {
         }
     }
 
+    /// The balance setting (0..=254, 127 = centred full stereo) of a linked
+    /// pair, recovered from the two channels' pan positions.
+    pub(crate) fn pair_balance(&self, low: u32) -> i32 {
+        let left = self.cached_int(Control::Pan, low);
+        let right = self.cached_int(Control::Pan, low + 1);
+        // At most one channel is off its hard-panned rail (see `balance_to_pans`).
+        let delta = if left > 0 { left } else { right - 254 };
+        (delta + 127).clamp(0, 254)
+    }
+
+    /// Apply a stereo-balance setting to a linked pair: the lower channel pans
+    /// toward L and the upper toward R, with the whole image tilted by the
+    /// balance, so the two channels are never set to the same pan.
+    pub(crate) fn set_balance(&mut self, low: u32, balance: i32) {
+        let (left, right) = balance_to_pans(balance);
+        self.write_one(Control::Pan, low, Value::Int(left));
+        self.write_one(Control::Pan, low + 1, Value::Int(right));
+    }
+
     /// Whether `channel`'s stereo pair is linked.
     pub(crate) fn linked(&self, channel: u32) -> bool {
         self.links
@@ -150,15 +169,21 @@ impl App {
         }
     }
 
-    /// Copy every per-channel control from `low` to its partner `low + 1`.
+    /// Copy every per-channel control from `low` to its partner `low + 1`, then
+    /// pan the pair into a centred stereo image. Pan is excluded from the copy:
+    /// a linked pair is panned hard-opposite (L/R), not to the same position.
     fn sync_pair(&mut self, low: u32) {
         for &control in Control::ALL {
-            if matches!(control.scope(), Scope::Channel) && !matches!(control.kind(), Kind::Meter) {
+            if matches!(control.scope(), Scope::Channel)
+                && !matches!(control.kind(), Kind::Meter)
+                && control != Control::Pan
+            {
                 if let Some(&value) = self.cache.get(&(control, low)) {
                     self.write_one(control, low + 1, value);
                 }
             }
         }
+        self.set_balance(low, 127);
     }
 
     /// The latest meter snapshot.
@@ -308,6 +333,14 @@ impl eframe::App for App {
     }
 }
 
+/// Map a balance setting (0..=254, 127 = centred full stereo) to the lower and
+/// upper channel pan positions of a linked pair. At centre the pair is hard
+/// L/R; the balance tilts both pans together, clamped at the rails.
+fn balance_to_pans(balance: i32) -> (i32, i32) {
+    let delta = balance - 127;
+    (delta.clamp(0, 254), (254 + delta).clamp(0, 254))
+}
+
 /// Native "save file" dialog for a JSON preset.
 fn save_dialog(default_name: &str) -> Option<std::path::PathBuf> {
     rfd::FileDialog::new()
@@ -321,4 +354,36 @@ fn open_dialog() -> Option<std::path::PathBuf> {
     rfd::FileDialog::new()
         .add_filter("JSON preset", &["json"])
         .pick_file()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::balance_to_pans;
+
+    /// Recover balance from a pair's pan positions (mirror of `pair_balance`).
+    fn balance_from_pans(left: i32, right: i32) -> i32 {
+        let delta = if left > 0 { left } else { right - 254 };
+        (delta + 127).clamp(0, 254)
+    }
+
+    #[test]
+    fn centre_balance_is_hard_opposite() {
+        assert_eq!(balance_to_pans(127), (0, 254));
+    }
+
+    #[test]
+    fn linked_pair_is_never_panned_equally() {
+        for balance in 0..=254 {
+            let (left, right) = balance_to_pans(balance);
+            assert_ne!(left, right, "balance {balance} collapsed both channels");
+        }
+    }
+
+    #[test]
+    fn balance_round_trips_through_pan_positions() {
+        for balance in 0..=254 {
+            let (left, right) = balance_to_pans(balance);
+            assert_eq!(balance_from_pans(left, right), balance);
+        }
+    }
 }
