@@ -278,17 +278,22 @@ fn resolve(key: &str) -> Result<Control> {
 
 fn print_meters(m: &Meters, raw: bool) {
     for ch in 0..NUM_CHANNELS {
-        let (level, reduction) = if raw {
-            (m.channel_raw(ch), m.reduction_raw(ch))
+        if raw {
+            // Raw registers: the reduction index is the gain coefficient.
+            println!(
+                "ch{:<2} level={:>6} reduction={:>6}",
+                ch + 1,
+                m.channel_raw(ch).unwrap_or(0),
+                m.reduction_raw(ch).unwrap_or(0)
+            );
         } else {
-            (m.channel_db(ch), m.reduction_db(ch))
-        };
-        println!(
-            "ch{:<2} level={:>6} reduction={:>6}",
-            ch + 1,
-            level.unwrap_or(0),
-            reduction.unwrap_or(0)
-        );
+            println!(
+                "ch{:<2} level={:>6} reduction={:>3.0}%",
+                ch + 1,
+                m.channel_db(ch).unwrap_or(0),
+                m.gain_reduction(ch).unwrap_or(0.0) * 100.0
+            );
+        }
     }
     let (left, right) = if raw { m.master_raw() } else { m.master_db() };
     println!("master  L={left:>6} R={right:>6}");

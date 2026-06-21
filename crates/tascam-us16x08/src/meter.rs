@@ -58,7 +58,9 @@ impl Meters {
         self.channel_raw(channel).map(meter_scale)
     }
 
-    /// Raw compressor gain-reduction for `channel` (`0..16`), if in range.
+    /// Raw compressor meter for `channel` (`0..16`), if in range. This index is
+    /// the compressor's gain *coefficient* (full scale = unity gain, i.e. no
+    /// reduction); see [`Self::gain_reduction`] for the reduction itself.
     #[must_use]
     pub fn reduction_raw(&self, channel: u32) -> Option<i32> {
         if channel >= NUM_CHANNELS {
@@ -67,10 +69,17 @@ impl Meters {
         self.raw.get(REDUCTION_BASE + channel as usize).copied()
     }
 
-    /// Scaled compressor gain-reduction for `channel` (`0..16`), if in range.
+    /// Compressor gain reduction for `channel` as a `0.0..=1.0` fraction (0 = no
+    /// reduction, 1 = full).
+    ///
+    /// The device reports the compressor's current *gain coefficient* at this
+    /// meter index (full scale is unity gain, i.e. no reduction), so the
+    /// reduction is its complement.
     #[must_use]
-    pub fn reduction_db(&self, channel: u32) -> Option<i32> {
-        self.reduction_raw(channel).map(meter_scale)
+    #[allow(clippy::cast_precision_loss)]
+    pub fn gain_reduction(&self, channel: u32) -> Option<f32> {
+        self.reduction_raw(channel)
+            .map(|raw| (1.0 - raw.max(0) as f32 / 32768.0).clamp(0.0, 1.0))
     }
 
     /// Raw master output level (left, right).

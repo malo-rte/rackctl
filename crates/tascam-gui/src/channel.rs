@@ -18,9 +18,6 @@ use crate::app::App;
 use crate::bridge;
 use crate::curves::{self, BandType, EqBand};
 
-/// Full-scale meter sample for the gain-reduction bar.
-const METER_FULL_SCALE: f32 = 32768.0;
-
 /// Column widths for the INPUT / EQ / COMPRESSOR boxes.
 const INPUT_WIDTH: f32 = 300.0;
 const DSP_WIDTH: f32 = 320.0;
@@ -332,11 +329,9 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
         })
         .collect();
 
-    // Gain-reduction level (0..=1 of full scale), zero when inactive.
+    // Gain-reduction level (0..=1), zero when inactive.
     let gr = if active {
-        app.meters().reduction_db(ch).map_or(0.0, |g| {
-            (g.max(0) as f32 / METER_FULL_SCALE).clamp(0.0, 1.0)
-        })
+        app.meters().gain_reduction(ch).unwrap_or(0.0)
     } else {
         0.0
     };

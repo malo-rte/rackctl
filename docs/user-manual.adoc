@@ -745,7 +745,7 @@ are mirrored to the headphones jack. _(manual)_
 
 | `dsp-bypass` | DSP Bypass Switch | on / off | Bypass the channel DSP (EQ and compressor) for dry monitoring. _(inferred)_
 | `buss-out` | Buss Out Switch | on / off | Fold the computer playback into the stereo master bus. _(manual/inferred)_
-| `meter` | Level Meter | read-only, 34 ints | Per-channel input levels (0-15), master L/R (16-17), per-channel compressor gain reduction (18-33).
+| `meter` | Level Meter | read-only, 34 ints | Per-channel input levels (0-15), master L/R (16-17), per-channel compressor gain coefficient (18-33; full scale = no reduction, reported as a reduction percentage by the `meters` command).
 |===
 
 [appendix]
