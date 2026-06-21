@@ -350,13 +350,19 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
             // Fixed scale: input/output -60..0 dB, so the view does not jump as
             // the parameters change.
             plot.set_plot_bounds(PlotBounds::from_min_max([-60.0, -60.0], [0.0, 0.0]));
-            // 1:1 reference diagonal (input == output), drawn under the curve.
+            // Transfer curve as a region filled down to the graph floor.
+            plot.line(
+                Line::new(PlotPoints::from(points))
+                    .color(egui::Color32::from_rgb(90, 170, 220))
+                    .fill(-60.0),
+            );
+            // 1:1 reference diagonal (input == output), on top of the fill so it
+            // stays visible.
             plot.line(
                 Line::new(PlotPoints::from(vec![[-60.0, -60.0], [0.0, 0.0]]))
-                    .color(egui::Color32::from_gray(90))
+                    .color(egui::Color32::from_gray(110))
                     .style(LineStyle::dashed_loose()),
             );
-            plot.line(Line::new(PlotPoints::from(points)));
 
             // Gain-reduction meter: a vertical bar at the right edge growing
             // down from 0 dB; full scale spans the whole height.
