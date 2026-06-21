@@ -1,6 +1,6 @@
 [package]
 name = "tascam-cli"
-version = "0.1.0"
+version.workspace = true
 description = "Command-line control tool (tascamctl) for the Tascam US-16x08 USB audio interface."
 edition.workspace = true
 rust-version.workspace = true

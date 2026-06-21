@@ -64,6 +64,8 @@ main() {
 
 	cd "${REPO_ROOT}"
 
+	check "version coherence" \
+		"${REPO_ROOT}/.claude/skills/release/scripts/bump-version" check
 	check "rustfmt" cargo fmt --all --check
 	check "clippy (default features)" \
 		cargo clippy --workspace --all-targets -- -D warnings

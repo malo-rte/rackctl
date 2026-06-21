@@ -3,11 +3,12 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "ISC"
-repository = "https://github.com/onkelDead/tascam-gtk"
-authors = ["Detlef Urban <onkel@paraair.de>"]
+repository = "https://github.com/malo-rte/tascam-mixer"
+authors = ["Mats Loman <mats.loman@rte.se>"]
 
 [workspace.dependencies]
 tascam-us16x08 = { path = "crates/tascam-us16x08" }
