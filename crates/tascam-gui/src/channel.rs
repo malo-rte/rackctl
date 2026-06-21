@@ -23,9 +23,6 @@ const INPUT_WIDTH: f32 = 300.0;
 const DSP_WIDTH: f32 = 320.0;
 /// Length of the INPUT volume fader — matched to the meter height beside it.
 const VOLUME_FADER_LENGTH: f32 = bridge::METER_HEIGHT;
-/// Footprint reserved for the meter+fader strip, so the switch column's width
-/// pushes the strip flush to the right edge.
-const VOLUME_STRIP_WIDTH: f32 = 90.0;
 /// Minimum width for the numeric value boxes, wide enough for the longest
 /// readout (e.g. `-127 dB`, `1000 ms`) so they are a fixed, uniform size.
 pub(crate) const VALUE_BOX_WIDTH: f32 = 60.0;
@@ -87,63 +84,64 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
             } else {
                 ui.heading(format!("INPUT {}", selected + 1));
             }
+            ui.separator();
 
-            ui.horizontal_top(|ui| {
-                // Switches stacked on the left; the fixed width pushes the
-                // volume strip flush to the right edge.
-                ui.vertical(|ui| {
-                    ui.set_width(INPUT_WIDTH - VOLUME_STRIP_WIDTH);
-                    let mut link_on = linked;
-                    if ui
-                        .checkbox(&mut link_on, format!("Stereo link {}-{}", low + 1, low + 2))
-                        .changed()
-                    {
-                        app.toggle_link(selected);
-                    }
-                    let mut phase = app.cached_bool(Control::PhaseSwitch, ch);
-                    if ui.checkbox(&mut phase, "Phase").changed() {
-                        app.set(Control::PhaseSwitch, ch, Value::Bool(phase));
-                    }
-                    let mut mute = app.cached_bool(Control::MuteSwitch, ch);
-                    if ui.checkbox(&mut mute, "Mute").changed() {
-                        app.set(Control::MuteSwitch, ch, Value::Bool(mute));
-                    }
-                });
+            // Switches: stereo link on its own row (long label), phase and mute
+            // side by side.
+            let mut link_on = linked;
+            if ui
+                .checkbox(&mut link_on, format!("Stereo link {}-{}", low + 1, low + 2))
+                .changed()
+            {
+                app.toggle_link(selected);
+            }
+            ui.horizontal(|ui| {
+                let mut phase = app.cached_bool(Control::PhaseSwitch, ch);
+                if ui.checkbox(&mut phase, "Phase").changed() {
+                    app.set(Control::PhaseSwitch, ch, Value::Bool(phase));
+                }
+                ui.add_space(24.0);
+                let mut mute = app.cached_bool(Control::MuteSwitch, ch);
+                if ui.checkbox(&mut mute, "Mute").changed() {
+                    app.set(Control::MuteSwitch, ch, Value::Bool(mute));
+                }
+            });
+            ui.separator();
 
-                // Volume fader strip, right-aligned: the channel meter beside
-                // the vertical fader, both the same height.
-                ui.vertical(|ui| {
-                    ui.label("Volume");
-                    ui.horizontal(|ui| {
-                        let level = app.meters().channel_db(ch).unwrap_or(0);
-                        bridge::meter_bar(ui, bridge::fraction(level));
-                        ui.spacing_mut().slider_width = VOLUME_FADER_LENGTH;
-                        // When linked, the fader is the common level (the louder
-                        // side); the balance offset between the channels is kept.
-                        let mut volume = if linked {
-                            app.pair_levels(ch).0
+            // Volume: the channel meter beside the vertical fader, both the same
+            // height, centred with the dB readout below.
+            ui.vertical_centered(|ui| {
+                ui.label("Volume");
+                ui.horizontal(|ui| {
+                    let level = app.meters().channel_db(ch).unwrap_or(0);
+                    bridge::meter_bar(ui, bridge::fraction(level));
+                    ui.spacing_mut().slider_width = VOLUME_FADER_LENGTH;
+                    // When linked, the fader is the common level (the louder
+                    // side); the balance offset between the channels is kept.
+                    let mut volume = if linked {
+                        app.pair_levels(ch).0
+                    } else {
+                        app.cached_int(Control::LineVolume, ch)
+                    };
+                    let fader = egui::Slider::new(&mut volume, 0..=133)
+                        .vertical()
+                        .custom_formatter(|n, _| human_text(Control::LineVolume, n))
+                        .custom_parser(|s| parse_human(Control::LineVolume, s));
+                    if ui.add(fader).changed() {
+                        if linked {
+                            let balance = app.pair_levels(ch).1;
+                            app.set_pair_levels(ch, volume, balance);
                         } else {
-                            app.cached_int(Control::LineVolume, ch)
-                        };
-                        let fader = egui::Slider::new(&mut volume, 0..=133)
-                            .vertical()
-                            .custom_formatter(|n, _| human_text(Control::LineVolume, n))
-                            .custom_parser(|s| parse_human(Control::LineVolume, s));
-                        if ui.add(fader).changed() {
-                            if linked {
-                                let balance = app.pair_levels(ch).1;
-                                app.set_pair_levels(ch, volume, balance);
-                            } else {
-                                app.set(Control::LineVolume, ch, Value::Int(volume));
-                            }
+                            app.set(Control::LineVolume, ch, Value::Int(volume));
                         }
-                    });
+                    }
                 });
             });
+            ui.separator();
 
-            // Bottom row: Pan for a single channel, or Balance for a linked
-            // pair. The pair stays panned hard L/R; Balance attenuates one
-            // channel's level (see `App::set_pair_levels`).
+            // Balance for a linked pair, or Pan for a single channel. The pair
+            // stays panned hard L/R; Balance attenuates one channel's level (see
+            // `App::set_pair_levels`).
             ui.horizontal(|ui| {
                 ui.label(if linked { "Balance" } else { "Pan" });
                 ui.spacing_mut().slider_width = INPUT_WIDTH - 130.0;
