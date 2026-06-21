@@ -445,7 +445,7 @@ nothing.
 
 Compressor:: A `Reset` button and an enable checkbox in the title row, a transfer
 curve (input level to output level) with the threshold, ratio, and make-up gain
-applied, a live gain-reduction bar, and the parameters below: threshold, ratio,
+applied, a vertical gain-reduction meter inside the graph, and the parameters below: threshold, ratio,
 and gain on the first row, attack and release on the second. Each is a drag-value
 (drag to change, click to type), except ratio, which is a dropdown of the
 available ratios. `Reset` returns the parameters to their defaults, a 1:1 ratio

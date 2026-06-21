@@ -11,7 +11,7 @@
 )]
 
 use eframe::egui;
-use egui_plot::{Line, Plot, PlotBounds, PlotPoints};
+use egui_plot::{Line, Plot, PlotBounds, PlotPoint, PlotPoints, Polygon, Text};
 use tascam_us16x08::{COMP_RATIO_VALUES, Control, Kind, Value, units};
 
 use crate::app::App;
@@ -331,6 +331,15 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
         })
         .collect();
 
+    // Gain-reduction level (0..=1 of full scale), zero when inactive.
+    let gr = if active {
+        app.meters().reduction_db(ch).map_or(0.0, |g| {
+            (g.max(0) as f32 / METER_FULL_SCALE).clamp(0.0, 1.0)
+        })
+    } else {
+        0.0
+    };
+
     Plot::new("comp_curve")
         .height(130.0)
         .allow_drag(false)
@@ -341,16 +350,21 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
             // the parameters change.
             plot.set_plot_bounds(PlotBounds::from_min_max([-60.0, -60.0], [0.0, 0.0]));
             plot.line(Line::new(PlotPoints::from(points)));
-        });
 
-    let fraction = if active {
-        app.meters().reduction_db(ch).map_or(0.0, |gr| {
-            (gr.max(0) as f32 / METER_FULL_SCALE).clamp(0.0, 1.0)
-        })
-    } else {
-        0.0
-    };
-    ui.add(egui::ProgressBar::new(fraction).text("gain reduction"));
+            // Gain-reduction meter: a vertical bar at the right edge growing
+            // down from 0 dB; full scale spans the whole height.
+            let depth = -60.0 * f64::from(gr);
+            let bar = Polygon::new(PlotPoints::from(vec![
+                [-3.0, 0.0],
+                [0.0, 0.0],
+                [0.0, depth],
+                [-3.0, depth],
+            ]))
+            .fill_color(egui::Color32::from_rgba_unmultiplied(230, 120, 60, 160))
+            .stroke(egui::Stroke::NONE);
+            plot.polygon(bar);
+            plot.text(Text::new(PlotPoint::new(-1.5, -57.0), "GR"));
+        });
 }
 
 /// A box title row: the title, then a right-aligned `Enable` checkbox with a
