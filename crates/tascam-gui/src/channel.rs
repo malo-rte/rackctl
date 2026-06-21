@@ -226,12 +226,17 @@ fn comp_box(app: &mut App, ui: &mut egui::Ui, ch: u32) {
         ui.vertical(|ui| {
             title_row(app, ui, "Compressor", Control::CompSwitch, &COMP_RESET, ch);
             comp_curve(app, ui, ch);
-            egui::Grid::new("comp_grid").num_columns(2).show(ui, |ui| {
-                control(app, ui, "Threshold", Control::CompThreshold, ch);
-                control(app, ui, "Ratio", Control::CompRatio, ch);
-                control(app, ui, "Attack", Control::CompAttack, ch);
-                control(app, ui, "Release", Control::CompRelease, ch);
-                control(app, ui, "Gain", Control::CompGain, ch);
+            // Threshold / Ratio / Gain on the first row, Attack / Release on the
+            // second. Ratio is an enum, so it stays a dropdown.
+            egui::Grid::new("comp_grid").num_columns(3).show(ui, |ui| {
+                comp_cell(app, ui, "Threshold", Control::CompThreshold, ch);
+                comp_cell(app, ui, "Ratio", Control::CompRatio, ch);
+                comp_cell(app, ui, "Gain", Control::CompGain, ch);
+                ui.end_row();
+                comp_cell(app, ui, "Attack", Control::CompAttack, ch);
+                comp_cell(app, ui, "Release", Control::CompRelease, ch);
+                ui.label("");
+                ui.end_row();
             });
         });
     });
@@ -388,48 +393,40 @@ fn reset_controls(app: &mut App, controls: &[Control], ch: u32) {
 }
 
 /// Render one control as the widget its kind calls for, writing through on edit.
-fn control(app: &mut App, ui: &mut egui::Ui, label: &str, control: Control, index: u32) {
-    // One grid row: label in column 1, the widget in column 2.
-    ui.label(label);
-    match control.kind() {
-        Kind::Bool => {
-            let mut value = app.cached_bool(control, index);
-            if ui.checkbox(&mut value, "").changed() {
-                app.set(control, index, Value::Bool(value));
-            }
+fn comp_cell(app: &mut App, ui: &mut egui::Ui, label: &str, control: Control, index: u32) {
+    ui.vertical(|ui| {
+        ui.label(label);
+        match control.kind() {
+            Kind::Int { .. } => drag_value(app, ui, control, index),
+            Kind::Enum { .. } => enum_combo(app, ui, control, index),
+            // The compressor grid holds only int and enum parameters.
+            _ => {}
         }
-        Kind::Int { min, max, .. } => {
-            let mut value = app.cached_int(control, index);
-            let slider = egui::Slider::new(&mut value, min..=max)
-                .custom_formatter(move |n, _| human_text(control, n))
-                .custom_parser(move |s| parse_human(control, s));
-            if ui.add(slider).changed() {
-                app.set(control, index, Value::Int(value));
+    });
+}
+
+/// Render an enum control as a dropdown of its labels.
+fn enum_combo(app: &mut App, ui: &mut egui::Ui, control: Control, index: u32) {
+    let Kind::Enum { values, .. } = control.kind() else {
+        return;
+    };
+    let current = app.cached_int(control, index);
+    let mut selected = current;
+    let text = usize::try_from(current)
+        .ok()
+        .and_then(|i| values.get(i))
+        .copied()
+        .unwrap_or("?");
+    egui::ComboBox::from_id_salt((control, index))
+        .selected_text(text)
+        .show_ui(ui, |ui| {
+            for (i, name) in values.iter().enumerate() {
+                ui.selectable_value(&mut selected, i as i32, *name);
             }
-        }
-        Kind::Enum { values, .. } => {
-            let current = app.cached_int(control, index);
-            let mut selected = current;
-            let text = usize::try_from(current)
-                .ok()
-                .and_then(|i| values.get(i))
-                .copied()
-                .unwrap_or("?");
-            egui::ComboBox::from_id_salt((control, index))
-                .selected_text(text)
-                .show_ui(ui, |ui| {
-                    for (i, name) in values.iter().enumerate() {
-                        ui.selectable_value(&mut selected, i as i32, *name);
-                    }
-                });
-            if selected != current {
-                app.set(control, index, Value::Enum(selected));
-            }
-        }
-        // Meter (and any future kind) is not an editable scalar control.
-        _ => {}
+        });
+    if selected != current {
+        app.set(control, index, Value::Enum(selected));
     }
-    ui.end_row();
 }
 
 /// Render one integer control as a bare drag-value cell (no label, no row end),
