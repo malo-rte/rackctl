@@ -11,7 +11,7 @@
 )]
 
 use eframe::egui;
-use egui_plot::{Line, LineStyle, Plot, PlotBounds, PlotPoint, PlotPoints, Polygon, Text};
+use egui_plot::{Line, LineStyle, Plot, PlotPoint, PlotPoints, Polygon, Text};
 use tascam_us16x08::{COMP_RATIO_VALUES, Control, Kind, Value, units};
 
 use crate::app::App;
@@ -300,6 +300,7 @@ fn eq_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
         .include_y(-15.0)
         .include_y(15.0)
         .x_axis_formatter(|mark, _| hz_label(mark.value))
+        .y_axis_formatter(|mark, _| format!("{:.0} dB", mark.value))
         .show(ui, |plot| plot.line(Line::new(PlotPoints::from(points))));
 }
 
@@ -341,12 +342,16 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
         .allow_drag(false)
         .allow_zoom(false)
         .allow_scroll(false)
+        // Fix the scale to -60..0 dB on both axes via the builder (not
+        // set_plot_bounds in the closure) so the axis tick labels render.
+        .include_x(-60.0)
+        .include_x(0.0)
+        .include_y(-60.0)
+        .include_y(0.0)
+        .set_margin_fraction(egui::vec2(0.0, 0.0))
         .x_axis_formatter(|mark, _| format!("{:.0} dB", mark.value))
         .y_axis_formatter(|mark, _| format!("{:.0} dB", mark.value))
         .show(ui, |plot| {
-            // Fixed scale: input/output -60..0 dB, so the view does not jump as
-            // the parameters change.
-            plot.set_plot_bounds(PlotBounds::from_min_max([-60.0, -60.0], [0.0, 0.0]));
             // Transfer curve as a region filled down to the graph floor.
             plot.line(
                 Line::new(PlotPoints::from(points))
