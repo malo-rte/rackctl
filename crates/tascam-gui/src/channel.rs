@@ -382,19 +382,19 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
                     .style(LineStyle::dashed_loose()),
             );
 
-            // Gain-reduction meter: a vertical bar at the right edge growing
-            // down from 0 dB; full scale spans the whole height.
+            // Gain-reduction meter: a thin vertical bar flush to the right edge,
+            // growing down from 0 dB; full scale spans the whole height.
             let depth = -60.0 * f64::from(gr);
             let bar = Polygon::new(PlotPoints::from(vec![
-                [-3.0, 0.0],
+                [-1.5, 0.0],
                 [0.0, 0.0],
                 [0.0, depth],
-                [-3.0, depth],
+                [-1.5, depth],
             ]))
-            .fill_color(egui::Color32::from_rgba_unmultiplied(230, 120, 60, 160))
+            .fill_color(egui::Color32::from_rgba_unmultiplied(230, 120, 60, 200))
             .stroke(egui::Stroke::NONE);
             plot.polygon(bar);
-            plot.text(Text::new(PlotPoint::new(-1.5, -57.0), "GR"));
+            plot.text(Text::new(PlotPoint::new(-4.5, -57.0), "GR"));
         });
 }
 
