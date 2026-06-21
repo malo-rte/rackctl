@@ -341,6 +341,8 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
         .allow_drag(false)
         .allow_zoom(false)
         .allow_scroll(false)
+        .x_axis_formatter(|mark, _| format!("{:.0} dB", mark.value))
+        .y_axis_formatter(|mark, _| format!("{:.0} dB", mark.value))
         .show(ui, |plot| {
             // Fixed scale: input/output -60..0 dB, so the view does not jump as
             // the parameters change.
