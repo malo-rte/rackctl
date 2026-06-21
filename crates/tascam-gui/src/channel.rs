@@ -168,24 +168,52 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
     });
 }
 
-/// The EQ box: response graph on top, then the band controls.
+/// The EQ box: response graph on top, then the bands as a Gain / Freq / Q grid
+/// (one row per band, high at the top). The low and high bands are shelves with
+/// no Q, so those cells are blank.
 fn eq_box(app: &mut App, ui: &mut egui::Ui, ch: u32) {
+    /// `(label, gain, freq, optional Q)` per band, high to low.
+    const BANDS: [(&str, Control, Control, Option<Control>); 4] = [
+        ("High", Control::EqHighVolume, Control::EqHighFreq, None),
+        (
+            "Mid-high",
+            Control::EqMidHighVolume,
+            Control::EqMidHighFreq,
+            Some(Control::EqMidHighQ),
+        ),
+        (
+            "Mid-low",
+            Control::EqMidLowVolume,
+            Control::EqMidLowFreq,
+            Some(Control::EqMidLowQ),
+        ),
+        ("Low", Control::EqLowVolume, Control::EqLowFreq, None),
+    ];
+
     ui.group(|ui| {
         ui.set_width(DSP_WIDTH);
         ui.vertical(|ui| {
             title_row(app, ui, "EQ", Control::EqSwitch, &EQ_RESET, ch);
             eq_curve(app, ui, ch);
-            egui::Grid::new("eq_grid").num_columns(2).show(ui, |ui| {
-                control(app, ui, "Low gain", Control::EqLowVolume, ch);
-                control(app, ui, "Low freq", Control::EqLowFreq, ch);
-                control(app, ui, "Mid-low gain", Control::EqMidLowVolume, ch);
-                control(app, ui, "Mid-low freq", Control::EqMidLowFreq, ch);
-                control(app, ui, "Mid-low Q", Control::EqMidLowQ, ch);
-                control(app, ui, "Mid-high gain", Control::EqMidHighVolume, ch);
-                control(app, ui, "Mid-high freq", Control::EqMidHighFreq, ch);
-                control(app, ui, "Mid-high Q", Control::EqMidHighQ, ch);
-                control(app, ui, "High gain", Control::EqHighVolume, ch);
-                control(app, ui, "High freq", Control::EqHighFreq, ch);
+            egui::Grid::new("eq_grid").num_columns(4).show(ui, |ui| {
+                ui.label("");
+                ui.label("Gain");
+                ui.label("Freq");
+                ui.label("Q");
+                ui.end_row();
+
+                for (label, gain, freq, q) in BANDS {
+                    ui.label(label);
+                    drag_value(app, ui, gain, ch);
+                    drag_value(app, ui, freq, ch);
+                    match q {
+                        Some(q) => drag_value(app, ui, q, ch),
+                        None => {
+                            ui.label("");
+                        }
+                    }
+                    ui.end_row();
+                }
             });
         });
     });
@@ -402,6 +430,22 @@ fn control(app: &mut App, ui: &mut egui::Ui, label: &str, control: Control, inde
         _ => {}
     }
     ui.end_row();
+}
+
+/// Render one integer control as a bare drag-value cell (no label, no row end),
+/// in its display units. Used by the EQ band grid.
+fn drag_value(app: &mut App, ui: &mut egui::Ui, control: Control, index: u32) {
+    let Kind::Int { min, max, .. } = control.kind() else {
+        return;
+    };
+    let mut value = app.cached_int(control, index);
+    let widget = egui::DragValue::new(&mut value)
+        .range(min..=max)
+        .custom_formatter(move |n, _| human_text(control, n))
+        .custom_parser(move |s| parse_human(control, s));
+    if ui.add(widget).changed() {
+        app.set(control, index, Value::Int(value));
+    }
 }
 
 /// Format a raw control value in its display units for a slider readout. Thin

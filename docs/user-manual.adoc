@@ -434,10 +434,11 @@ volume fader with its level meter, and a pan slider along the bottom. When the
 pair is linked, the pan slider becomes a balance (see <<sec-gui-link>>).
 
 EQ:: A `Reset` button and an enable checkbox in the title row, a response curve
-showing the combined effect of the four bands, and the band controls below: gain
-and frequency for each of the low, mid-low, mid-high, and high bands, plus a Q
-control for the two mid bands. `Reset` returns the band controls to their
-defaults, which gives a flat response. The low and high bands are shelving filters; the two mid bands are
+showing the combined effect of the four bands, and below it the bands as a Gain /
+Freq / Q grid, one row per band (high at the top, low at the bottom). Drag a value
+to change it, or click to type. The low and high bands are shelving filters with
+no Q, so those cells are blank; the two mid bands are peaking filters with a Q.
+`Reset` returns the band controls to their defaults, which gives a flat response. The low and high bands are shelving filters; the two mid bands are
 peaking filters. The curve is indicative of the response shape. When the EQ is
 disabled (or `DSP bypass` is on) the curve is flat, since the EQ is doing
 nothing.
