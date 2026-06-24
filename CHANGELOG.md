@@ -9,10 +9,11 @@ version.
 
 ### Added
 
-- **GUI** — the mixer now survives the interface being unplugged. When device
-  reads fail, it shows a "reconnecting" status and retries about once a second;
-  on replug it reopens the card and re-applies the on-screen mix (which the
-  re-enumerated device would otherwise have reset to its defaults).
+- **GUI** — the mixer now survives the interface being unplugged. While the
+  device is gone the controls are hidden behind a centred "Tascam US-16x08 is
+  disconnected" notice and a "reconnecting" status; it retries about once a
+  second, and on replug reopens the card and re-applies the on-screen mix (which
+  the re-enumerated device would otherwise have reset to its defaults).
 
 ## [0.1.0] - 2026-06-21
 

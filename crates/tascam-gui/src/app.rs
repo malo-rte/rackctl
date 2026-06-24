@@ -444,19 +444,18 @@ impl eframe::App for App {
             } else if prev {
                 self.nav(false);
             }
-            if mute_channel {
+            // Mute shortcuts write to the device, so ignore them while it is
+            // gone; quit and channel navigation stay available.
+            if mute_channel && self.connected {
                 let ch = u32::from(self.selected);
                 let muted = self.cached_bool(Control::MuteSwitch, ch);
                 self.set(Control::MuteSwitch, ch, Value::Bool(!muted));
             }
-            if mute_master {
+            if mute_master && self.connected {
                 let muted = self.cached_bool(Control::MasterMute, 0);
                 self.set(Control::MasterMute, 0, Value::Bool(!muted));
             }
         }
-
-        egui::TopBottomPanel::top("bridge").show(ctx, |ui| bridge::show(self, ui));
-        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| self.toolbar(ui));
 
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             ui.horizontal(|ui| {
@@ -468,14 +467,30 @@ impl eframe::App for App {
             });
         });
 
-        egui::SidePanel::right("output").show(ctx, |ui| output::show(self, ui));
-
-        egui::CentralPanel::default().show(ctx, |ui| {
-            egui::ScrollArea::both().show(ui, |ui| match self.tab {
-                Tab::Channel => channel::show(self, ui),
-                Tab::Routing => routing::show(self, ui),
+        if self.connected {
+            // The mixer surface: bridge, toolbar, output, and the active tab.
+            egui::TopBottomPanel::top("bridge").show(ctx, |ui| bridge::show(self, ui));
+            egui::TopBottomPanel::top("toolbar").show(ctx, |ui| self.toolbar(ui));
+            egui::SidePanel::right("output").show(ctx, |ui| output::show(self, ui));
+            egui::CentralPanel::default().show(ctx, |ui| {
+                egui::ScrollArea::both().show(ui, |ui| match self.tab {
+                    Tab::Channel => channel::show(self, ui),
+                    Tab::Routing => routing::show(self, ui),
+                });
             });
-        });
+        } else {
+            // Hide the controls (they would drive a dead handle) and show only a
+            // centred notice until the device comes back.
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.centered_and_justified(|ui| {
+                    ui.label(
+                        egui::RichText::new("Tascam US-16x08 is disconnected")
+                            .size(28.0)
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                });
+            });
+        }
 
         ctx.request_repaint_after(METER_INTERVAL);
     }
