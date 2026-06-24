@@ -7,6 +7,7 @@ mod config;
 mod curves;
 mod output;
 mod routing;
+mod scenes;
 
 use anyhow::Result;
 use tascam_us16x08::{Backend, MockBackend, Us16x08};

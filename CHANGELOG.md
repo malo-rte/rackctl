@@ -7,6 +7,13 @@ version.
 
 ## [Unreleased]
 
+### Added
+
+- **GUI** — a *Scenes* tab: save the whole mixer as a named snapshot and recall
+  it later. Scenes are stored as ordinary preset files in the settings directory
+  (no fixed limit), each with Load and Delete; equivalent to a hardware mixer's
+  scene memories, kept on the host.
+
 ## [0.2.1] - 2026-06-24
 
 ### Fixed

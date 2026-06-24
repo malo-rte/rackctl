@@ -1,7 +1,7 @@
 //! The eframe application shell: device ownership, control-state cache, layout.
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use eframe::egui;
@@ -11,13 +11,14 @@ use tascam_us16x08::{
 };
 
 use crate::config::{self, GuiConfig};
-use crate::{bridge, channel, output, routing};
+use crate::{bridge, channel, output, routing, scenes};
 
 /// Which editor the central panel shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Tab {
     Channel,
     Routing,
+    Scenes,
 }
 
 /// Meter repaint cadence (~30 Hz).
@@ -71,6 +72,10 @@ pub(crate) struct App {
     zoom: f32,
     /// Persisted window inner size (logical points), saved with the default.
     window: Option<[f32; 2]>,
+    /// Name being typed for a new scene in the Scenes tab.
+    pub(crate) scene_name: String,
+    /// A scene awaiting delete confirmation in the Scenes tab.
+    pub(crate) pending_delete: Option<PathBuf>,
     status: String,
 }
 
@@ -105,6 +110,8 @@ impl App {
             links: cfg.links,
             zoom: cfg.zoom,
             window: cfg.window,
+            scene_name: String::new(),
+            pending_delete: None,
             status: String::new(),
         };
         if connected {
@@ -416,12 +423,47 @@ impl App {
         (self.zoom, self.window)
     }
 
+    /// Save the current whole mixer as a scene named `name` in the scenes
+    /// directory. The name is sanitised into a file name; an existing scene of
+    /// the same name is overwritten.
+    pub(crate) fn save_scene(&mut self, name: &str) {
+        let Some(dir) = config::scenes_dir() else {
+            "save failed: no config directory".clone_into(&mut self.status);
+            return;
+        };
+        let file = sanitize_scene_name(name);
+        if file.is_empty() {
+            "save failed: empty scene name".clone_into(&mut self.status);
+            return;
+        }
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            self.status = format!("save failed: {e}");
+            return;
+        }
+        let path = dir.join(format!("{file}.json"));
+        self.save_preset(&path, None);
+    }
+
+    /// Load a saved scene (whole mixer) from `path`.
+    pub(crate) fn load_scene(&mut self, path: &Path) {
+        self.load_preset(path, None);
+    }
+
+    /// Delete a saved scene file.
+    pub(crate) fn delete_scene(&mut self, path: &Path) {
+        self.status = match std::fs::remove_file(path) {
+            Ok(()) => format!("deleted {}", scene_label(path)),
+            Err(e) => format!("delete failed: {e}"),
+        };
+    }
+
     /// Tab selector and the Presets menu. (The global DSP switches live in the
     /// OUTPUT panel.)
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.tab, Tab::Channel, "Channel");
             ui.selectable_value(&mut self.tab, Tab::Routing, "Routing");
+            ui.selectable_value(&mut self.tab, Tab::Scenes, "Scenes");
             ui.separator();
             self.presets_menu(ui);
         });
@@ -534,6 +576,7 @@ impl eframe::App for App {
                 egui::ScrollArea::both().show(ui, |ui| match self.tab {
                     Tab::Channel => channel::show(self, ui),
                     Tab::Routing => routing::show(self, ui),
+                    Tab::Scenes => scenes::show(self, ui),
                 });
             });
         } else {
@@ -611,6 +654,48 @@ fn levels_to_balance(left: i32, right: i32) -> (i32, i32) {
         std::cmp::Ordering::Equal => 127,
     };
     (common, balance.clamp(0, 254))
+}
+
+/// The saved scenes (whole-mixer presets) in the scenes directory, sorted by
+/// name. Each is a `*.json` file saved from the Scenes tab.
+pub(crate) fn scene_paths() -> Vec<PathBuf> {
+    let Some(dir) = config::scenes_dir() else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut paths: Vec<PathBuf> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|ext| ext == "json"))
+        .collect();
+    paths.sort();
+    paths
+}
+
+/// The display name of a scene file: its stem without the `.json` extension.
+pub(crate) fn scene_label(path: &Path) -> String {
+    path.file_stem().map_or_else(
+        || path.display().to_string(),
+        |s| s.to_string_lossy().into_owned(),
+    )
+}
+
+/// Turn a user-typed scene name into a safe file stem: keep letters, digits,
+/// spaces, dashes and underscores; replace anything else (path separators,
+/// dots) with an underscore; trim surrounding whitespace.
+fn sanitize_scene_name(name: &str) -> String {
+    name.trim()
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 /// Native "save file" dialog for a JSON preset.

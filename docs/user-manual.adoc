@@ -475,8 +475,9 @@ becoming ready, add `ExecStartPre=/bin/sleep 1` to the service.
 
 `tascam-mixer` opens a single window: a meter bridge across the top, a focused
 channel (or linked pair) editor in the centre, an output panel on the right, and
-a toolbar to switch to the routing tab and manage presets. The full list of
-panels and controls is in <<sec-gui-ref>>.
+a toolbar to switch between the channel editor, the routing tab, and the scenes
+tab, and to manage presets. The full list of panels and controls is in
+<<sec-gui-ref>>.
 
 [[sec-gui-bridge]]
 === The meter bridge
@@ -533,6 +534,25 @@ buttons (see <<sec-gui-presets>>). The master mute is in the meter bridge.
 The toolbar switches between the *Channel* editor and the *Routing* tab. The
 routing tab has one row per physical output (`LINE OUT 1`...`LINE OUT 8`), each
 selecting one source: `Master L`, `Master R`, or one of `Output 1`...`Output 8`.
+
+[[sec-gui-scenes]]
+=== The scenes tab
+
+The toolbar's *Scenes* tab keeps a list of saved whole-mixer snapshots -- like
+the recall scenes of a hardware mixer, but stored as ordinary preset files in the
+settings directory, with no fixed limit on how many.
+
+To save the current mixer, type a name and click *Save current mix* (or press
+Enter); the snapshot is written to a `<name>.json` file in the scenes directory.
+Saving with an existing name overwrites that scene. Each saved scene appears as a
+row with *Load*, which applies it to the whole mixer, and *Delete*, which removes
+the file after a confirmation.
+
+A scene holds the same whole-mixer state as a mixer preset (master, routing, and
+all 16 channel strips); it does not carry the GUI-only stereo-link grouping, zoom,
+or window size. Scenes are independent of the shared default preset
+(<<sec-gui-presets>>): the default is the one applied automatically on connect,
+while scenes are recalled by hand.
 
 [[sec-gui-link]]
 === Stereo link
@@ -657,8 +677,9 @@ A Lua-configured Hyprland uses the equivalent
 | Area | Contents
 
 | Meter bridge (top) | 16 channel columns (number, level meter, mute) and the master level meters with a mute button, always visible. Click a number to focus that channel.
-| Toolbar | `Channel` / `Routing` tab buttons and the `Presets` menu.
+| Toolbar | `Channel` / `Routing` / `Scenes` tab buttons and the `Presets` menu.
 | Channel editor (centre) | INPUT, EQ, and Compressor boxes for the focused channel or linked pair.
+| Scenes tab (centre) | A name field with `Save current mix`, and a list of saved scenes each with `Load` and `Delete`.
 | Output panel (right) | Master fader, `DSP bypass` and `Buss out` switches, `Save default` / `Load default` buttons.
 | Status line (bottom) | The active device and the most recent error or result message.
 |===
@@ -879,6 +900,9 @@ mock device:: An in-memory stand-in for the hardware, selected with `--mock`, so
 the tools run with no card attached.
 route:: The per-output control that selects which source a physical line output
 carries.
+scene:: A named whole-mixer snapshot saved in the settings directory and recalled
+by hand from the GUI's scenes tab. The host-side equivalent of a hardware mixer's
+scene memory.
 scope:: Whether a control is global, per channel, or per output.
 strip preset:: A saved file holding one channel's controls, applicable to any
 channel.
