@@ -24,7 +24,6 @@ tempfile = "3"
 eframe = "0.29"
 egui = "0.29"
 egui_plot = "0.29"
-rfd = "0.15"
 directories = "5"
 
 # rust-coding-rules RS-3/RS-4/RS-10/RS-12/RS-30/RS-52/RS-90 — drop-in lint table.

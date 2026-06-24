@@ -23,7 +23,6 @@ tascam-us16x08 = { path = "../tascam-us16x08", default-features = false }
 eframe.workspace = true
 egui.workspace = true
 egui_plot.workspace = true
-rfd.workspace = true
 directories.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true

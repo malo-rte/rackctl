@@ -18,6 +18,11 @@ version.
   directory; saves from the focused channel and loads onto it, so it doubles as a
   quick way to copy settings between channels.
 
+### Removed
+
+- **GUI** — the toolbar's *Presets* file-dialog menu, superseded by the Scenes
+  and Channel-presets tabs. (Drops the `rfd` dependency.)
+
 ### Fixed
 
 - **GUI** — the stereo-link grouping is now saved inside every whole-mixer preset

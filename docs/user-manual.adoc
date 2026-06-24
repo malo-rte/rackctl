@@ -479,8 +479,8 @@ becoming ready, add `ExecStartPre=/bin/sleep 1` to the service.
 `tascam-mixer` opens a single window: a meter bridge across the top, a focused
 channel (or linked pair) editor in the centre, an output panel on the right, and
 a toolbar to switch between the channel editor, the routing tab, the scenes tab,
-and the channel-presets tab, and to manage presets. The full list of panels and
-controls is in <<sec-gui-ref>>.
+and the channel-presets tab. The full list of panels and controls is in
+<<sec-gui-ref>>.
 
 [[sec-gui-bridge]]
 === The meter bridge
@@ -585,13 +585,11 @@ Unticking the box unlinks the pair. The link state is saved between sessions. Se
 <<sec-link-concept>> for the concept.
 
 [[sec-gui-presets]]
-=== Presets and the default preset
+=== The default preset
 
-The toolbar's *Presets* menu saves and loads presets through a file dialog:
-
-* *Save mixer* / *Load mixer* write or restore the whole mixer.
-* *Save channel N strip* / *Load strip into channel N* write or apply the focused
-  channel's strip.
+Named presets are saved and recalled from their tabs: whole-mixer snapshots from
+the <<sec-gui-scenes,Scenes>> tab, and per-channel strips from the
+<<sec-gui-channel-presets,Channel presets>> tab.
 
 The output panel's *Save default* and *Load default* buttons capture the current
 mixer as the shared default preset, or restore it. This is the same default file
@@ -695,7 +693,7 @@ A Lua-configured Hyprland uses the equivalent
 | Area | Contents
 
 | Meter bridge (top) | 16 channel columns (number, level meter, mute) and the master level meters with a mute button, always visible. Click a number to focus that channel.
-| Toolbar | `Channel` / `Routing` / `Scenes` / `Channel presets` tab buttons and the `Presets` menu.
+| Toolbar | `Channel` / `Routing` / `Scenes` / `Channel presets` tab buttons.
 | Channel editor (centre) | INPUT, EQ, and Compressor boxes for the focused channel or linked pair.
 | Scenes tab (centre) | A name field with `Save current mix`, and a list of saved scenes each with `Save` (overwrite), `Load`, and `Delete`.
 | Channel presets tab (centre) | A name field with `Save this channel`, and a list of saved channel presets each with `Save` (overwrite), `Load`, and `Delete`.

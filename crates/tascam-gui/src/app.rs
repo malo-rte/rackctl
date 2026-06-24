@@ -539,54 +539,14 @@ impl App {
         };
     }
 
-    /// Tab selector and the Presets menu. (The global DSP switches live in the
-    /// OUTPUT panel.)
+    /// Tab selector. (Presets live in the Scenes and Channel-presets tabs; the
+    /// global DSP switches live in the OUTPUT panel.)
     fn toolbar(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.tab, Tab::Channel, "Channel");
             ui.selectable_value(&mut self.tab, Tab::Routing, "Routing");
             ui.selectable_value(&mut self.tab, Tab::Scenes, "Scenes");
             ui.selectable_value(&mut self.tab, Tab::Strips, "Channel presets");
-            ui.separator();
-            self.presets_menu(ui);
-        });
-    }
-
-    /// The Presets menu: save/load the whole mixer or the selected channel strip.
-    fn presets_menu(&mut self, ui: &mut egui::Ui) {
-        let channel = u32::from(self.selected);
-        ui.menu_button("Presets", |ui| {
-            if ui.button("Save mixer...").clicked() {
-                ui.close_menu();
-                if let Some(path) = save_dialog("mixer.json") {
-                    self.save_preset(&path, None);
-                }
-            }
-            if ui.button("Load mixer...").clicked() {
-                ui.close_menu();
-                if let Some(path) = open_dialog() {
-                    self.load_preset(&path, None);
-                }
-            }
-            ui.separator();
-            if ui
-                .button(format!("Save channel {} strip...", channel + 1))
-                .clicked()
-            {
-                ui.close_menu();
-                if let Some(path) = save_dialog("strip.json") {
-                    self.save_preset(&path, Some(channel));
-                }
-            }
-            if ui
-                .button(format!("Load strip into channel {}...", channel + 1))
-                .clicked()
-            {
-                ui.close_menu();
-                if let Some(path) = open_dialog() {
-                    self.load_preset(&path, Some(channel));
-                }
-            }
         });
     }
 }
@@ -795,21 +755,6 @@ fn sanitize_name(name: &str) -> String {
             }
         })
         .collect()
-}
-
-/// Native "save file" dialog for a JSON preset.
-fn save_dialog(default_name: &str) -> Option<std::path::PathBuf> {
-    rfd::FileDialog::new()
-        .add_filter("JSON preset", &["json"])
-        .set_file_name(default_name)
-        .save_file()
-}
-
-/// Native "open file" dialog for a JSON preset.
-fn open_dialog() -> Option<std::path::PathBuf> {
-    rfd::FileDialog::new()
-        .add_filter("JSON preset", &["json"])
-        .pick_file()
 }
 
 #[cfg(test)]
