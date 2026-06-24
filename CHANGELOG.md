@@ -7,6 +7,13 @@ version.
 
 ## [Unreleased]
 
+### Added
+
+- **GUI** — the mixer now survives the interface being unplugged. When device
+  reads fail, it shows a "reconnecting" status and retries about once a second;
+  on replug it reopens the card and re-applies the on-screen mix (which the
+  re-enumerated device would otherwise have reset to its defaults).
+
 ## [0.1.0] - 2026-06-21
 
 Initial release: a Rust rewrite of the Tascam US-16x08 DSP mixer, as a workspace

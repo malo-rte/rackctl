@@ -24,11 +24,25 @@ const METER_INTERVAL: Duration = Duration::from_millis(33);
 /// How often to re-read controls so external changes (front panel, another
 /// client) show up.
 const WATCH_INTERVAL_SECS: f64 = 0.5;
+/// How often to try reopening the device after it has gone away (e.g. the USB
+/// interface was unplugged). Slow enough not to spin while it is absent.
+const RECONNECT_INTERVAL_SECS: f64 = 1.0;
+
+/// Reopens the device (real hardware or mock). Called to recover after the
+/// device disappears, so the closure can outlive any one connection.
+pub(crate) type Reopen = Box<dyn Fn() -> anyhow::Result<Us16x08<Box<dyn Backend>>>>;
 
 /// The running mixer application. Owns the device on the UI thread.
 pub(crate) struct App {
     device: Us16x08<Box<dyn Backend>>,
     source: &'static str,
+    /// Reopen the backend after a disconnect (USB replug); see [`Reopen`].
+    reopen: Reopen,
+    /// Whether the device is currently reachable. When false, the app polls
+    /// [`Self::try_reconnect`] instead of the device.
+    connected: bool,
+    /// Next time (seconds, eframe clock) to attempt a reconnect.
+    next_reconnect: f64,
     /// Last-known control values, fed by the watcher and by our own writes.
     cache: HashMap<(Control, u32), Value>,
     watcher: Watcher,
@@ -48,7 +62,8 @@ pub(crate) struct App {
 
 impl App {
     /// Build the app around an opened device and seed the control cache.
-    pub(crate) fn new(device: Us16x08<Box<dyn Backend>>, mock: bool) -> Self {
+    /// `reopen` reconnects the same kind of backend after a USB replug.
+    pub(crate) fn new(device: Us16x08<Box<dyn Backend>>, mock: bool, reopen: Reopen) -> Self {
         let cfg = config::load();
         let mut app = Self {
             device,
@@ -57,6 +72,9 @@ impl App {
             } else {
                 "US-16x08 (ALSA)"
             },
+            reopen,
+            connected: true,
+            next_reconnect: 0.0,
             cache: HashMap::new(),
             watcher: Watcher::new(),
             meters: Meters::default(),
@@ -214,6 +232,64 @@ impl App {
         &self.meters
     }
 
+    /// Poll meters and (at the watch cadence) controls. A device read failure
+    /// means the interface has gone away (USB unplug); flip to the disconnected
+    /// state so the app starts trying to reopen it instead of erroring at 30 Hz.
+    fn poll_device(&mut self, now: f64) {
+        match self.device.meters() {
+            Ok(m) => self.meters = m,
+            Err(e) => {
+                self.mark_disconnected(&e.to_string());
+                return;
+            }
+        }
+        if now >= self.next_watch {
+            self.sync_controls();
+            self.next_watch = now + WATCH_INTERVAL_SECS;
+        }
+    }
+
+    /// Record that the device has gone away and schedule an immediate reconnect
+    /// attempt. The cached control values are kept so the mix can be restored.
+    fn mark_disconnected(&mut self, err: &str) {
+        self.connected = false;
+        self.next_reconnect = 0.0;
+        self.meters = Meters::default();
+        self.status = format!("device disconnected ({err}); reconnecting…");
+    }
+
+    /// Try to reopen the device. On success, restore the user's mix (the freshly
+    /// re-enumerated card powers up at its own defaults) and resume polling.
+    fn try_reconnect(&mut self) {
+        match (self.reopen)() {
+            Ok(device) => {
+                self.device = device;
+                self.watcher = Watcher::new();
+                self.connected = true;
+                self.next_watch = 0.0;
+                self.restore_mix();
+                "device reconnected".clone_into(&mut self.status);
+            }
+            Err(_) => {
+                "device disconnected; waiting for it to return…".clone_into(&mut self.status);
+            }
+        }
+    }
+
+    /// Push every cached control value back to the device, then re-seed the
+    /// watcher and cache from what the device now reports. Used after a replug so
+    /// the restored card matches the mix shown in the UI.
+    fn restore_mix(&mut self) {
+        let entries: Vec<((Control, u32), Value)> =
+            self.cache.iter().map(|(&k, &v)| (k, v)).collect();
+        for ((control, index), value) in entries {
+            // A control the restored device does not expose is simply skipped;
+            // the following re-seed corrects the cache to match the hardware.
+            let _ = self.device.set(control, index, value);
+        }
+        self.sync_controls();
+    }
+
     /// Capture the whole mixer (or one channel's strip) to a JSON file.
     fn save_preset(&mut self, path: &Path, channel: Option<u32>) {
         let captured = match channel {
@@ -334,14 +410,12 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        match self.device.meters() {
-            Ok(m) => self.meters = m,
-            Err(e) => self.status = format!("device error: {e}"),
-        }
         let now = ctx.input(|i| i.time);
-        if now >= self.next_watch {
-            self.sync_controls();
-            self.next_watch = now + WATCH_INTERVAL_SECS;
+        if self.connected {
+            self.poll_device(now);
+        } else if now >= self.next_reconnect {
+            self.try_reconnect();
+            self.next_reconnect = now + RECONNECT_INTERVAL_SECS;
         }
 
         // Keyboard shortcuts, only when no widget (e.g. a slider) holds keyboard

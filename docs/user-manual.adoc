@@ -761,6 +761,12 @@ Meters do not move in the GUI:: Another program may be reading the meters. Close
 any running `tascamctl monitor` against the same device; run one meter reader at
 a time.
 
+The interface was unplugged:: The GUI keeps running. It shows a "reconnecting"
+status while the card is absent and reopens it automatically once it returns
+(about a second after the card re-enumerates). On reconnect it re-applies the mix
+shown on screen, since the device powers up at its own defaults. The `tascamctl`
+commands are one-shot and instead exit with an error if the card is gone.
+
 A value will not go where expected:: Integer values are in display units and are
 clamped to each control's range (see <<sec-appendix-catalog>>). A bare leading `-`
 is read as a relative adjust; for a negative absolute value, add a unit suffix
