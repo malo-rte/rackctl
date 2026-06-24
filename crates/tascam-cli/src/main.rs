@@ -6,6 +6,7 @@ mod value;
 use std::process::ExitCode;
 
 use anyhow::Result;
+use clap::builder::styling::{AnsiColor, Styles};
 use clap::{Parser, Subcommand};
 use tascam_us16x08::{Backend, MockBackend, Us16x08};
 
@@ -26,7 +27,8 @@ Controls are addressed by a short key (run `list` to see them all) and, for \
 per-channel and per-output controls, a 0-based index given with --channel. \
 Values read and write in display units, such as dB, Hz, ms, and pan percent.",
     after_help = EXAMPLES,
-    propagate_version = true
+    propagate_version = true,
+    styles = HELP_STYLES
 )]
 struct Cli {
     /// Use an in-memory mock device instead of real hardware.
@@ -36,6 +38,17 @@ struct Cli {
     #[command(subcommand)]
     command: Command,
 }
+
+/// Colour scheme for help and error output. clap auto-disables colour when the
+/// output is not a terminal (piped or redirected), so scripts see plain text.
+const HELP_STYLES: Styles = Styles::styled()
+    .header(AnsiColor::Green.on_default().bold())
+    .usage(AnsiColor::Green.on_default().bold())
+    .literal(AnsiColor::Cyan.on_default().bold())
+    .placeholder(AnsiColor::Cyan.on_default())
+    .error(AnsiColor::Red.on_default().bold())
+    .valid(AnsiColor::Green.on_default().bold())
+    .invalid(AnsiColor::Yellow.on_default());
 
 /// Examples shown at the foot of `tascamctl --help`.
 const EXAMPLES: &str = "\

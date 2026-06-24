@@ -23,7 +23,8 @@ version.
 
 - **CLI** — clearer `--help`: a short summary and command list with `-h`, fuller
   per-command detail with `--help`, an examples section, and a readable breakdown
-  of the `set` value forms.
+  of the `set` value forms. Help and error output is now colorized on a terminal
+  (and stays plain when piped or redirected).
 
 ### Documentation
 
