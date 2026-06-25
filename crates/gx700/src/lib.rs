@@ -47,6 +47,7 @@ mod patch;
 pub mod monitor;
 pub mod param;
 pub mod sysex;
+pub mod units;
 
 #[cfg(feature = "alsa")]
 pub use backend::RawMidi;

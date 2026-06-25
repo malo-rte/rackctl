@@ -56,7 +56,7 @@ fn parse_enum(values: &[&str], input: &str) -> Result<i32> {
 pub(crate) fn format_value(param: Param, value: Value) -> String {
     match value {
         Value::Bool(b) => b.to_string(),
-        Value::Int(v) => v.to_string(),
+        Value::Int(_) => rackctl_gx700::units::display(param, value),
         Value::Enum(v) => {
             if let Kind::Enum { values, .. } = param.kind() {
                 let label = usize::try_from(v).ok().and_then(|i| values.get(i)).copied();

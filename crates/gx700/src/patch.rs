@@ -135,9 +135,13 @@ impl RawPatch {
             .filter_map(|&c| param::Block::from_base(c).map(param::Block::label))
             .collect();
 
+        let level = param::Param::from_key("output-level").map_or_else(
+            || output_level.to_string(),
+            |p| crate::units::display(p, Value::Int(i32::from(output_level))),
+        );
         let mut out = String::new();
         let _ = writeln!(out, "Patch: {:?}", self.name);
-        let _ = writeln!(out, "  output level: {output_level}");
+        let _ = writeln!(out, "  output level: {level}");
         let _ = writeln!(out, "  chain: {}", chain_labels.join(" > "));
 
         let mut current: Option<&str> = None;
@@ -161,15 +165,14 @@ impl RawPatch {
     }
 }
 
-/// Format a raw device byte for one parameter, by kind.
+/// Format a raw device byte for one parameter in display units.
 fn format_raw(p: param::Param, raw: u8) -> String {
-    match p.kind() {
-        Kind::Bool => if raw == 0 { "off" } else { "on" }.to_owned(),
-        Kind::Int { .. } => raw.to_string(),
-        Kind::Enum { values, .. } => values
-            .get(usize::from(raw))
-            .map_or_else(|| raw.to_string(), |label| (*label).to_owned()),
-    }
+    let value = match p.kind() {
+        Kind::Bool => Value::Bool(raw != 0),
+        Kind::Int { .. } => Value::Int(i32::from(raw)),
+        Kind::Enum { .. } => Value::Enum(i32::from(raw)),
+    };
+    crate::units::display(p, value)
 }
 
 /// A single parameter value as stored in a patch. Enums are kept as their label
