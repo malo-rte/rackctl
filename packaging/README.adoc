@@ -1,0 +1,52 @@
+= Packaging and desktop integration
+
+Distribution assets for the Tascam US-16x08 mixer tools and notes on installing
+them by hand. The Nix flake (`../flake.nix`) wires all of this up automatically;
+the steps here are for packagers and for a manual install.
+
+== Binaries
+
+Build the release binaries and copy them onto the `PATH`:
+
+[source,bash]
+----
+cargo build --release --workspace
+sudo install -Dm755 target/release/tascamctl    /usr/bin/tascamctl
+sudo install -Dm755 target/release/tascam-mixer  /usr/bin/tascam-mixer
+----
+
+== Desktop entry
+
+`tascam-mixer.desktop` launches the GUI from a desktop menu or launcher. Its
+`StartupWMClass` matches the GUI's Wayland `app_id` (`tascam-mixer`), so
+compositors associate the window with the entry.
+
+[source,bash]
+----
+sudo install -Dm644 packaging/tascam-mixer.desktop \
+  /usr/share/applications/tascam-mixer.desktop
+----
+
+The entry references an icon named `tascam-mixer`. Until an icon ships, launchers
+fall back to a generic one; installing a `tascam-mixer.png`/`.svg` into the
+hicolor icon theme (for example
+`/usr/share/icons/hicolor/scalable/apps/tascam-mixer.svg`) makes it appear.
+
+== Shell completions
+
+`tascamctl` generates its own completion scripts, so they always match the
+current commands and flags. Generate and install them for the shells you want:
+
+[source,bash]
+----
+# bash
+tascamctl completions bash | sudo tee /usr/share/bash-completion/completions/tascamctl >/dev/null
+
+# zsh  (a directory on your $fpath)
+tascamctl completions zsh  | sudo tee /usr/share/zsh/site-functions/_tascamctl >/dev/null
+
+# fish
+tascamctl completions fish > ~/.config/fish/completions/tascamctl.fish
+----
+
+Supported shells: `bash`, `zsh`, `fish`, `elvish`, `powershell`.

@@ -14,6 +14,13 @@ version.
   with the Rust toolchain and the eframe system libraries. The package version is
   read from the workspace `Cargo.toml`, and the GUI binary is wrapped so it finds
   the Wayland/GL/xkbcommon libraries it loads at run time.
+- **CLI** — `tascamctl completions <shell>` prints a shell completion script
+  (bash, zsh, fish, elvish, or powershell) generated from the command definition,
+  so it always matches the current commands and flags.
+- **Packaging** — a desktop entry (`packaging/tascam-mixer.desktop`) for launching
+  the GUI from a desktop menu, with `packaging/README.adoc` covering a manual
+  install of the binaries, the desktop entry, and the completions. The Nix package
+  installs the completions and the desktop entry automatically.
 
 ### Changed
 

@@ -7,7 +7,8 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::builder::styling::{AnsiColor, Styles};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
+use clap_complete::Shell;
 use tascam_us16x08::{Backend, MockBackend, Section, Us16x08};
 
 #[cfg(feature = "alsa")]
@@ -162,6 +163,24 @@ enum Command {
         #[arg(long)]
         save: bool,
     },
+    /// Print a shell completion script for tascamctl to standard output.
+    ///
+    /// Redirect it to where your shell looks for completions, for example:
+    ///   tascamctl completions bash | sudo tee /usr/share/bash-completion/completions/tascamctl
+    ///   tascamctl completions fish > ~/.config/fish/completions/tascamctl.fish
+    #[command(verbatim_doc_comment)]
+    Completions {
+        /// Shell to generate the completion script for.
+        #[arg(value_enum)]
+        shell: Shell,
+    },
+}
+
+/// Write the completion script for `shell` to standard output. Backend-free.
+fn print_completions(shell: Shell) {
+    let mut cmd = Cli::command();
+    let name = cmd.get_name().to_string();
+    clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
 }
 
 /// Examples shown at the foot of `tascamctl set --help`.
@@ -241,6 +260,10 @@ fn run_command<B: Backend>(dev: &mut Us16x08<B>, command: Command) -> Result<()>
         } => commands::save(dev, &file, channel, section.into()),
         Command::Load { file, channel } => commands::load(dev, &file, channel),
         Command::Default { save } => commands::default_preset(dev, save),
+        Command::Completions { shell } => {
+            print_completions(shell);
+            Ok(())
+        }
     }
 }
 
@@ -258,6 +281,10 @@ fn run() -> Result<()> {
             return Ok(());
         }
         Command::Info { control } => return commands::info(control),
+        Command::Completions { shell } => {
+            print_completions(*shell);
+            return Ok(());
+        }
         _ => {}
     }
 
