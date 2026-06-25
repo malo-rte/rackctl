@@ -12,6 +12,7 @@ authors = ["Mats Loman <mats.loman@rte.se>"]
 
 [workspace.dependencies]
 rackctl-us16x08 = { path = "crates/us16x08" }
+rackctl-gx700 = { path = "crates/gx700", default-features = false }
 thiserror = "2"
 alsa = "0.9"
 serde = { version = "1", features = ["derive"] }

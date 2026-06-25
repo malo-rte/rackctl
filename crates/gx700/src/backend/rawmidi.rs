@@ -1,0 +1,198 @@
+//! The real MIDI [`Transport`], backed by ALSA's rawmidi interface.
+//!
+//! Opens a `hw:CARD,DEV` rawmidi endpoint for both input and output, writes
+//! Roland DT1/RQ1 `SysEx`, and frames replies with [`crate::sysex::Framer`]. This
+//! file and its port enumeration are manufacturer-independent and are a prime
+//! candidate to lift into a shared `rackctl-core` later.
+//!
+//! This path is exercised only on hardware; CI and tests use the mock.
+
+use std::ffi::CString;
+use std::io::{Read, Write};
+use std::time::Duration;
+
+use ::alsa::Direction;
+use ::alsa::ctl::Ctl;
+use ::alsa::rawmidi::{Iter as RawmidiIter, Rawmidi};
+
+use super::Transport;
+use crate::error::{Error, Result};
+use crate::sysex::{self, DT1, Framer};
+
+/// Default device id used in the Roland `SysEx` header (`F0 41 <dev> 79 ...`).
+///
+/// The GX-700 ships listening on device id `0x00`; firm up if a unit is found
+/// configured otherwise.
+const DEFAULT_DEVICE_ID: u8 = 0x00;
+
+/// Pause between non-blocking read polls while waiting for a reply.
+const POLL_INTERVAL: Duration = Duration::from_millis(1);
+
+/// How many [`POLL_INTERVAL`] polls to wait for a DT1 reply before giving up
+/// (about 500 ms). A bounded poll count avoids reaching for an injectable
+/// clock on this hardware-only path.
+const REPLY_POLLS: u32 = 500;
+
+/// A live connection to a GX-700 over ALSA rawmidi.
+pub struct RawMidi {
+    output: Rawmidi,
+    input: Rawmidi,
+    device_id: u8,
+}
+
+impl std::fmt::Debug for RawMidi {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RawMidi")
+            .field("device_id", &self.device_id)
+            .finish_non_exhaustive()
+    }
+}
+
+fn transport_err(e: ::alsa::Error) -> Error {
+    Error::Transport(e.to_string())
+}
+
+fn io_err(e: &std::io::Error) -> Error {
+    Error::Transport(e.to_string())
+}
+
+/// Whether a read error just means "no data available yet" on a non-blocking
+/// endpoint. ALSA reports `EAGAIN` with its negative-errno convention (`-11`),
+/// which `io::Error::kind()` does not map to [`WouldBlock`][std::io::ErrorKind],
+/// so check the raw code for both signs as well.
+fn is_would_block(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::WouldBlock || matches!(e.raw_os_error(), Some(11 | -11))
+}
+
+impl RawMidi {
+    /// Enumerate the ALSA rawmidi ports available on the system, as
+    /// `hw:CARD,DEV` strings suitable for [`Self::open`].
+    ///
+    /// # Errors
+    /// [`Error::Transport`] if ALSA reports an error while iterating cards or
+    /// devices.
+    pub fn ports() -> Result<Vec<String>> {
+        let mut ports = Vec::new();
+        for card in ::alsa::card::Iter::new() {
+            let card = card.map_err(transport_err)?;
+            let index = card.get_index();
+            let ctl = Ctl::new(&format!("hw:{index}"), false).map_err(transport_err)?;
+            for info in RawmidiIter::new(&ctl) {
+                let info = info.map_err(transport_err)?;
+                // Each output device gives one addressable endpoint; list those.
+                if info.get_stream() == Direction::Playback {
+                    let port = format!("hw:{index},{}", info.get_device());
+                    if !ports.contains(&port) {
+                        ports.push(port);
+                    }
+                }
+            }
+        }
+        Ok(ports)
+    }
+
+    /// Open the rawmidi port at `port` (a `hw:CARD,DEV` address) for both input
+    /// and output.
+    ///
+    /// # Errors
+    /// [`Error::PortNotFound`] if the address contains an interior NUL;
+    /// [`Error::Transport`] if ALSA cannot open the input or output stream.
+    pub fn open(port: &str) -> Result<Self> {
+        let cname = CString::new(port).map_err(|_| Error::PortNotFound(port.to_owned()))?;
+        let output = Rawmidi::open(&cname, Direction::Playback, false).map_err(transport_err)?;
+        // Open the input non-blocking so reads can poll for a timeout.
+        let input = Rawmidi::open(&cname, Direction::Capture, true).map_err(transport_err)?;
+        Ok(Self {
+            output,
+            input,
+            device_id: DEFAULT_DEVICE_ID,
+        })
+    }
+
+    /// Print every incoming complete `SysEx` message as hex, one per line,
+    /// until interrupted. A reverse-engineering aid for mapping the parameter
+    /// addresses the unit emits when its knobs move or it dumps a patch.
+    ///
+    /// # Errors
+    /// [`Error::Transport`] if a read fails for a reason other than there being
+    /// no data yet.
+    pub fn watch_sysex(&mut self) -> Result<()> {
+        let mut framer = Framer::new();
+        let mut buf = [0u8; 256];
+        loop {
+            match self.input.io().read(&mut buf) {
+                Ok(0) => std::thread::sleep(POLL_INTERVAL),
+                Ok(n) => {
+                    let chunk = buf.get(..n).unwrap_or(&[]);
+                    for msg in framer.push(chunk) {
+                        let hex: Vec<String> = msg.iter().map(|b| format!("{b:02X}")).collect();
+                        println!("{}", hex.join(" "));
+                    }
+                }
+                Err(e) if is_would_block(&e) => {
+                    std::thread::sleep(POLL_INTERVAL);
+                }
+                Err(e) => return Err(io_err(&e)),
+            }
+        }
+    }
+
+    /// Write a complete byte buffer to the output port.
+    fn write_all(&mut self, bytes: &[u8]) -> Result<()> {
+        self.output.io().write_all(bytes).map_err(|e| io_err(&e))
+    }
+
+    /// Read and frame `SysEx` replies until a DT1 message arrives or the poll
+    /// budget runs out, returning the parsed DT1 body (address + data).
+    fn read_dt1_reply(&mut self) -> Result<Vec<u8>> {
+        let mut framer = Framer::new();
+        let mut buf = [0u8; 256];
+        for _ in 0..REPLY_POLLS {
+            match self.input.io().read(&mut buf) {
+                Ok(0) => std::thread::sleep(POLL_INTERVAL),
+                Ok(n) => {
+                    let chunk = buf.get(..n).unwrap_or(&[]);
+                    for msg in framer.push(chunk) {
+                        let parsed = sysex::parse_roland(&msg)?;
+                        if parsed.command == DT1 {
+                            return Ok(parsed.body);
+                        }
+                    }
+                }
+                Err(e) if is_would_block(&e) => {
+                    std::thread::sleep(POLL_INTERVAL);
+                }
+                Err(e) => return Err(io_err(&e)),
+            }
+        }
+        Err(Error::Timeout)
+    }
+}
+
+impl Transport for RawMidi {
+    fn send(&mut self, addr: &[u8], data: &[u8]) -> Result<()> {
+        let msg = sysex::build_dt1(self.device_id, addr, data);
+        self.write_all(&msg)
+    }
+
+    fn request(&mut self, addr: &[u8], len: usize) -> Result<Vec<u8>> {
+        // RQ1 size field mirrors the address width, big-endian.
+        let mut size = vec![0u8; addr.len().max(1)];
+        if let Some(last) = size.last_mut() {
+            *last = u8::try_from(len & 0x7f).unwrap_or(0x7f);
+        }
+        let msg = sysex::build_rq1(self.device_id, addr, &size);
+        self.write_all(&msg)?;
+
+        let body = self.read_dt1_reply()?;
+        // The reply body is <addr..> <data..>; strip the echoed address.
+        let data = body.get(addr.len()..).unwrap_or(&[]);
+        let mut out = data.to_vec();
+        out.resize(len, 0);
+        Ok(out)
+    }
+
+    fn program_change(&mut self, program: u8) -> Result<()> {
+        self.write_all(&[0xC0, program & 0x7f])
+    }
+}

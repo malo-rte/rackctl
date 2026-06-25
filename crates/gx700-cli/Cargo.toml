@@ -1,0 +1,30 @@
+[package]
+name = "rackctl-gx700-cli"
+version.workspace = true
+description = "Command-line control tool (rackctl-gx700) for the BOSS GX-700 guitar effects processor."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false             # application crate, not for crates.io (it has a path dependency)
+
+[[bin]]
+name = "rackctl-gx700"
+path = "src/main.rs"
+
+[features]
+# Mirror the library: the real ALSA rawmidi transport is on by default; build
+# with `--no-default-features` for a mock-only binary that needs no MIDI port.
+default = ["alsa"]
+alsa = ["rackctl-gx700/alsa"]
+
+[dependencies]
+rackctl-gx700 = { workspace = true }
+clap.workspace = true
+clap_complete.workspace = true
+anyhow.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
