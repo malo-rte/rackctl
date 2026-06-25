@@ -7,6 +7,7 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+publish = false             # application crate, not for crates.io (it has a path dependency)
 
 [[bin]]
 name = "rackctl-us16x08-gui"

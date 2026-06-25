@@ -34,6 +34,7 @@ confidence-threshold = 0.9
 # Supply-chain hygiene: catch duplicate versions and unvetted sources.
 multiple-versions = "warn"   # raise to "deny" once the tree is deduplicated
 wildcards = "deny"
+allow-wildcard-paths = true  # permit version-less workspace path deps (only applies to publish=false crates)
 deny = [
     # { crate = "openssl", reason = "use rustls; no system OpenSSL dependency" },
 ]

@@ -9,7 +9,12 @@
 version = 2
 yanked = "deny"
 ignore = [
-    # "RUSTSEC-0000-0000",  # document each ignore with a reason + tracking task (RS-92)
+    # RS-92: each ignore documents a reason + tracking note.
+    # `paste` is unmaintained (not vulnerable, no safe upgrade). It is pulled in
+    # transitively by the GUI: eframe -> accesskit_winit -> accesskit_windows ->
+    # paste. Nothing we depend on directly; drop this once eframe's tree moves off
+    # paste. https://rustsec.org/advisories/RUSTSEC-2024-0436
+    "RUSTSEC-2024-0436",
 ]
 
 [licenses]
@@ -21,19 +26,32 @@ allow = [
     "Apache-2.0 WITH LLVM-exception",
     "BSD-2-Clause",
     "BSD-3-Clause",
+    "BSL-1.0",       # Boost Software License — permissive (clipboard-win, error-code via eframe)
     "ISC",
     "Unicode-3.0",
     "Zlib",
 ]
 confidence-threshold = 0.9
-# Copyleft licenses are absent from the allow-list, so they fail by default —
-# the intended behaviour for shipped firmware/tooling. Add an explicit clarify
-# block for any crate whose detected license is wrong.
+# Copyleft licenses are absent from the allow-list, so they fail by default — the
+# intended behaviour. The exceptions below scope the few non-permissive or
+# non-SPDX licenses to the single crate that carries them, rather than allowing
+# them tree-wide.
+exceptions = [
+    # `directories` -> dirs-sys -> option-ext: MPL-2.0 is weak, file-level
+    # copyleft; using the crate unmodified as a dependency does not affect our
+    # MIT licensing.
+    { crate = "option-ext", allow = ["MPL-2.0"] },
+    # egui's bundled default fonts. OFL-1.1 (SIL Open Font License) and the
+    # Ubuntu Font License (non-SPDX, hence LicenseRef-) cover the embedded font
+    # files, not code.
+    { crate = "epaint_default_fonts", allow = ["OFL-1.1", "LicenseRef-UFL-1.0"] },
+]
 
 [bans]
 # Supply-chain hygiene: catch duplicate versions and unvetted sources.
 multiple-versions = "warn"   # raise to "deny" once the tree is deduplicated
 wildcards = "deny"
+allow-wildcard-paths = true  # workspace-internal path deps carry no version (not a real wildcard)
 deny = [
     # { crate = "openssl", reason = "use rustls; no system OpenSSL dependency" },
 ]
