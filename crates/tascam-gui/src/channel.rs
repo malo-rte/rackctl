@@ -67,10 +67,16 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     // Fixed-width numeric value boxes across the editor.
     ui.spacing_mut().interact_size.x = VALUE_BOX_WIDTH;
 
-    // Whole-channel copy/paste: capture this strip and apply it to another.
+    // Whole-channel actions: copy/paste this strip, or reset it to defaults.
     ui.horizontal(|ui| {
         copy_paste(app, ui, Group::Channel, "Copy channel", "Paste channel");
-        ui.label("copy a channel's settings, then focus another and paste");
+        if ui
+            .button("Reset channel")
+            .on_hover_text("Reset the whole channel to a neutral default")
+            .clicked()
+        {
+            app.reset_channel();
+        }
     });
 
     ui.horizontal_top(|ui| {

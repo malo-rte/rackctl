@@ -640,6 +640,31 @@ impl App {
         self.status = format!("pasted {} to channel {}", group.label(), ch + 1);
     }
 
+    /// Reset the whole focused channel to a neutral default: every per-channel
+    /// control to its catalog default, the switches (phase, mute, EQ and
+    /// compressor enables) off, and the fader fully down (-127 dB) so a reset
+    /// channel starts silent rather than at the default level. Flat EQ, no
+    /// compression, centre pan. Applies to the linked pair too, via [`Self::set`].
+    pub(crate) fn reset_channel(&mut self) {
+        let ch = u32::from(self.selected);
+        for &control in Control::ALL {
+            if control.scope() != Scope::Channel || !self.device.is_present(control) {
+                continue;
+            }
+            let value = match control.kind() {
+                // The fader resets fully down, not to its default level.
+                Kind::Int { min, .. } if control == Control::LineVolume => Value::Int(min),
+                Kind::Int { default, .. } => Value::Int(default),
+                Kind::Enum { default, .. } => Value::Enum(default),
+                Kind::Bool => Value::Bool(false),
+                // Meters are not settable, and any future kind is skipped.
+                _ => continue,
+            };
+            self.set(control, ch, value);
+        }
+        self.status = format!("reset channel {}", ch + 1);
+    }
+
     /// Tab selector. (Presets live in the Scenes and Channel-presets tabs; the
     /// global DSP switches live in the OUTPUT panel.)
     fn toolbar(&mut self, ui: &mut egui::Ui) {

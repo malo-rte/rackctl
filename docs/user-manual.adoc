@@ -530,6 +530,12 @@ have their own *Copy* and *Paste* buttons in their title rows, to copy just that
 section between channels. *Paste* is disabled until something has been copied, and
 pasting onto a linked pair applies to both channels.
 
+Reset channel:: Next to those, *Reset channel* returns the whole focused channel
+to a neutral default -- flat EQ, no compression, centre pan, the fader fully down
+(-127 dB) so the channel starts silent, with the phase, mute, and the EQ and
+compressor enable switches off. (The EQ and Compressor boxes also have their own
+*Reset* buttons for just that section.)
+
 [[sec-gui-output]]
 === The output panel
 

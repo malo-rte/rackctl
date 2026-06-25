@@ -20,6 +20,10 @@ version.
 - **GUI** — copy/paste between channels: *Copy channel* / *Paste channel* above
   the editor for the whole strip, and *Copy* / *Paste* in the EQ and Compressor
   title rows for just that section. Pasting onto a linked pair applies to both.
+- **GUI** — a *Reset channel* button that returns the whole focused channel to a
+  neutral default (flat EQ, no compression, centre pan, fader fully down at
+  -127 dB, switches off), alongside the existing per-section EQ and Compressor
+  resets.
 
 ### Removed
 
