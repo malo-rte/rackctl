@@ -7,6 +7,14 @@ version.
 
 ## [Unreleased]
 
+### Added
+
+- **Packaging** — a Nix flake (`flake.nix`): `nix run` the GUI or
+  `nix run .#tascamctl` the CLI, `nix build`, and `nix develop` for a dev shell
+  with the Rust toolchain and the eframe system libraries. The package version is
+  read from the workspace `Cargo.toml`, and the GUI binary is wrapped so it finds
+  the Wayland/GL/xkbcommon libraries it loads at run time.
+
 ## [0.6.0] - 2026-06-25
 
 ### Fixed

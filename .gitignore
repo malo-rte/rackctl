@@ -4,4 +4,7 @@
 # Rendered documentation (docs/build.sh output)
 /build
 
+# Nix build symlink (flake.nix)
+/result
+
 *~
