@@ -10,7 +10,7 @@
 )]
 
 use eframe::egui;
-use tascam_us16x08::{Control, NUM_CHANNELS, Value};
+use tascam_us16x08::{Control, Meters, NUM_CHANNELS, Value};
 
 use crate::app::App;
 
@@ -22,20 +22,86 @@ const METER_SIZE: egui::Vec2 = egui::vec2(18.0, METER_HEIGHT);
 /// Width of each channel column in the bridge.
 const COLUMN_WIDTH: f32 = 44.0;
 
+/// Number of meters tracked for peak-hold: the 16 channels plus master L and R.
+pub(crate) const NUM_METERS: usize = 18;
+/// Peak-hold index of the master left and right meters.
+const MASTER_L: u32 = 16;
+const MASTER_R: u32 = 17;
+/// Bar fraction at or above which a meter is treated as clipping.
+const CLIP_THRESHOLD: f32 = 0.98;
+/// Seconds the clip indicator stays lit after a clip.
+const CLIP_HOLD: f64 = 1.5;
+/// How fast the held peak marker falls, in bar fractions per second.
+const PEAK_DECAY: f32 = 0.6;
+
+/// Per-meter peak-hold and clip state, advanced once per frame.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct PeakHold {
+    /// Held peak as a 0..=1 bar fraction.
+    peak: f32,
+    /// Clock time (eframe seconds) until which the clip indicator shows.
+    clip_until: f64,
+}
+
+impl PeakHold {
+    /// Fold in the current bar `fraction` at time `now`, `dt` seconds after the
+    /// last update: latch a clip and let the held peak rise instantly but fall
+    /// slowly.
+    fn observe(&mut self, fraction: f32, now: f64, dt: f32) {
+        if fraction >= CLIP_THRESHOLD {
+            self.clip_until = now + CLIP_HOLD;
+        }
+        self.peak = if fraction >= self.peak {
+            fraction
+        } else {
+            (self.peak - PEAK_DECAY * dt).max(fraction)
+        };
+    }
+
+    fn clipping(self, now: f64) -> bool {
+        now < self.clip_until
+    }
+}
+
+/// Advance every meter's peak-hold/clip state from the latest meter snapshot.
+pub(crate) fn observe_meters(
+    peaks: &mut [PeakHold; NUM_METERS],
+    meters: &Meters,
+    now: f64,
+    last: &mut f64,
+) {
+    let dt = (now - *last) as f32;
+    *last = now;
+    for ch in 0..NUM_CHANNELS {
+        let f = fraction(meters.channel_db(ch).unwrap_or(0));
+        if let Some(p) = peaks.get_mut(ch as usize) {
+            p.observe(f, now, dt);
+        }
+    }
+    let (l, r) = meters.master_db();
+    if let Some(p) = peaks.get_mut(MASTER_L as usize) {
+        p.observe(fraction(l), now, dt);
+    }
+    if let Some(p) = peaks.get_mut(MASTER_R as usize) {
+        p.observe(fraction(r), now, dt);
+    }
+}
+
 pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
+    let now = ui.input(|i| i.time);
     ui.horizontal(|ui| {
         for ch in 0..NUM_CHANNELS {
-            channel_strip(app, ui, ch);
+            channel_strip(app, ui, ch, now);
         }
         // Master L/R meters, right-aligned at the end of the bridge.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::TOP), |ui| {
-            master_meters(app, ui);
+            master_meters(app, ui, now);
         });
     });
 }
 
 /// The master L/R level meters and mute, shown at the right of the bridge.
-fn master_meters(app: &mut App, ui: &mut egui::Ui) {
+fn master_meters(app: &mut App, ui: &mut egui::Ui, now: f64) {
     ui.vertical(|ui| {
         // An empty name line and a label matching the channel columns' name +
         // selector, so the master meters sit at the same height.
@@ -43,8 +109,8 @@ fn master_meters(app: &mut App, ui: &mut egui::Ui) {
         let _ = ui.selectable_label(false, "Master");
         ui.horizontal(|ui| {
             let (l, r) = app.meters().master_db();
-            meter_bar(ui, fraction(l));
-            meter_bar(ui, fraction(r));
+            meter_bar(ui, fraction(l), app.peak(MASTER_L), now);
+            meter_bar(ui, fraction(r), app.peak(MASTER_R), now);
         });
         // Mute button centred under the two meter bars (a single left-aligned
         // "M" would sit under the left bar only).
@@ -60,7 +126,7 @@ fn master_meters(app: &mut App, ui: &mut egui::Ui) {
     });
 }
 
-fn channel_strip(app: &mut App, ui: &mut egui::Ui, ch: u32) {
+fn channel_strip(app: &mut App, ui: &mut egui::Ui, ch: u32, now: f64) {
     ui.vertical(|ui| {
         ui.set_width(COLUMN_WIDTH);
 
@@ -90,7 +156,7 @@ fn channel_strip(app: &mut App, ui: &mut egui::Ui, ch: u32) {
         }
 
         let level = app.meters().channel_db(ch).unwrap_or(0);
-        meter_bar(ui, fraction(level));
+        meter_bar(ui, fraction(level), app.peak(ch), now);
 
         // Mute and solo, side by side under the meter.
         ui.horizontal(|ui| {
@@ -129,12 +195,29 @@ pub(crate) fn fraction(level: i32) -> f32 {
     (level.max(0) as f32 / METER_FULL_SCALE).clamp(0.0, 1.0)
 }
 
-/// Paint a vertical meter bar filled from the bottom.
-pub(crate) fn meter_bar(ui: &mut egui::Ui, fraction: f32) {
+/// Paint a vertical meter bar filled from the bottom, with a held peak marker
+/// and a clip cap from `peak`.
+pub(crate) fn meter_bar(ui: &mut egui::Ui, fraction: f32, peak: PeakHold, now: f64) {
     let (rect, _) = ui.allocate_exact_size(METER_SIZE, egui::Sense::hover());
     let painter = ui.painter();
     painter.rect_filled(rect, 2.0, egui::Color32::from_gray(40));
     let height = rect.height() * fraction;
     let fill = egui::Rect::from_min_max(egui::pos2(rect.left(), rect.bottom() - height), rect.max);
     painter.rect_filled(fill, 2.0, egui::Color32::from_rgb(70, 200, 90));
+
+    // Held peak: a thin line that rises with the level and falls slowly.
+    if peak.peak > 0.001 {
+        let y = rect.bottom() - rect.height() * peak.peak;
+        painter.hline(
+            rect.x_range(),
+            y,
+            egui::Stroke::new(1.5, egui::Color32::from_rgb(235, 225, 90)),
+        );
+    }
+    // Clip: a red cap at the top, latched for a moment after a clip.
+    if peak.clipping(now) {
+        let cap =
+            egui::Rect::from_min_max(rect.left_top(), egui::pos2(rect.right(), rect.top() + 3.0));
+        painter.rect_filled(cap, 1.0, egui::Color32::from_rgb(235, 60, 60));
+    }
 }

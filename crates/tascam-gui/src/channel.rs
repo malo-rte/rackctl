@@ -169,7 +169,8 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                     egui::Layout::left_to_right(egui::Align::TOP),
                     |ui| {
                         let level = app.meters().channel_db(ch).unwrap_or(0);
-                        bridge::meter_bar(ui, bridge::fraction(level));
+                        let now = ui.input(|i| i.time);
+                        bridge::meter_bar(ui, bridge::fraction(level), app.peak(ch), now);
                         ui.spacing_mut().slider_width = VOLUME_FADER_LENGTH;
                         // When linked, the fader is the common level (the louder
                         // side); the balance offset between the channels is kept.

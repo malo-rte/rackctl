@@ -496,7 +496,9 @@ controls is in <<sec-gui-ref>>.
 The meter bridge shows all 16 input channels and the master, always visible at
 the top. Each channel column has its name (if set, above the number, truncated
 with the full name on hover), a number label, a level meter, and *M* (mute) and
-*S* (solo) buttons. Click a channel's number to focus it in the editor below; the
+*S* (solo) buttons. Each meter carries a held peak marker (a line that rises with
+the level and falls back slowly) and a red clip cap at the top that lights
+briefly when the meter reaches full scale. Click a channel's number to focus it in the editor below; the
 focused channel (or its linked pair) is highlighted. *S* solos the channel: while
 any channel is soloed, the others are muted, and clearing solo restores the mutes
 that were in place before. The master level meters and the master mute button sit
@@ -722,6 +724,9 @@ For channel controls the channel index is 0...15; for output controls it is
 ----
 tascam-mixer [--mock]
 ----
+
+It also accepts `--version` and `--help`. `--mock` runs the whole interface
+against the in-memory mock device (see <<sec-mock>>).
 
 On Wayland the window sets its `app_id` to `tascam-mixer` (the window class in
 compositors such as Hyprland and sway), so a compositor rule can target it. For

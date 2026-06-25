@@ -161,6 +161,10 @@ pub(crate) struct App {
     /// The channel mutes snapshotted when solo first engaged, restored when solo
     /// is cleared. `None` when no channel is soloed.
     pre_solo: Option<[bool; 16]>,
+    /// Per-meter peak-hold / clip state (16 channels + master L/R).
+    peaks: [bridge::PeakHold; bridge::NUM_METERS],
+    /// Clock time of the last peak-hold update, for the decay step.
+    meter_time: f64,
     /// Persisted interface zoom factor, saved with the default preset.
     zoom: f32,
     /// Persisted window inner size (logical points), saved with the default.
@@ -208,6 +212,8 @@ impl App {
             names: cfg.names,
             solo: [false; 16],
             pre_solo: None,
+            peaks: [bridge::PeakHold::default(); bridge::NUM_METERS],
+            meter_time: 0.0,
             zoom: cfg.zoom,
             window: cfg.window,
             preset_names: HashMap::new(),
@@ -467,6 +473,12 @@ impl App {
         &self.meters
     }
 
+    /// The peak-hold / clip state for a meter (channels `0..16`, master L `16`,
+    /// master R `17`).
+    pub(crate) fn peak(&self, index: u32) -> bridge::PeakHold {
+        self.peaks.get(index as usize).copied().unwrap_or_default()
+    }
+
     /// Poll meters and (at the watch cadence) controls. A device read failure
     /// means the interface has gone away (USB unplug); flip to the disconnected
     /// state so the app starts trying to reopen it instead of erroring at 30 Hz.
@@ -478,6 +490,7 @@ impl App {
                 return;
             }
         }
+        bridge::observe_meters(&mut self.peaks, &self.meters, now, &mut self.meter_time);
         if now >= self.next_watch {
             self.sync_controls();
             self.next_watch = now + WATCH_INTERVAL_SECS;
