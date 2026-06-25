@@ -7,6 +7,15 @@ version.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-06-25
+
+### Changed
+
+- **Packaging** — the GUI desktop entry's `Name` now leads with the suite brand
+  (`Rackctl US-16x08 Mixer`) instead of fronting the Tascam trademark, matching
+  the rest of the project after the rename. Discoverability is unchanged — the
+  entry's `Comment` and `Keywords` still carry "Tascam"/"us-16x08".
+
 ## [0.7.0] - 2026-06-25
 
 ### Changed
@@ -223,7 +232,8 @@ only, via the `snd-usb-audio` driver.
 - The tools drive the DSP mixer control surface only; they do not stream audio.
   Capture to the computer is taken pre-DSP (the dry input).
 
-[Unreleased]: https://github.com/malo-rte/rackctl/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/malo-rte/rackctl/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/malo-rte/rackctl/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/malo-rte/rackctl/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/malo-rte/rackctl/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/malo-rte/rackctl/compare/v0.4.0...v0.5.0
