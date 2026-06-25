@@ -142,9 +142,24 @@ impl RawMidi {
         self.output.io().write_all(bytes).map_err(|e| io_err(&e))
     }
 
-    /// Read and frame `SysEx` replies until a DT1 message arrives or the poll
-    /// budget runs out, returning the parsed DT1 body (address + data).
-    fn read_dt1_reply(&mut self) -> Result<Vec<u8>> {
+    /// Discard any pending input, so a stale reply left over from a previous
+    /// request cannot be mistaken for the answer to the next one.
+    fn drain_input(&mut self) {
+        let mut buf = [0u8; 256];
+        // Read until there is nothing left: a zero-length read, a would-block, or
+        // any other error all end the drain.
+        while let Ok(n) = self.input.io().read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+        }
+    }
+
+    /// Read and frame `SysEx` replies until a DT1 message *for `addr`* arrives,
+    /// or the poll budget runs out. Returns the data bytes that follow the
+    /// echoed address. DT1s for other addresses are skipped, so a single-byte
+    /// read cannot be satisfied by a leftover reply to a different request.
+    fn read_dt1_reply(&mut self, addr: &[u8]) -> Result<Vec<u8>> {
         let mut framer = Framer::new();
         let mut buf = [0u8; 256];
         for _ in 0..REPLY_POLLS {
@@ -153,9 +168,14 @@ impl RawMidi {
                 Ok(n) => {
                     let chunk = buf.get(..n).unwrap_or(&[]);
                     for msg in framer.push(chunk) {
-                        let parsed = sysex::parse_roland(&msg)?;
-                        if parsed.command == DT1 {
-                            return Ok(parsed.body);
+                        let Ok(parsed) = sysex::parse_roland(&msg) else {
+                            continue;
+                        };
+                        if parsed.command != DT1 {
+                            continue;
+                        }
+                        if let Some(data) = parsed.body.strip_prefix(addr) {
+                            return Ok(data.to_vec());
                         }
                     }
                 }
@@ -176,6 +196,9 @@ impl Transport for RawMidi {
     }
 
     fn request(&mut self, addr: &[u8], len: usize) -> Result<Vec<u8>> {
+        // Clear any unread reply from a previous request first.
+        self.drain_input();
+
         // RQ1 size field mirrors the address width, big-endian.
         let mut size = vec![0u8; addr.len().max(1)];
         if let Some(last) = size.last_mut() {
@@ -184,10 +207,7 @@ impl Transport for RawMidi {
         let msg = sysex::build_rq1(self.device_id, addr, &size);
         self.write_all(&msg)?;
 
-        let body = self.read_dt1_reply()?;
-        // The reply body is <addr..> <data..>; strip the echoed address.
-        let data = body.get(addr.len()..).unwrap_or(&[]);
-        let mut out = data.to_vec();
+        let mut out = self.read_dt1_reply(addr)?;
         out.resize(len, 0);
         Ok(out)
     }
