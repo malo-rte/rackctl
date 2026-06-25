@@ -15,6 +15,15 @@ version.
   read from the workspace `Cargo.toml`, and the GUI binary is wrapped so it finds
   the Wayland/GL/xkbcommon libraries it loads at run time.
 
+### Changed
+
+- **License/credits** — the `LICENSE` file now carries this project's own MIT
+  license (© 2026 Mats Loman) instead of the inherited upstream copyright, and the
+  workspace `license` field is corrected from `ISC` to `MIT` to match. The README
+  gains an acknowledgment of [tascam-gtk](https://github.com/onkelDead/tascam-gtk)
+  by onkelDead, the (independently reimplemented, not copied) inspiration for this
+  project.
+
 ## [0.6.0] - 2026-06-25
 
 ### Fixed

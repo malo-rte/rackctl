@@ -62,7 +62,7 @@
           meta = {
             description = "Control tools for the Tascam US-16x08 USB DSP mixer (CLI + GUI)";
             homepage = "https://github.com/malo-rte/tascam-mixer";
-            license = lib.licenses.isc;
+            license = lib.licenses.mit;
             platforms = lib.platforms.linux;
             mainProgram = "tascam-mixer";
           };

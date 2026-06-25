@@ -6,7 +6,7 @@ members = ["crates/*"]
 version = "0.6.0"
 edition = "2024"
 rust-version = "1.85"
-license = "ISC"
+license = "MIT"
 repository = "https://github.com/malo-rte/tascam-mixer"
 authors = ["Mats Loman <mats.loman@rte.se>"]
 

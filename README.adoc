@@ -116,3 +116,18 @@ This needs `asciidoctor-pdf` and `asciidoctor-diagram` (Ruby gems) plus `plantum
 sudo gem install asciidoctor-pdf asciidoctor-diagram
 sudo apt-get install plantuml graphviz
 ----
+
+== Acknowledgments
+
+This project was inspired by
+https://github.com/onkelDead/tascam-gtk[tascam-gtk] by onkelDead, a GTK+
+application for the same interface. That project showed the US-16x08's DSP mixer
+could be driven well from Linux and informed the feature set here. This is an
+independent Rust rewrite — a fresh implementation rather than a port or a copy of
+its code — built around a focused one-channel-at-a-time editor and a typed control
+library. With thanks to its author.
+
+== License
+
+Licensed under the MIT License; see link:LICENSE[LICENSE]. tascam-gtk is likewise
+MIT-licensed, © onkelDead.
