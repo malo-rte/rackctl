@@ -7,8 +7,8 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use clap::builder::styling::{AnsiColor, Styles};
-use clap::{Parser, Subcommand};
-use tascam_us16x08::{Backend, MockBackend, Us16x08};
+use clap::{Parser, Subcommand, ValueEnum};
+use tascam_us16x08::{Backend, MockBackend, Section, Us16x08};
 
 #[cfg(feature = "alsa")]
 use tascam_us16x08::AlsaBackend;
@@ -61,6 +61,7 @@ Examples:
   tascamctl set line-volume +2 -c 0      Nudge channel 0 up 2 dB
   tascamctl monitor                      Watch the meters live
   tascamctl save mix.json                Back up the whole mixer
+  tascamctl save eq.json -c 3 --section eq   Save channel 4's EQ only
   tascamctl default --save               Remember the current mix as the default";
 
 #[derive(Subcommand)]
@@ -123,26 +124,31 @@ enum Command {
         #[arg(long, default_value_t = 500)]
         interval: u64,
     },
-    /// Save the mixer, or one channel strip, to a JSON file.
+    /// Save the mixer, a channel strip, or one section, to a JSON file.
     ///
     /// Without --channel, saves the whole mixer (master, routing, and all 16
-    /// strips). With --channel, saves only that one channel's strip, which can
-    /// later be loaded onto any channel.
+    /// strips). With --channel, saves that channel; --section chooses how much of
+    /// it: the whole `strip` (default), just the `eq`, or just the `comp`
+    /// compressor. A strip or section preset can later be loaded onto any channel.
     Save {
         /// Output file path.
         file: String,
-        /// Save only this channel's strip instead of the whole mixer.
+        /// Save this channel instead of the whole mixer.
         #[arg(short, long)]
         channel: Option<u32>,
+        /// How much of the channel to save (requires --channel).
+        #[arg(long, value_enum, default_value_t = SectionArg::Strip)]
+        section: SectionArg,
     },
-    /// Load a mixer or strip preset from a JSON file.
+    /// Load a mixer, strip, or section preset from a JSON file.
     ///
-    /// A whole-mixer preset is loaded as-is. A strip preset must be given a
-    /// target channel with --channel.
+    /// A whole-mixer preset is loaded as-is. A strip or section (EQ /
+    /// compressor) preset must be given a target channel with --channel; only the
+    /// controls the file holds are applied.
     Load {
         /// Input file path.
         file: String,
-        /// Target channel for a strip preset.
+        /// Target channel for a strip or section preset.
         #[arg(short, long)]
         channel: Option<u32>,
     },
@@ -165,6 +171,27 @@ Examples:
   tascamctl set master-volume -6dB       Absolute -6 dB
   tascamctl set line-volume +2 -c 0      Relative +2 dB on channel 0
   tascamctl set comp-enable toggle -c 0  Flip the compressor on channel 0";
+
+/// How much of a channel `save` captures. Maps to [`Section`].
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum SectionArg {
+    /// The whole channel strip.
+    Strip,
+    /// Only the EQ section.
+    Eq,
+    /// Only the compressor section.
+    Comp,
+}
+
+impl From<SectionArg> for Section {
+    fn from(arg: SectionArg) -> Self {
+        match arg {
+            SectionArg::Strip => Section::Strip,
+            SectionArg::Eq => Section::Eq,
+            SectionArg::Comp => Section::Comp,
+        }
+    }
+}
 
 /// The selected backend, resolved once at startup.
 enum Device {
@@ -207,7 +234,11 @@ fn run_command<B: Backend>(dev: &mut Us16x08<B>, command: Command) -> Result<()>
         Command::Meters { raw } => commands::meters(dev, raw),
         Command::Monitor { interval, raw } => commands::monitor(dev, interval, raw),
         Command::Watch { interval } => commands::watch(dev, interval),
-        Command::Save { file, channel } => commands::save(dev, &file, channel),
+        Command::Save {
+            file,
+            channel,
+            section,
+        } => commands::save(dev, &file, channel, section.into()),
         Command::Load { file, channel } => commands::load(dev, &file, channel),
         Command::Default { save } => commands::default_preset(dev, save),
     }

@@ -79,6 +79,37 @@ pub struct ApplyReport {
     pub skipped: Vec<String>,
 }
 
+/// A subset of a channel strip, used to capture or apply just part of it as a
+/// preset (for example an EQ-only or compressor-only preset). A section preset is
+/// stored as a [`Preset::Strip`] holding only that section's controls, so loading
+/// it changes just that section and leaves the rest of the channel untouched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Section {
+    /// The whole channel strip.
+    Strip,
+    /// The EQ section (enable plus the four bands).
+    Eq,
+    /// The compressor section (enable plus the parameters).
+    Comp,
+}
+
+impl Section {
+    /// Whether `control` belongs to this section. Only per-channel, non-meter
+    /// controls can.
+    #[must_use]
+    pub fn contains(self, control: Control) -> bool {
+        if control.scope() != Scope::Channel || matches!(control.kind(), Kind::Meter) {
+            return false;
+        }
+        match self {
+            Section::Strip => true,
+            Section::Eq => control.cli_key().starts_with("eq-"),
+            Section::Comp => control.cli_key().starts_with("comp-"),
+        }
+    }
+}
+
 /// Timing policy for a robust load ([`Us16x08::apply_muted`] /
 /// [`Us16x08::restore_values_muted`]). All three default to zero for tests.
 #[derive(Debug, Clone, Copy, Default)]
@@ -171,6 +202,26 @@ impl<B: Backend> Us16x08<B> {
         Ok(Preset::Strip {
             version: PRESET_VERSION,
             controls: self.strip_map(channel)?,
+        })
+    }
+
+    /// Capture one channel's `section` as a [`Preset::Strip`]. [`Section::Strip`]
+    /// is the whole strip (as [`Self::capture_strip`]); [`Section::Eq`] and
+    /// [`Section::Comp`] capture only that section's controls.
+    ///
+    /// # Errors
+    /// Propagates backend read errors.
+    pub fn capture_section(&self, channel: u32, section: Section) -> Result<Preset> {
+        let mut controls = ControlMap::new();
+        for &control in Control::ALL {
+            if section.contains(control) && self.is_present(control) {
+                let value = self.get(control, channel)?;
+                controls.insert(control.cli_key().to_owned(), to_scalar(control, value));
+            }
+        }
+        Ok(Preset::Strip {
+            version: PRESET_VERSION,
+            controls,
         })
     }
 
@@ -708,6 +759,48 @@ mod tests {
         fn set_bool(&mut self, name: &str, index: u32, val: bool) -> Result<()> {
             self.inner.set_bool(name, index, val)
         }
+    }
+
+    #[test]
+    fn capture_section_keeps_only_that_section() {
+        let mut d = dev();
+        d.set(Control::EqLowVolume, 2, Value::Int(20)).unwrap();
+        d.set(Control::CompThreshold, 2, Value::Int(10)).unwrap();
+        d.set(Control::Pan, 2, Value::Int(200)).unwrap();
+
+        let eq: Vec<_> = d
+            .capture_section(2, Section::Eq)
+            .unwrap()
+            .strip_values()
+            .into_iter()
+            .map(|(c, _)| c)
+            .collect();
+        assert!(eq.contains(&Control::EqSwitch));
+        assert!(eq.contains(&Control::EqLowVolume));
+        assert!(!eq.contains(&Control::CompThreshold));
+        assert!(!eq.contains(&Control::Pan));
+
+        let comp: Vec<_> = d
+            .capture_section(2, Section::Comp)
+            .unwrap()
+            .strip_values()
+            .into_iter()
+            .map(|(c, _)| c)
+            .collect();
+        assert!(comp.contains(&Control::CompThreshold));
+        assert!(!comp.contains(&Control::EqLowVolume));
+
+        // Strip captures the whole channel, including pan.
+        let strip: Vec<_> = d
+            .capture_section(2, Section::Strip)
+            .unwrap()
+            .strip_values()
+            .into_iter()
+            .map(|(c, _)| c)
+            .collect();
+        assert!(strip.contains(&Control::Pan));
+        assert!(strip.contains(&Control::EqLowVolume));
+        assert!(strip.contains(&Control::CompThreshold));
     }
 
     #[test]

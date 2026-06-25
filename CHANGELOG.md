@@ -7,6 +7,13 @@ version.
 
 ## [Unreleased]
 
+### Added
+
+- **CLI** — `tascamctl save --section eq|comp` saves just a channel's EQ or
+  compressor section (a partial strip preset), matching the GUI's EQ/Comp preset
+  tabs. `load` already applies such a preset with `-c`, setting only the controls
+  it holds. The library gains a `Section` type and `Us16x08::capture_section`.
+
 ## [0.3.0] - 2026-06-25
 
 ### Added

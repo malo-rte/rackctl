@@ -375,25 +375,33 @@ success.
 [[sec-cli-presets]]
 === Saving and restoring
 
-Save the whole mixer, or a single channel's strip, to a JSON file:
+Save the whole mixer, a single channel's strip, or just one section (the EQ or
+the compressor) of a channel, to a JSON file. The `--section` option chooses how
+much of the channel to save and requires `-c`:
 
 [source,bash]
 ----
 tascamctl save mix.json                  # the whole mixer
 tascamctl save strip.json -c 0           # just channel 0's strip
+tascamctl save eq.json -c 0 --section eq # just channel 0's EQ
+tascamctl save comp.json -c 0 --section comp   # just channel 0's compressor
 ----
 
 Restore from a file. A mixer preset restores everything and takes no channel; a
-strip preset is applied to the channel given with `-c`:
+strip or section preset is applied to the channel given with `-c`, setting only
+the controls the file holds:
 
 [source,bash]
 ----
 tascamctl load mix.json                  # restore the whole mixer
 tascamctl load strip.json -c 5           # apply a strip to channel 5
+tascamctl load eq.json -c 5              # apply just an EQ to channel 5
 ----
 
-On load, the number of controls applied is reported on standard error. Controls
-the device does not expose are skipped and listed.
+These are the same files the GUI's scenes and channel/EQ/compressor preset tabs
+read and write, so the two tools share presets. On load, the number of controls
+applied is reported on standard error. Controls the device does not expose are
+skipped and listed.
 
 [[sec-cli-default]]
 === The default preset

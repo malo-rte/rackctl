@@ -10,8 +10,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use directories::ProjectDirs;
 use tascam_us16x08::{
-    Backend, Control, Kind, LoadTiming, Meters, NUM_CHANNELS, NUM_OUTPUTS, Preset, Scope, Us16x08,
-    Value, Watcher, units,
+    Backend, Control, Kind, LoadTiming, Meters, NUM_CHANNELS, NUM_OUTPUTS, Preset, Scope, Section,
+    Us16x08, Value, Watcher, units,
 };
 
 use crate::value::{format_value, parse_value};
@@ -186,10 +186,17 @@ fn is_relative(s: &str) -> bool {
 
 /// Save mixer state to a JSON file: the whole mixer, or one channel's strip if
 /// `channel` is given.
-pub(crate) fn save<B: Backend>(dev: &Us16x08<B>, path: &str, channel: Option<u32>) -> Result<()> {
-    let preset = match channel {
-        Some(ch) => dev.capture_strip(ch)?,
-        None => dev.capture_mixer()?,
+pub(crate) fn save<B: Backend>(
+    dev: &Us16x08<B>,
+    path: &str,
+    channel: Option<u32>,
+    section: Section,
+) -> Result<()> {
+    let preset = match (channel, section) {
+        (None, Section::Strip) => dev.capture_mixer()?,
+        (None, _) => bail!("--section requires --channel"),
+        (Some(ch), Section::Strip) => dev.capture_strip(ch)?,
+        (Some(ch), section) => dev.capture_section(ch, section)?,
     };
     let json = serde_json::to_string_pretty(&preset).context("serializing preset")?;
     fs::write(path, json).with_context(|| format!("writing {path:?}"))?;
