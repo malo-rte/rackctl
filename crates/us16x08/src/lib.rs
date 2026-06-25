@@ -17,7 +17,7 @@
 //! # Example
 //!
 //! ```
-//! use tascam_us16x08::{Control, MockBackend, Us16x08, Value};
+//! use rackctl_us16x08::{Control, MockBackend, Us16x08, Value};
 //!
 //! let mut dev = Us16x08::new(MockBackend::new());
 //!
@@ -28,15 +28,15 @@
 //! // Out-of-range values and indices are rejected.
 //! assert!(dev.set(Control::EqLowVolume, 0, Value::Int(999)).is_err());
 //! assert!(dev.get(Control::MuteSwitch, 99).is_err());
-//! # Ok::<(), tascam_us16x08::Error>(())
+//! # Ok::<(), rackctl_us16x08::Error>(())
 //! ```
 //!
 //! On real hardware, swap the backend:
 //!
 //! ```no_run
 //! # #[cfg(feature = "alsa")]
-//! # fn main() -> Result<(), tascam_us16x08::Error> {
-//! use tascam_us16x08::Us16x08;
+//! # fn main() -> Result<(), rackctl_us16x08::Error> {
+//! use rackctl_us16x08::Us16x08;
 //! let dev = Us16x08::open()?; // finds the "US16x08" card
 //! let meters = dev.meters()?;
 //! println!("master = {:?}", meters.master_db());

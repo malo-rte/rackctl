@@ -2,7 +2,7 @@
 //! (the driver has no link element), so it lives here rather than in the
 //! device's JSON presets.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
@@ -47,39 +47,70 @@ fn default_names() -> [String; 16] {
     std::array::from_fn(|_| String::new())
 }
 
-fn config_path() -> Option<PathBuf> {
-    ProjectDirs::from("de", "paraair", "tascam-mixer")
-        .map(|dirs| dirs.config_dir().join("config.json"))
+/// The suite's per-device settings directory: `<config>/rackctl/us16x08`, where
+/// the default preset, scenes, and per-section presets live (shared with the
+/// CLI's `default` command). Migrates a pre-rename `tascam-mixer` directory into
+/// place on first use. `None` if no home directory can be determined.
+pub(crate) fn settings_dir() -> Option<PathBuf> {
+    let dir = ProjectDirs::from("", "malo-rte", "rackctl")?
+        .config_dir()
+        .join("us16x08");
+    migrate_legacy_settings(&dir);
+    Some(dir)
 }
 
-/// Path to the shared default-mixer preset, in the same config directory the
+/// One-time move of the pre-rename settings (`<config>/tascam-mixer`, from when
+/// the tools were named after the device) into the new suite location. Best
+/// effort: if it cannot move, the app simply starts with fresh settings.
+fn migrate_legacy_settings(new_dir: &Path) {
+    if new_dir.exists() {
+        return;
+    }
+    let Some(old) = ProjectDirs::from("de", "paraair", "tascam-mixer")
+        .map(|dirs| dirs.config_dir().to_path_buf())
+    else {
+        return;
+    };
+    if !old.exists() {
+        return;
+    }
+    if let Some(parent) = new_dir.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::rename(&old, new_dir);
+}
+
+fn config_path() -> Option<PathBuf> {
+    settings_dir().map(|dir| dir.join("config.json"))
+}
+
+/// Path to the shared default-mixer preset, in the same settings directory the
 /// CLI's `default` command uses. `None` if no home directory can be determined.
 pub(crate) fn default_preset_path() -> Option<PathBuf> {
-    ProjectDirs::from("de", "paraair", "tascam-mixer")
-        .map(|dirs| dirs.config_dir().join("default-preset.json"))
+    settings_dir().map(|dir| dir.join("default-preset.json"))
 }
 
 /// Directory holding the user's saved scenes (whole-mixer presets), under the
-/// config directory. `None` if no home directory can be determined.
+/// settings directory. `None` if no home directory can be determined.
 pub(crate) fn scenes_dir() -> Option<PathBuf> {
-    ProjectDirs::from("de", "paraair", "tascam-mixer").map(|dirs| dirs.config_dir().join("scenes"))
+    settings_dir().map(|dir| dir.join("scenes"))
 }
 
 /// Directory holding the user's saved channel presets (single-channel strips),
-/// under the config directory. `None` if no home directory can be determined.
+/// under the settings directory. `None` if no home directory can be determined.
 pub(crate) fn strips_dir() -> Option<PathBuf> {
-    ProjectDirs::from("de", "paraair", "tascam-mixer").map(|dirs| dirs.config_dir().join("strips"))
+    settings_dir().map(|dir| dir.join("strips"))
 }
 
-/// Directory holding the user's saved EQ presets, under the config directory.
+/// Directory holding the user's saved EQ presets, under the settings directory.
 pub(crate) fn eq_dir() -> Option<PathBuf> {
-    ProjectDirs::from("de", "paraair", "tascam-mixer").map(|dirs| dirs.config_dir().join("eq"))
+    settings_dir().map(|dir| dir.join("eq"))
 }
 
-/// Directory holding the user's saved compressor presets, under the config
+/// Directory holding the user's saved compressor presets, under the settings
 /// directory.
 pub(crate) fn comp_dir() -> Option<PathBuf> {
-    ProjectDirs::from("de", "paraair", "tascam-mixer").map(|dirs| dirs.config_dir().join("comp"))
+    settings_dir().map(|dir| dir.join("comp"))
 }
 
 /// Load the saved config, falling back to defaults on any error.

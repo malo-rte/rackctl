@@ -9,7 +9,7 @@
     clippy::cast_possible_wrap
 )]
 
-use tascam_us16x08::{
+use rackctl_us16x08::{
     Backend, COMP_RATIO_VALUES, Control, Kind, MockBackend, NUM_CHANNELS, ROUTE_VALUES, Scope,
     Us16x08, Value, Watcher,
 };

@@ -54,9 +54,9 @@ jobs:
         id: package
         run: |
           version="${GITHUB_REF_NAME#v}"
-          name="tascam-mixer-${version}-x86_64-linux"
+          name="rackctl-us16x08-${version}-x86_64-linux"
           mkdir -p "dist/${name}"
-          cp target/release/tascamctl target/release/tascam-mixer "dist/${name}/"
+          cp target/release/rackctl-us16x08 target/release/rackctl-us16x08-gui "dist/${name}/"
           cp README.adoc CHANGELOG.md LICENSE docs/user-manual.adoc "dist/${name}/"
           tar -C dist -czf "dist/${name}.tar.gz" "${name}"
           ( cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256" )

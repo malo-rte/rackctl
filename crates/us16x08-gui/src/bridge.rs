@@ -10,7 +10,7 @@
 )]
 
 use eframe::egui;
-use tascam_us16x08::{Control, Meters, NUM_CHANNELS, Value};
+use rackctl_us16x08::{Control, Meters, NUM_CHANNELS, Value};
 
 use crate::app::App;
 

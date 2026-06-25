@@ -1,4 +1,4 @@
-//! `tascam-mixer` — graphical mixer for the Tascam US-16x08.
+//! `rackctl-us16x08-gui` — graphical mixer for the Tascam US-16x08.
 
 mod app;
 mod bridge;
@@ -12,14 +12,14 @@ mod routing;
 
 use anyhow::Result;
 use clap::Parser;
-use tascam_us16x08::{Backend, MockBackend, Us16x08};
+use rackctl_us16x08::{Backend, MockBackend, Us16x08};
 
 #[cfg(feature = "alsa")]
-use tascam_us16x08::AlsaBackend;
+use rackctl_us16x08::AlsaBackend;
 
 /// Graphical mixer for the Tascam US-16x08 DSP mixer.
 #[derive(Parser)]
-#[command(name = "tascam-mixer", version)]
+#[command(name = "rackctl-us16x08-gui", version)]
 struct Cli {
     /// Use an in-memory mock device instead of real hardware.
     #[arg(long)]
@@ -60,7 +60,7 @@ fn main() -> Result<()> {
     // Restore the saved window size before creating the window; an absent size
     // falls back to eframe's default. The app id is the Wayland app_id (the
     // window "class" in Hyprland/sway), so compositor rules can target it.
-    let mut viewport = eframe::egui::ViewportBuilder::default().with_app_id("tascam-mixer");
+    let mut viewport = eframe::egui::ViewportBuilder::default().with_app_id("rackctl-us16x08-gui");
     if let Some([w, h]) = config::load().window {
         viewport = viewport.with_inner_size([w, h]);
     }

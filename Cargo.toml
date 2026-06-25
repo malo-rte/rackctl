@@ -3,15 +3,15 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
-repository = "https://github.com/malo-rte/tascam-mixer"
+repository = "https://github.com/malo-rte/rackctl"
 authors = ["Mats Loman <mats.loman@rte.se>"]
 
 [workspace.dependencies]
-tascam-us16x08 = { path = "crates/tascam-us16x08" }
+rackctl-us16x08 = { path = "crates/us16x08" }
 thiserror = "2"
 alsa = "0.9"
 serde = { version = "1", features = ["derive"] }

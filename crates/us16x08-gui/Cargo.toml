@@ -1,7 +1,7 @@
 [package]
-name = "tascam-gui"
+name = "rackctl-us16x08-gui"
 version.workspace = true
-description = "Graphical mixer (tascam-mixer) for the Tascam US-16x08 USB audio interface."
+description = "Graphical mixer (rackctl-us16x08-gui) for the Tascam US-16x08 USB audio interface."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -9,17 +9,17 @@ repository.workspace = true
 authors.workspace = true
 
 [[bin]]
-name = "tascam-mixer"
+name = "rackctl-us16x08-gui"
 path = "src/main.rs"
 
 [features]
 # The real ALSA backend is on by default; `--mock` swaps in the in-memory
 # backend at runtime. Build with `--no-default-features` for a mock-only binary.
 default = ["alsa"]
-alsa = ["tascam-us16x08/alsa"]
+alsa = ["rackctl-us16x08/alsa"]
 
 [dependencies]
-tascam-us16x08 = { path = "../tascam-us16x08", default-features = false }
+rackctl-us16x08 = { path = "../us16x08", default-features = false }
 clap.workspace = true
 eframe.workspace = true
 egui.workspace = true

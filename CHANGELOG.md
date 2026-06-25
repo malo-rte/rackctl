@@ -7,29 +7,47 @@ version.
 
 ## [Unreleased]
 
-### Added
-
-- **Packaging** — a Nix flake (`flake.nix`): `nix run` the GUI or
-  `nix run .#tascamctl` the CLI, `nix build`, and `nix develop` for a dev shell
-  with the Rust toolchain and the eframe system libraries. The package version is
-  read from the workspace `Cargo.toml`, and the GUI binary is wrapped so it finds
-  the Wayland/GL/xkbcommon libraries it loads at run time.
-- **CLI** — `tascamctl completions <shell>` prints a shell completion script
-  (bash, zsh, fish, elvish, or powershell) generated from the command definition,
-  so it always matches the current commands and flags.
-- **Packaging** — a desktop entry (`packaging/tascam-mixer.desktop`) for launching
-  the GUI from a desktop menu, with `packaging/README.adoc` covering a manual
-  install of the binaries, the desktop entry, and the completions. The Nix package
-  installs the completions and the desktop entry automatically.
+## [0.7.0] - 2026-06-25
 
 ### Changed
 
+- **BREAKING — renamed the project to Rackctl**, a suite of Linux utilities for
+  controlling outboard audio hardware. The Tascam US-16x08 tools are its first
+  member (a BOSS GX-700 is planned). Renames:
+  - binaries `tascamctl` → `rackctl-us16x08`, `tascam-mixer` → `rackctl-us16x08-gui`;
+  - crates `tascam-us16x08`/`tascam-cli`/`tascam-gui` →
+    `rackctl-us16x08`/`rackctl-us16x08-cli`/`rackctl-us16x08-gui`
+    (in `crates/us16x08`, `crates/us16x08-cli`, `crates/us16x08-gui`);
+  - repository `malo-rte/tascam-mixer` → `malo-rte/rackctl`.
+
+  Settings move to `~/.config/rackctl/us16x08/` (the default preset, scenes, and
+  per-section presets) and are migrated automatically from the previous
+  `~/.config/tascam-mixer/` on first run — saved presets and the default carry
+  over — also dropping the inherited `paraair` namespace. Update any scripts,
+  udev rules, or systemd units that referenced the old binary names. "Tascam
+  US-16x08" remains in the tools' descriptive text, naming the hardware they
+  control.
 - **License/credits** — the `LICENSE` file now carries this project's own MIT
   license (© 2026 Mats Loman) instead of the inherited upstream copyright, and the
   workspace `license` field is corrected from `ISC` to `MIT` to match. The README
   gains an acknowledgment of [tascam-gtk](https://github.com/onkelDead/tascam-gtk)
   by onkelDead, the (independently reimplemented, not copied) inspiration for this
-  project.
+  project, and a trademark disclaimer.
+
+### Added
+
+- **Packaging** — a Nix flake (`flake.nix`): `nix run` the GUI or
+  `nix run .#rackctl-us16x08` the CLI, `nix build`, and `nix develop` for a dev
+  shell with the Rust toolchain and the eframe system libraries. The package
+  version is read from the workspace `Cargo.toml`, and the GUI binary is wrapped
+  so it finds the Wayland/GL/xkbcommon libraries it loads at run time.
+- **CLI** — `rackctl-us16x08 completions <shell>` prints a shell completion script
+  (bash, zsh, fish, elvish, or powershell) generated from the command definition,
+  so it always matches the current commands and flags.
+- **Packaging** — a desktop entry (`packaging/rackctl-us16x08-gui.desktop`) for
+  launching the GUI from a desktop menu, with `packaging/README.adoc` covering a
+  manual install of the binaries, the desktop entry, and the completions. The Nix
+  package installs the completions and the desktop entry automatically.
 
 ## [0.6.0] - 2026-06-25
 
@@ -205,11 +223,12 @@ only, via the `snd-usb-audio` driver.
 - The tools drive the DSP mixer control surface only; they do not stream audio.
   Capture to the computer is taken pre-DSP (the dry input).
 
-[Unreleased]: https://github.com/malo-rte/tascam-mixer/compare/v0.6.0...HEAD
-[0.6.0]: https://github.com/malo-rte/tascam-mixer/compare/v0.5.0...v0.6.0
-[0.5.0]: https://github.com/malo-rte/tascam-mixer/compare/v0.4.0...v0.5.0
-[0.4.0]: https://github.com/malo-rte/tascam-mixer/compare/v0.3.0...v0.4.0
-[0.3.0]: https://github.com/malo-rte/tascam-mixer/compare/v0.2.1...v0.3.0
-[0.2.1]: https://github.com/malo-rte/tascam-mixer/compare/v0.2.0...v0.2.1
-[0.2.0]: https://github.com/malo-rte/tascam-mixer/compare/v0.1.0...v0.2.0
-[0.1.0]: https://github.com/malo-rte/tascam-mixer/releases/tag/v0.1.0
+[Unreleased]: https://github.com/malo-rte/rackctl/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/malo-rte/rackctl/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/malo-rte/rackctl/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/malo-rte/rackctl/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/malo-rte/rackctl/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/malo-rte/rackctl/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/malo-rte/rackctl/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/malo-rte/rackctl/compare/v0.1.0...v0.2.0
+[0.1.0]: https://github.com/malo-rte/rackctl/releases/tag/v0.1.0

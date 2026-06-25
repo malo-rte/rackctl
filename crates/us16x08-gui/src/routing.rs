@@ -2,7 +2,7 @@
 #![allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap)]
 
 use eframe::egui;
-use tascam_us16x08::{Control, Kind, NUM_OUTPUTS, Value};
+use rackctl_us16x08::{Control, Kind, NUM_OUTPUTS, Value};
 
 use crate::app::App;
 

@@ -1,11 +1,11 @@
 //! Parsing and formatting control values for the command line.
 
 use anyhow::{Result, anyhow, bail};
-use tascam_us16x08::{Control, Kind, Value, units};
+use rackctl_us16x08::{Control, Kind, Value, units};
 
 /// Parse a user-supplied string into a [`Value`] for `control`. Integer
 /// controls accept their display units (dB, Hz, ms, pan) as well as a bare
-/// number; see [`tascam_us16x08::units`].
+/// number; see [`rackctl_us16x08::units`].
 pub(crate) fn parse_value(control: Control, input: &str) -> Result<Value> {
     match control.kind() {
         Kind::Bool => Ok(Value::Bool(parse_bool(input)?)),

@@ -3,13 +3,13 @@
 
 use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::thread::sleep;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use directories::ProjectDirs;
-use tascam_us16x08::{
+use rackctl_us16x08::{
     Backend, Control, Kind, LoadTiming, Meters, NUM_CHANNELS, NUM_OUTPUTS, Preset, Scope, Section,
     Us16x08, Value, Watcher, units,
 };
@@ -241,12 +241,36 @@ fn wait_until_writable<B: Backend>(dev: &mut Us16x08<B>) {
     }
 }
 
-/// Path to the shared default-mixer preset, in the same config directory the
-/// GUI uses for its "Save default" / "Load default" buttons.
+/// Path to the shared default-mixer preset, in the same settings directory the
+/// GUI uses for its "Save default" / "Load default" buttons:
+/// `<config>/rackctl/us16x08`. Migrates a pre-rename `tascam-mixer` directory
+/// into place on first use, so an existing default carries over.
 fn default_preset_path() -> Result<PathBuf> {
-    ProjectDirs::from("de", "paraair", "tascam-mixer")
-        .map(|dirs| dirs.config_dir().join("default-preset.json"))
-        .context("could not determine the configuration directory")
+    let dir = ProjectDirs::from("", "malo-rte", "rackctl")
+        .map(|dirs| dirs.config_dir().join("us16x08"))
+        .context("could not determine the configuration directory")?;
+    migrate_legacy_settings(&dir);
+    Ok(dir.join("default-preset.json"))
+}
+
+/// One-time move of the pre-rename settings (`<config>/tascam-mixer`) into the
+/// new suite location. Best effort; mirrors the GUI's migration.
+fn migrate_legacy_settings(new_dir: &Path) {
+    if new_dir.exists() {
+        return;
+    }
+    let Some(old) = ProjectDirs::from("de", "paraair", "tascam-mixer")
+        .map(|dirs| dirs.config_dir().to_path_buf())
+    else {
+        return;
+    };
+    if !old.exists() {
+        return;
+    }
+    if let Some(parent) = new_dir.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::rename(&old, new_dir);
 }
 
 /// Load the shared default mixer preset, or (with `save`) capture the current
@@ -377,7 +401,7 @@ fn kind_str(control: Control) -> String {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
-    use tascam_us16x08::MockBackend;
+    use rackctl_us16x08::MockBackend;
 
     fn dev() -> Us16x08<MockBackend> {
         Us16x08::new(MockBackend::new())

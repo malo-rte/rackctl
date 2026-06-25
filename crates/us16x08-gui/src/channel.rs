@@ -1,6 +1,6 @@
 //! The focused-channel editor: phase, fader, pan, EQ, and compressor.
 //!
-//! Widgets are driven by each control's [`tascam_us16x08::Kind`]; the EQ and
+//! Widgets are driven by each control's [`rackctl_us16x08::Kind`]; the EQ and
 //! compressor sections add response/transfer curves (see [`crate::curves`]).
 //! Small numeric casts for combo indices and plot/curve math are harmless.
 #![allow(
@@ -12,7 +12,7 @@
 
 use eframe::egui;
 use egui_plot::{Axis, AxisHints, Line, LineStyle, Plot, PlotPoint, PlotPoints, Polygon, Text};
-use tascam_us16x08::{COMP_RATIO_VALUES, Control, Kind, Value, units};
+use rackctl_us16x08::{COMP_RATIO_VALUES, Control, Kind, Value, units};
 
 use crate::app::{App, Group};
 use crate::bridge;

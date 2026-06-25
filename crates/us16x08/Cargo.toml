@@ -1,5 +1,5 @@
 [package]
-name = "tascam-us16x08"
+name = "rackctl-us16x08"
 version.workspace = true
 description = "Control-surface library for the Tascam US-16x08 USB audio interface, driven through the ALSA high-level control (HCTL) API."
 edition.workspace = true

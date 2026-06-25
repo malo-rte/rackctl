@@ -1,7 +1,7 @@
 [package]
-name = "tascam-cli"
+name = "rackctl-us16x08-cli"
 version.workspace = true
-description = "Command-line control tool (tascamctl) for the Tascam US-16x08 USB audio interface."
+description = "Command-line control tool (rackctl-us16x08) for the Tascam US-16x08 USB audio interface."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -9,17 +9,17 @@ repository.workspace = true
 authors.workspace = true
 
 [[bin]]
-name = "tascamctl"
+name = "rackctl-us16x08"
 path = "src/main.rs"
 
 [features]
 # Mirror the library: the real ALSA backend is on by default; build with
 # `--no-default-features` for a mock-only binary that needs no sound card.
 default = ["alsa"]
-alsa = ["tascam-us16x08/alsa"]
+alsa = ["rackctl-us16x08/alsa"]
 
 [dependencies]
-tascam-us16x08 = { path = "../tascam-us16x08", default-features = false }
+rackctl-us16x08 = { path = "../us16x08", default-features = false }
 clap.workspace = true
 clap_complete.workspace = true
 anyhow.workspace = true

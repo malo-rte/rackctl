@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use eframe::egui;
-use tascam_us16x08::{Control, Kind, LoadTiming, Meters, NUM_CHANNELS, Preset, Scope, Value};
+use rackctl_us16x08::{Control, Kind, LoadTiming, Meters, NUM_CHANNELS, Preset, Scope, Value};
 
 use crate::config::{self, GuiConfig};
 use crate::poller::{self, Poller, Report, SharedDevice, lock};
@@ -1239,7 +1239,7 @@ mod tests {
         // The grouping is recovered, and the library still parses the preset
         // (the extra field is ignored).
         assert_eq!(extract_links(&value), Some(links));
-        assert!(serde_json::from_value::<tascam_us16x08::Preset>(value).is_ok());
+        assert!(serde_json::from_value::<rackctl_us16x08::Preset>(value).is_ok());
     }
 
     #[test]

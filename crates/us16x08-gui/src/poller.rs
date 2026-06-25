@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use tascam_us16x08::{Backend, Control, Kind, Meters, Us16x08, Value};
+use rackctl_us16x08::{Backend, Control, Kind, Meters, Us16x08, Value};
 
 /// The device, shared between the UI thread and the poller. Each access locks it
 /// briefly.

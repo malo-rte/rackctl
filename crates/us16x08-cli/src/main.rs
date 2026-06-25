@@ -1,4 +1,4 @@
-//! `tascamctl` — command-line control for the Tascam US-16x08 DSP mixer.
+//! `rackctl-us16x08` — command-line control for the Tascam US-16x08 DSP mixer.
 
 mod commands;
 mod value;
@@ -9,18 +9,18 @@ use anyhow::Result;
 use clap::builder::styling::{AnsiColor, Styles};
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
 use clap_complete::Shell;
-use tascam_us16x08::{Backend, MockBackend, Section, Us16x08};
+use rackctl_us16x08::{Backend, MockBackend, Section, Us16x08};
 
 #[cfg(feature = "alsa")]
-use tascam_us16x08::AlsaBackend;
+use rackctl_us16x08::AlsaBackend;
 
 #[derive(Parser)]
 #[command(
-    name = "tascamctl",
+    name = "rackctl-us16x08",
     version,
     about = "Control the Tascam US-16x08 DSP mixer",
     long_about = "\
-tascamctl reads and writes the US-16x08's on-board DSP mixer -- faders, EQ, \
+rackctl-us16x08 reads and writes the US-16x08's on-board DSP mixer -- faders, EQ, \
 compressor, mutes, and output routing -- over ALSA. It drives the control \
 surface only; it does not stream or record audio.
 
@@ -51,19 +51,19 @@ const HELP_STYLES: Styles = Styles::styled()
     .valid(AnsiColor::Green.on_default().bold())
     .invalid(AnsiColor::Yellow.on_default());
 
-/// Examples shown at the foot of `tascamctl --help`.
+/// Examples shown at the foot of `rackctl-us16x08 --help`.
 const EXAMPLES: &str = "\
 Examples:
-  tascamctl list                         List every control key
-  tascamctl info eq-low-volume           Explain one control
-  tascamctl get master-volume            Read a value
-  tascamctl set mute on -c 3             Mute channel 3
-  tascamctl set master-volume -6dB       Set the master to -6 dB
-  tascamctl set line-volume +2 -c 0      Nudge channel 0 up 2 dB
-  tascamctl monitor                      Watch the meters live
-  tascamctl save mix.json                Back up the whole mixer
-  tascamctl save eq.json -c 3 --section eq   Save channel 4's EQ only
-  tascamctl default --save               Remember the current mix as the default";
+  rackctl-us16x08 list                         List every control key
+  rackctl-us16x08 info eq-low-volume           Explain one control
+  rackctl-us16x08 get master-volume            Read a value
+  rackctl-us16x08 set mute on -c 3             Mute channel 3
+  rackctl-us16x08 set master-volume -6dB       Set the master to -6 dB
+  rackctl-us16x08 set line-volume +2 -c 0      Nudge channel 0 up 2 dB
+  rackctl-us16x08 monitor                      Watch the meters live
+  rackctl-us16x08 save mix.json                Back up the whole mixer
+  rackctl-us16x08 save eq.json -c 3 --section eq   Save channel 4's EQ only
+  rackctl-us16x08 default --save               Remember the current mix as the default";
 
 #[derive(Subcommand)]
 enum Command {
@@ -163,11 +163,11 @@ enum Command {
         #[arg(long)]
         save: bool,
     },
-    /// Print a shell completion script for tascamctl to standard output.
+    /// Print a shell completion script for rackctl-us16x08 to standard output.
     ///
     /// Redirect it to where your shell looks for completions, for example:
-    ///   tascamctl completions bash | sudo tee /usr/share/bash-completion/completions/tascamctl
-    ///   tascamctl completions fish > ~/.config/fish/completions/tascamctl.fish
+    ///   rackctl-us16x08 completions bash | sudo tee /usr/share/bash-completion/completions/rackctl-us16x08
+    ///   rackctl-us16x08 completions fish > ~/.config/fish/completions/rackctl-us16x08.fish
     #[command(verbatim_doc_comment)]
     Completions {
         /// Shell to generate the completion script for.
@@ -183,13 +183,13 @@ fn print_completions(shell: Shell) {
     clap_complete::generate(shell, &mut cmd, name, &mut std::io::stdout());
 }
 
-/// Examples shown at the foot of `tascamctl set --help`.
+/// Examples shown at the foot of `rackctl-us16x08 set --help`.
 const SET_EXAMPLES: &str = "\
 Examples:
-  tascamctl set mute on -c 3             Mute channel 3
-  tascamctl set master-volume -6dB       Absolute -6 dB
-  tascamctl set line-volume +2 -c 0      Relative +2 dB on channel 0
-  tascamctl set comp-enable toggle -c 0  Flip the compressor on channel 0";
+  rackctl-us16x08 set mute on -c 3             Mute channel 3
+  rackctl-us16x08 set master-volume -6dB       Absolute -6 dB
+  rackctl-us16x08 set line-volume +2 -c 0      Relative +2 dB on channel 0
+  rackctl-us16x08 set comp-enable toggle -c 0  Flip the compressor on channel 0";
 
 /// How much of a channel `save` captures. Maps to [`Section`].
 #[derive(Clone, Copy, Debug, ValueEnum)]

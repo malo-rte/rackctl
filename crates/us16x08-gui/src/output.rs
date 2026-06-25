@@ -1,7 +1,7 @@
 //! The OUTPUT panel: master meters/fader/mute and the global DSP switches.
 
 use eframe::egui;
-use tascam_us16x08::{Control, Value};
+use rackctl_us16x08::{Control, Value};
 
 use crate::app::App;
 use crate::bridge::METER_HEIGHT;
@@ -39,7 +39,7 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
     ui.separator();
 
     // The shared default preset: whole-mixer state saved to / restored from the
-    // config directory, also reachable via `tascamctl default`. The interface
+    // config directory, also reachable via `rackctl-us16x08 default`. The interface
     // zoom and window size are saved and restored alongside it as part of the
     // user's setup.
     if ui.button("Save default").clicked() {

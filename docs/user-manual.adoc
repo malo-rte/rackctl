@@ -3,7 +3,7 @@
 :doc-status:    Draft
 :doc-date:      2026-06-18
 :doc-authors:   Mats Loman
-:applies-to-version: 0.6.0
+:applies-to-version: 0.7.0
 :revnumber:     {doc-version}
 :revdate:       {doc-date}
 :title-page:
@@ -17,7 +17,7 @@
 
 This manual describes how to control the Tascam US-16x08's built-in DSP mixer
 from Linux, using the two tools this project provides: the command-line tool
-`tascamctl` and the graphical mixer `tascam-mixer`.
+`rackctl-us16x08` and the graphical mixer `rackctl-us16x08-gui`.
 
 [[sec-intro]]
 == Introduction
@@ -28,11 +28,11 @@ summed into a stereo master bus and routed to eight physical outputs. On Linux
 the `snd-usb-audio` driver exposes that mixer as roughly 280 ALSA control
 elements. The two tools in this project drive those controls.
 
-`tascamctl`:: A command-line tool for reading and writing individual controls,
+`rackctl-us16x08`:: A command-line tool for reading and writing individual controls,
 watching changes, reading the level meters, and saving or restoring whole-mixer
 or single-channel presets. Suited to scripting and to quick one-off changes.
 
-`tascam-mixer`:: A graphical mixer with a live meter bridge, a focused
+`rackctl-us16x08-gui`:: A graphical mixer with a live meter bridge, a focused
 channel editor showing the EQ and compressor as response curves, an output
 panel, and an output-routing tab. Suited to interactive mixing.
 
@@ -57,8 +57,8 @@ these tools control.
 [[sec-scope]]
 == Scope
 
-This manual covers operating the US-16x08 DSP mixer through `tascamctl` and
-`tascam-mixer` on Linux.
+This manual covers operating the US-16x08 DSP mixer through `rackctl-us16x08` and
+`rackctl-us16x08-gui` on Linux.
 
 In scope:
 
@@ -76,7 +76,7 @@ Out of scope:
 * *Front-panel and interface functions* not exposed as DSP controls: mic preamp
   gain, phantom power, and sample rate. These are set on the unit or by the audio
   stack, not by these tools.
-* *The `tascam-us16x08` library API.* Building applications against the control
+* *The `rackctl-us16x08` library API.* Building applications against the control
   library is a developer topic; see the project README.
 
 Prerequisites:
@@ -84,7 +84,7 @@ Prerequisites:
 * A Linux system running the `snd-usb-audio` driver (kernel 4.11 or later, which
   added US-16x08 support).
 * A connected US-16x08, recognized as ALSA card id `US16x08`.
-* A built `tascamctl` and/or `tascam-mixer` binary (see <<sec-install>>).
+* A built `rackctl-us16x08` and/or `rackctl-us16x08-gui` binary (see <<sec-install>>).
 
 For trying the tools without the hardware, every command and the whole GUI run
 against an in-memory mock device (see <<sec-mock>>).
@@ -163,7 +163,7 @@ record that) or apply the processing in the DAW.
 === Controls: scope, kind, and display units
 
 Every control has a short *key* (for example `eq-low-volume`), used by
-`tascamctl` and shown by the `list` command. Each control has a *scope* and a
+`rackctl-us16x08` and shown by the `list` command. Each control has a *scope* and a
 *kind*.
 
 Scope says how many instances a control has:
@@ -186,7 +186,7 @@ Integer controls are read and written in *display units* rather than raw control
 numbers: dB for the faders, EQ gains, and compressor threshold and gain; Hz or
 kHz for the EQ band frequencies; ms for the compressor attack and release; and
 `C` / `L..%` / `R..%` for pan. Both tools use the same units, so a value shown by
-`tascamctl get` matches the value shown on the matching GUI control. The raw
+`rackctl-us16x08 get` matches the value shown on the matching GUI control. The raw
 ranges behind these units are listed in <<sec-appendix-catalog>>.
 
 [[sec-presets-concept]]
@@ -197,7 +197,7 @@ exist:
 
 * A *mixer preset* holds the whole mixer: the master controls, the output
   routing, and all 16 channel strips. Saved from the GUI, it also records the
-  stereo-link grouping (an extra field `tascamctl` ignores).
+  stereo-link grouping (an extra field `rackctl-us16x08` ignores).
 * A *strip preset* holds one channel's controls and can be applied to any
   channel.
 
@@ -242,9 +242,9 @@ development headers, which the default build links against.
 cargo build --release
 ----
 +
-This produces `target/release/tascamctl` and `target/release/tascam-mixer`.
+This produces `target/release/rackctl-us16x08` and `target/release/rackctl-us16x08-gui`.
 
-To build a single tool, add `-p tascam-cli` or `-p tascam-gui`.
+To build a single tool, add `-p rackctl-us16x08-cli` or `-p rackctl-us16x08-gui`.
 
 [[sec-mock]]
 === Running without hardware
@@ -252,9 +252,9 @@ To build a single tool, add `-p tascam-cli` or `-p tascam-gui`.
 Both tools accept an in-memory mock device that needs no card and no ALSA
 headers, useful for trying commands or the interface before connecting hardware.
 
-* `tascamctl` takes a global `--mock` flag before the command, for example
-  `tascamctl --mock list`.
-* `tascam-mixer` takes a `--mock` argument: `tascam-mixer --mock`.
+* `rackctl-us16x08` takes a global `--mock` flag before the command, for example
+  `rackctl-us16x08 --mock list`.
+* `rackctl-us16x08-gui` takes a `--mock` argument: `rackctl-us16x08-gui --mock`.
 
 To build without the ALSA dependency at all (mock only), build with
 `--no-default-features`.
@@ -262,7 +262,7 @@ To build without the ALSA dependency at all (mock only), build with
 [[sec-cli]]
 == Using the command-line tool
 
-`tascamctl` runs one command per invocation. A global `--mock` flag selects the
+`rackctl-us16x08` runs one command per invocation. A global `--mock` flag selects the
 mock device; otherwise the tool opens the connected US-16x08. The exact command
 and option syntax is in <<sec-cli-ref>>.
 
@@ -273,7 +273,7 @@ To see every control with its key, scope, kind, and ALSA name:
 
 [source,bash]
 ----
-tascamctl list
+rackctl-us16x08 list
 ----
 
 The KIND column shows each integer control's range in display units, for example
@@ -283,7 +283,7 @@ To explain the signal flow and how the eight outputs are routed:
 
 [source,bash]
 ----
-tascamctl topology
+rackctl-us16x08 topology
 ----
 
 To see one control in detail (scope, range in display units, enum values, and a
@@ -291,7 +291,7 @@ short description):
 
 [source,bash]
 ----
-tascamctl info comp-ratio
+rackctl-us16x08 info comp-ratio
 ----
 
 `list`, `topology`, and `info` do not touch the device, so they work without
@@ -305,9 +305,9 @@ give the index with `-c`:
 
 [source,bash]
 ----
-tascamctl get master-volume        # a global control, prints e.g. "+0 dB"
-tascamctl get eq-low-freq -c 0     # channel 0, prints e.g. "60 Hz"
-tascamctl get mute -c 3            # channel 3, prints "true" or "false"
+rackctl-us16x08 get master-volume        # a global control, prints e.g. "+0 dB"
+rackctl-us16x08 get eq-low-freq -c 0     # channel 0, prints e.g. "60 Hz"
+rackctl-us16x08 get mute -c 3            # channel 3, prints "true" or "false"
 ----
 
 Read the level meters once with `meters`, or continuously until interrupted with
@@ -315,9 +315,9 @@ Read the level meters once with `meters`, or continuously until interrupted with
 
 [source,bash]
 ----
-tascamctl meters                   # one reading, dB-scaled
-tascamctl meters --raw             # linear samples instead
-tascamctl monitor                  # repeat until Ctrl-C
+rackctl-us16x08 meters                   # one reading, dB-scaled
+rackctl-us16x08 meters --raw             # linear samples instead
+rackctl-us16x08 monitor                  # repeat until Ctrl-C
 ----
 
 Print control changes as they happen (for example, when someone turns a knob on
@@ -325,11 +325,11 @@ the unit or another client writes a control):
 
 [source,bash]
 ----
-tascamctl watch
+rackctl-us16x08 watch
 ----
 
-NOTE: While `tascam-mixer` is running it polls the meters continuously. Run only
-one meter reader at a time; do not run `tascamctl monitor` against the device
+NOTE: While `rackctl-us16x08-gui` is running it polls the meters continuously. Run only
+one meter reader at a time; do not run `rackctl-us16x08 monitor` against the device
 while the GUI is open.
 
 [[sec-cli-write]]
@@ -343,16 +343,16 @@ flip the current value:
 
 [source,bash]
 ----
-tascamctl set mute on -c 3
-tascamctl set mute toggle -c 3
+rackctl-us16x08 set mute on -c 3
+rackctl-us16x08 set mute toggle -c 3
 ----
 
 Enum controls accept either the label or its index:
 
 [source,bash]
 ----
-tascamctl set route "Output 3" -c 0
-tascamctl set comp-ratio 4 -c 0
+rackctl-us16x08 set route "Output 3" -c 0
+rackctl-us16x08 set comp-ratio 4 -c 0
 ----
 
 Integer controls accept their display units. A bare number, or a number with a
@@ -360,10 +360,10 @@ unit suffix, is an absolute value:
 
 [source,bash]
 ----
-tascamctl set master-volume +3dB -c 0   # dB
-tascamctl set eq-low-freq 1.2kHz -c 0    # Hz / kHz
-tascamctl set comp-release 200ms -c 0    # ms
-tascamctl set pan L50% -c 0              # C / L..% / R..%
+rackctl-us16x08 set master-volume +3dB -c 0   # dB
+rackctl-us16x08 set eq-low-freq 1.2kHz -c 0    # Hz / kHz
+rackctl-us16x08 set comp-release 200ms -c 0    # ms
+rackctl-us16x08 set pan L50% -c 0              # C / L..% / R..%
 ----
 
 A bare `+N` or `-N` adjusts the control relative to its current value, in display
@@ -373,8 +373,8 @@ adjust:
 
 [source,bash]
 ----
-tascamctl set master-volume +5          # relative: add 5 dB
-tascamctl set eq-low-volume -6dB -c 0   # absolute: -6 dB
+rackctl-us16x08 set master-volume +5          # relative: add 5 dB
+rackctl-us16x08 set eq-low-volume -6dB -c 0   # absolute: -6 dB
 ----
 
 A value beyond a control's range is clamped to the range. `set` prints nothing on
@@ -389,10 +389,10 @@ much of the channel to save and requires `-c`:
 
 [source,bash]
 ----
-tascamctl save mix.json                  # the whole mixer
-tascamctl save strip.json -c 0           # just channel 0's strip
-tascamctl save eq.json -c 0 --section eq # just channel 0's EQ
-tascamctl save comp.json -c 0 --section comp   # just channel 0's compressor
+rackctl-us16x08 save mix.json                  # the whole mixer
+rackctl-us16x08 save strip.json -c 0           # just channel 0's strip
+rackctl-us16x08 save eq.json -c 0 --section eq # just channel 0's EQ
+rackctl-us16x08 save comp.json -c 0 --section comp   # just channel 0's compressor
 ----
 
 Restore from a file. A mixer preset restores everything and takes no channel; a
@@ -401,9 +401,9 @@ the controls the file holds:
 
 [source,bash]
 ----
-tascamctl load mix.json                  # restore the whole mixer
-tascamctl load strip.json -c 5           # apply a strip to channel 5
-tascamctl load eq.json -c 5              # apply just an EQ to channel 5
+rackctl-us16x08 load mix.json                  # restore the whole mixer
+rackctl-us16x08 load strip.json -c 5           # apply a strip to channel 5
+rackctl-us16x08 load eq.json -c 5              # apply just an EQ to channel 5
 ----
 
 These are the same files the GUI's scenes and channel/EQ/compressor preset tabs
@@ -418,8 +418,8 @@ Recall the shared default preset, or capture the current mixer as the default:
 
 [source,bash]
 ----
-tascamctl default                        # load the default into the whole mixer
-tascamctl default --save                 # save the current mixer as the default
+rackctl-us16x08 default                        # load the default into the whole mixer
+rackctl-us16x08 default --save                 # save the current mixer as the default
 ----
 
 Loading before a default exists is an error that names the expected file. The
@@ -432,7 +432,7 @@ file is shared with the GUI's *Save default* and *Load default* buttons (see
 With a `udev` rule you can have the default preset applied every time the
 interface is plugged in, with nothing running -- handy because the device powers
 up at its own factory defaults each time it is connected. The rule reacts to the
-card appearing and hands off to a small `systemd` service that runs `tascamctl
+card appearing and hands off to a small `systemd` service that runs `rackctl-us16x08
 default`. (Handing off to `systemd` matters: `udev` runs commands in a stripped
 environment and kills anything still running when the event finishes, so it is
 the wrong place to run the tool directly.)
@@ -441,15 +441,15 @@ This complements the GUI's own behaviour: the running GUI already restores its
 on-screen mix on replug (see <<sec-appendix-trouble>>); this rule covers the case
 where no GUI is running.
 
-First make sure a default exists and note where `tascamctl` is installed:
+First make sure a default exists and note where `rackctl-us16x08` is installed:
 
 [source,bash]
 ----
-tascamctl default --save                 # capture the current mixer as the default
-command -v tascamctl                      # e.g. /usr/local/bin/tascamctl
+rackctl-us16x08 default --save                 # capture the current mixer as the default
+command -v rackctl-us16x08                      # e.g. /usr/local/bin/rackctl-us16x08
 ----
 
-Create the `udev` rule `/etc/udev/rules.d/99-tascam-us16x08.rules`. It matches the
+Create the `udev` rule `/etc/udev/rules.d/99-rackctl-us16x08.rules`. It matches the
 card by its ALSA id (`US16x08`) and triggers the service when the control device
 appears, which is the point at which the card is ready to be opened:
 
@@ -457,12 +457,12 @@ appears, which is the point at which the card is ready to be opened:
 ----
 ACTION=="add", SUBSYSTEM=="sound", KERNEL=="controlC[0-9]*", \
   ATTRS{id}=="US16x08", TAG+="systemd", \
-  ENV{SYSTEMD_WANTS}+="tascam-default.service"
+  ENV{SYSTEMD_WANTS}+="rackctl-us16x08-default.service"
 ----
 
-Create the service `/etc/systemd/system/tascam-default.service`. Set `User=` to
-your login account: the command then reads *your* default preset from
-`~/.config/tascam-mixer/default-preset.json`, the same file the tools save. Adjust
+Create the service `/etc/systemd/system/rackctl-us16x08-default.service`. Set
+`User=` to your login account: the command then reads *your* default preset from
+`~/.config/rackctl/us16x08/default-preset.json`, the same file the tools save. Adjust
 `ExecStart` to the path from `command -v` above:
 
 [source,ini]
@@ -473,7 +473,7 @@ Description=Load the Tascam US-16x08 default mixer preset
 [Service]
 Type=oneshot
 User=YOUR_USERNAME
-ExecStart=/usr/local/bin/tascamctl default
+ExecStart=/usr/local/bin/rackctl-us16x08 default
 ----
 
 The service is started on demand by the rule, so it is neither enabled nor given
@@ -485,14 +485,14 @@ sudo udevadm control --reload
 sudo systemctl daemon-reload
 ----
 
-Replug the interface to test. `journalctl -u tascam-default.service` shows whether
+Replug the interface to test. `journalctl -u rackctl-us16x08-default.service` shows whether
 the load ran and what it applied. If the open occasionally races the device
 becoming ready, add `ExecStartPre=/bin/sleep 1` to the service.
 
 [[sec-gui]]
 == Using the graphical mixer
 
-`tascam-mixer` opens a single window: a meter bridge across the top, a focused
+`rackctl-us16x08-gui` opens a single window: a meter bridge across the top, a focused
 channel (or linked pair) editor in the centre, an output panel on the right, and
 a toolbar to switch between the channel editor, the routing tab, and the preset
 tabs (scenes, channel, EQ, and compressor presets). The full list of panels and
@@ -631,7 +631,7 @@ Each row also has a *Copy* button that overlays the preset's section onto the
 editor's clipboard, ready to *Paste* onto a channel from the editor.
 
 A section preset is stored as a channel strip preset that holds only that
-section's controls, so `tascamctl load` can apply one to a channel too -- it sets
+section's controls, so `rackctl-us16x08 load` can apply one to a channel too -- it sets
 just the saved controls and leaves the rest of the channel untouched.
 
 Loading a channel, EQ, or compressor preset onto a channel that is part of a
@@ -659,10 +659,10 @@ the <<sec-gui-scenes,Scenes>> tab, and per-channel strips from the
 
 The output panel's *Save default* and *Load default* buttons capture the current
 mixer as the shared default preset, or restore it. This is the same default file
-that `tascamctl default` uses (see <<sec-cli-default>>). *Save default* also
+that `rackctl-us16x08 default` uses (see <<sec-cli-default>>). *Save default* also
 records the current interface zoom and window size, and *Load default* and the
 next startup restore them, so they are part of the saved setup. The zoom and
-window size are GUI settings, so `tascamctl default` does not change them.
+window size are GUI settings, so `rackctl-us16x08 default` does not change them.
 
 [[sec-gui-keyboard]]
 === Keyboard and zoom
@@ -677,11 +677,11 @@ interface in or out. The zoom is remembered by *Save default* (see
 [[sec-cli-ref]]
 == Command-line reference
 
-`tascamctl` invocation:
+`rackctl-us16x08` invocation:
 
 [source]
 ----
-tascamctl [--mock] <command> [arguments]
+rackctl-us16x08 [--mock] <command> [arguments]
 ----
 
 [[sec-cli-ref-global]]
@@ -732,28 +732,28 @@ For channel controls the channel index is 0...15; for output controls it is
 [[sec-gui-ref]]
 == Graphical interface reference
 
-`tascam-mixer` invocation:
+`rackctl-us16x08-gui` invocation:
 
 [source]
 ----
-tascam-mixer [--mock]
+rackctl-us16x08-gui [--mock]
 ----
 
 It also accepts `--version` and `--help`. `--mock` runs the whole interface
 against the in-memory mock device (see <<sec-mock>>).
 
-On Wayland the window sets its `app_id` to `tascam-mixer` (the window class in
+On Wayland the window sets its `app_id` to `rackctl-us16x08-gui` (the window class in
 compositors such as Hyprland and sway), so a compositor rule can target it. For
 example, to float and centre the window in `hyprland.conf` (Hyprland 0.53 or
 later):
 
 [source]
 ----
-windowrule = match:class ^(tascam-mixer)$, float 1, center 1
+windowrule = match:class ^(rackctl-us16x08-gui)$, float 1, center 1
 ----
 
 A Lua-configured Hyprland uses the equivalent
-`hl.window_rule({ match = { class = "tascam-mixer" }, float = true })`.
+`hl.window_rule({ match = { class = "rackctl-us16x08-gui" }, float = true })`.
 
 [[sec-gui-ref-layout]]
 === Window layout
@@ -926,20 +926,20 @@ are mirrored to the headphones jack. _(manual)_
 [[sec-appendix-trouble]]
 == Troubleshooting
 
-Card not found:: `tascamctl` exits with an error and code 1 when no US-16x08 is
+Card not found:: `rackctl-us16x08` exits with an error and code 1 when no US-16x08 is
 present. Confirm the unit is connected and that `aplay -l` (or `cat
 /proc/asound/cards`) lists card id `US16x08`. To work without hardware, add
 `--mock`.
 
 Meters do not move in the GUI:: Another program may be reading the meters. Close
-any running `tascamctl monitor` against the same device; run one meter reader at
+any running `rackctl-us16x08 monitor` against the same device; run one meter reader at
 a time.
 
 The interface was unplugged:: The GUI keeps running. It hides the controls behind
 a "Tascam US-16x08 is disconnected" notice while the card is absent and reopens it
 automatically once it returns (about a second after the card re-enumerates). On
 reconnect it re-applies the mix shown on screen, since the device powers up at its
-own defaults. The `tascamctl` commands are one-shot and instead exit with an error
+own defaults. The `rackctl-us16x08` commands are one-shot and instead exit with an error
 if the card is gone.
 
 The GUI was started with no interface attached:: It opens to the disconnected
@@ -976,7 +976,7 @@ DSP:: The on-board digital signal processing (EQ, low-cut filter, compressor) th
 shapes monitoring and the outputs, not the recording.
 gain reduction:: The amount, in dB, by which the compressor is currently lowering a
 channel's level. Shown as a meter.
-key:: The short name of a control used by `tascamctl` (for example
+key:: The short name of a control used by `rackctl-us16x08` (for example
 `master-volume`).
 LCF:: Low-cut filter; a per-channel high-pass filter present on the device but not
 exposed by the Linux driver.

@@ -5,13 +5,13 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 
-fn tascamctl() -> Command {
-    Command::cargo_bin("tascamctl").expect("binary builds")
+fn bin() -> Command {
+    Command::cargo_bin("rackctl-us16x08").expect("binary builds")
 }
 
 /// Run `save` to `path` (optionally a single strip), asserting success.
 fn save_to(path: &str, channel: Option<&str>) {
-    let mut cmd = tascamctl();
+    let mut cmd = bin();
     cmd.arg("--mock").arg("save").arg(path);
     if let Some(ch) = channel {
         cmd.arg("-c").arg(ch);
@@ -21,7 +21,7 @@ fn save_to(path: &str, channel: Option<&str>) {
 
 #[test]
 fn list_succeeds_and_shows_known_keys() {
-    tascamctl()
+    bin()
         .args(["--mock", "list"])
         .assert()
         .success()
@@ -32,13 +32,13 @@ fn list_succeeds_and_shows_known_keys() {
 
 #[test]
 fn get_returns_seeded_defaults() {
-    tascamctl()
+    bin()
         .args(["--mock", "get", "master-volume"])
         .assert()
         .success()
         // The default raw 127 reads out as 0 dB in display units.
         .stdout(predicate::str::starts_with("+0 dB"));
-    tascamctl()
+    bin()
         .args(["--mock", "get", "mute", "-c", "3"])
         .assert()
         .success()
@@ -48,7 +48,7 @@ fn get_returns_seeded_defaults() {
 #[test]
 fn topology_explains_routing() {
     // Backend-independent, so it needs no device or --mock.
-    tascamctl()
+    bin()
         .arg("topology")
         .assert()
         .success()
@@ -59,7 +59,7 @@ fn topology_explains_routing() {
 
 #[test]
 fn info_enum_lists_values() {
-    tascamctl()
+    bin()
         .args(["--mock", "info", "comp-ratio"])
         .assert()
         .success()
@@ -70,7 +70,7 @@ fn info_enum_lists_values() {
 
 #[test]
 fn info_shows_description_for_global_switches() {
-    tascamctl()
+    bin()
         .args(["--mock", "info", "buss-out"])
         .assert()
         .success()
@@ -80,7 +80,7 @@ fn info_shows_description_for_global_switches() {
 
 #[test]
 fn info_int_shows_range() {
-    tascamctl()
+    bin()
         .args(["--mock", "info", "master-volume"])
         .assert()
         .success()
@@ -90,7 +90,7 @@ fn info_int_shows_range() {
 
 #[test]
 fn info_unknown_control_fails() {
-    tascamctl()
+    bin()
         .args(["--mock", "info", "nonsuch"])
         .assert()
         .failure()
@@ -99,7 +99,7 @@ fn info_unknown_control_fails() {
 
 #[test]
 fn get_enum_shows_label() {
-    tascamctl()
+    bin()
         .args(["--mock", "get", "route", "-c", "0"])
         .assert()
         .success()
@@ -108,7 +108,7 @@ fn get_enum_shows_label() {
 
 #[test]
 fn set_valid_value_succeeds_silently() {
-    tascamctl()
+    bin()
         .args(["--mock", "set", "mute", "on", "-c", "3"])
         .assert()
         .success()
@@ -124,7 +124,7 @@ fn relative_and_toggle_succeed() {
         &["--mock", "set", "master-volume", "-5"][..],
         &["--mock", "set", "mute", "toggle", "-c", "2"][..],
     ] {
-        tascamctl()
+        bin()
             .args(args)
             .assert()
             .success()
@@ -134,7 +134,7 @@ fn relative_and_toggle_succeed() {
 
 #[test]
 fn toggle_on_int_fails() {
-    tascamctl()
+    bin()
         .args(["--mock", "set", "master-volume", "toggle"])
         .assert()
         .failure()
@@ -145,7 +145,7 @@ fn toggle_on_int_fails() {
 fn set_out_of_range_clamps() {
     // An absolute value beyond the control's range is clamped to it (as the GUI
     // sliders and relative adjusts do), not rejected.
-    tascamctl()
+    bin()
         .args(["--mock", "set", "eq-low-volume", "999", "-c", "0"])
         .assert()
         .success()
@@ -154,7 +154,7 @@ fn set_out_of_range_clamps() {
 
 #[test]
 fn unknown_control_fails() {
-    tascamctl()
+    bin()
         .args(["--mock", "get", "nonsuch"])
         .assert()
         .failure()
@@ -163,7 +163,7 @@ fn unknown_control_fails() {
 
 #[test]
 fn setting_the_meter_block_fails() {
-    tascamctl()
+    bin()
         .args(["--mock", "set", "meter", "1"])
         .assert()
         .failure()
@@ -172,7 +172,7 @@ fn setting_the_meter_block_fails() {
 
 #[test]
 fn global_control_rejects_nonzero_channel() {
-    tascamctl()
+    bin()
         .args(["--mock", "set", "master-volume", "100", "-c", "1"])
         .assert()
         .failure()
@@ -182,11 +182,7 @@ fn global_control_rejects_nonzero_channel() {
 #[test]
 fn missing_argument_is_a_usage_error() {
     // clap reports usage errors with exit code 2.
-    tascamctl()
-        .args(["--mock", "set"])
-        .assert()
-        .failure()
-        .code(2);
+    bin().args(["--mock", "set"]).assert().failure().code(2);
 }
 
 #[test]
@@ -216,12 +212,12 @@ fn load_strip_requires_a_channel() {
     let strip = strip.to_str().unwrap();
 
     // Applying a strip to a channel works.
-    tascamctl()
+    bin()
         .args(["--mock", "load", strip, "-c", "5"])
         .assert()
         .success();
     // Without a target channel it is an error.
-    tascamctl()
+    bin()
         .args(["--mock", "load", strip])
         .assert()
         .failure()
@@ -235,11 +231,8 @@ fn load_mixer_rejects_a_channel() {
     save_to(mixer.to_str().unwrap(), None);
     let mixer = mixer.to_str().unwrap();
 
-    tascamctl()
-        .args(["--mock", "load", mixer])
-        .assert()
-        .success();
-    tascamctl()
+    bin().args(["--mock", "load", mixer]).assert().success();
+    bin()
         .args(["--mock", "load", mixer, "-c", "0"])
         .assert()
         .failure()
@@ -248,7 +241,7 @@ fn load_mixer_rejects_a_channel() {
 
 #[test]
 fn load_missing_file_fails() {
-    tascamctl()
+    bin()
         .args(["--mock", "load", "/no/such/preset.json"])
         .assert()
         .failure()
@@ -258,7 +251,7 @@ fn load_missing_file_fails() {
 #[test]
 fn meters_prints_all_channels() {
     for extra in [&[][..], &["--raw"][..]] {
-        let mut cmd = tascamctl();
+        let mut cmd = bin();
         cmd.arg("--mock").arg("meters").args(extra);
         cmd.assert()
             .success()
@@ -275,7 +268,7 @@ fn default_preset_round_trips() {
     let dir = tempfile::tempdir().unwrap();
 
     // Loading before one exists is an error.
-    tascamctl()
+    bin()
         .env("XDG_CONFIG_HOME", dir.path())
         .args(["--mock", "default"])
         .assert()
@@ -283,13 +276,17 @@ fn default_preset_round_trips() {
         .code(1);
 
     // Save the current mixer as the default, then load it back.
-    tascamctl()
+    bin()
         .env("XDG_CONFIG_HOME", dir.path())
         .args(["--mock", "default", "--save"])
         .assert()
         .success();
-    assert!(dir.path().join("tascam-mixer/default-preset.json").exists());
-    tascamctl()
+    assert!(
+        dir.path()
+            .join("rackctl/us16x08/default-preset.json")
+            .exists()
+    );
+    bin()
         .env("XDG_CONFIG_HOME", dir.path())
         .args(["--mock", "default"])
         .assert()
