@@ -119,10 +119,18 @@ const LOAD_TIMING: LoadTiming = LoadTiming {
     rounds: 6,
     settle: Duration::from_millis(50),
 };
-/// Pace between the (few) mute writes a solo toggle makes -- short, since at most
-/// 16 channels change, to keep the toggle responsive while not flooding the
-/// device.
-const SOLO_PACE: Duration = Duration::from_millis(2);
+/// Pace between consecutive control writes in an in-editor bulk operation (solo,
+/// paste, reset channel, stereo-link sync), so the burst does not outrun the
+/// device's USB control channel and get silently dropped. Short -- these write
+/// at most ~20 controls -- to stay responsive.
+const WRITE_PACE: Duration = Duration::from_millis(2);
+
+/// Sleep one [`WRITE_PACE`] between consecutive writes of a bulk operation.
+fn pace_write() {
+    if !WRITE_PACE.is_zero() {
+        std::thread::sleep(WRITE_PACE);
+    }
+}
 
 /// Reopens the device (real hardware or mock). Called to recover after the
 /// device disappears, so the closure can outlive any one connection.
@@ -427,9 +435,7 @@ impl App {
             };
             if self.cached_bool(Control::MuteSwitch, ch) != want {
                 self.write_one(Control::MuteSwitch, ch, Value::Bool(want));
-                if !SOLO_PACE.is_zero() {
-                    std::thread::sleep(SOLO_PACE);
-                }
+                pace_write();
             }
         }
     }
@@ -451,6 +457,7 @@ impl App {
             {
                 if let Some(&value) = self.cache.get(&(control, low)) {
                     self.write_one(control, low + 1, value);
+                    pace_write();
                 }
             }
         }
@@ -867,6 +874,7 @@ impl App {
         };
         for (control, value) in values {
             self.set(control, ch, value);
+            pace_write();
         }
         // `set` mirrors each control onto the linked partner; re-assert the
         // hard-pan so a pasted channel's pan does not collapse the pair.
@@ -897,6 +905,7 @@ impl App {
                 _ => continue,
             };
             self.set(control, ch, value);
+            pace_write();
         }
         self.status = format!("reset channel {}", ch + 1);
     }
