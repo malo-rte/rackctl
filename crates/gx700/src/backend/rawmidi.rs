@@ -33,6 +33,11 @@ const POLL_INTERVAL: Duration = Duration::from_millis(1);
 /// clock on this hardware-only path.
 const REPLY_POLLS: u32 = 500;
 
+/// Consecutive silent [`POLL_INTERVAL`] polls that end an input drain (~35 ms).
+/// Comfortably longer than the ~20 ms gap between the messages of a streamed
+/// whole-patch reply, so a single gap does not end the drain early.
+const DRAIN_QUIET_POLLS: u32 = 35;
+
 /// A live connection to a GX-700 over ALSA rawmidi.
 pub struct RawMidi {
     output: Rawmidi,
@@ -146,11 +151,17 @@ impl RawMidi {
     /// request cannot be mistaken for the answer to the next one.
     fn drain_input(&mut self) {
         let mut buf = [0u8; 256];
-        // Read until there is nothing left: a zero-length read, a would-block, or
-        // any other error all end the drain.
-        while let Ok(n) = self.input.io().read(&mut buf) {
-            if n == 0 {
-                break;
+        // Drain until the input has been silent for DRAIN_QUIET_POLLS in a row.
+        // A whole-patch reply streams as many messages ~20 ms apart, so a single
+        // gap is not the end; only sustained silence is.
+        let mut quiet = 0u32;
+        while quiet < DRAIN_QUIET_POLLS {
+            match self.input.io().read(&mut buf) {
+                Ok(n) if n > 0 => quiet = 0,
+                _ => {
+                    quiet = quiet.saturating_add(1);
+                    std::thread::sleep(POLL_INTERVAL);
+                }
             }
         }
     }

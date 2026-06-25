@@ -145,12 +145,60 @@ look-up tables (EQ mid frequency, hi/low cut, delay note values, etc.) are raw
 bytes on the wire; converting them to human units is a presentation concern handled
 above the catalog.
 
+== Patch memories (presets)
+
+The GX-700 stores *200 patches*: 100 user (area `00`) and 100 preset (area `01`).
+A patch is the same 14 sub-blocks as the temporary buffer (`00` Level/Chain, then
+the 13 effect blocks), at the patch's base address.
+
+.Patch base addresses
+[cols="1,3",options="header"]
+|===
+| Slot | Base address
+| User 1..100     | `00 (slot-1) 00 00`   (e.g. user 1 = `00 00 00 00`, user 100 = `00 63 00 00`)
+| Preset 101..200 | `01 (slot-101) 00 00` (e.g. preset 101 = `01 00 00 00`)
+|===
+
+*Reading a patch.* An RQ1 to a patch base makes the GX-700 stream the *whole
+patch* back as its 14 sub-block DT1 messages, roughly 20 ms apart (the requested
+size is ignored). A reader must therefore consume the entire stream before issuing
+the next request, or the next reply collides with the tail of this one -- the
+rawmidi transport drains the input until it has been silent for ~35 ms for exactly
+this reason. `Gx700::read_patch_header` reads one patch's Level/Chain block this
+way; the CLI `patches` command lists every slot's name and output level.
+
+*The Level/Chain block (`00`).* This patch-common block carries, in order:
+
+[cols="1,1,3",options="header"]
+|===
+| Offset | Field | Notes
+| `00`      | Output level | raw `0..=100`
+| `01`..`0D`| Chain order  | 13 effect-type bytes (`01`=Comp ... `0D`=Reverb) giving the block order in the signal path; a patch may reorder them (e.g. Delay/Chorus swapped)
+| `0E`..`19`| Name         | 12 character codes, ASCII over the printable range, space-padded
+| `1A`..    | Control assigns | four assign slots (target / min / max / source / mode, Tables 1.2--1.3)
+|===
+
+Patch names decode/encode via `patch::decode_name`/`encode_name`. Example: user
+patch 1's Level/Chain data begins `32 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 4E 20
+52 4F 44 47 45 52 53 3F 20 20 ...` = output 50, the default chain order, name
+"N RODGERS?".
+
+*Writing a patch.* Storing a patch is a bulk DT1 to its memory base -- this
+*overwrites* a user patch, so it is destructive and not done implicitly. Preset
+patches (area `01`) are factory data. To change the *current sound* without
+touching stored memory, write to the temporary buffer instead (see
+<<Editing model>>); a bulk write to `04 00 00 00` must be followed by a Sound
+Change Request (DT1 `00` to `04 7F 7F 7F`), whereas individual writes to
+`08 00 00 00` apply immediately.
+
 == Verified against hardware
 
 [cols="1,3",options="header"]
 |===
 | Check | Result
 | Header / device id | Every message is `F0 41 00 79 12 ...` -- device id `0x00`, matching the factory default (channel 1).
+| Patch memories | Reading user and preset patch bases returned correct names/chains (e.g. user 1 "N RODGERS?", preset 101 "STUDIO SPACE"); `patches` lists the whole bank.
+| Live read/write | The full preamp block reads back byte-exact, and a write to `08 00 04 02` audibly/round-trip changed `preamp-volume` (67 -> 100 -> 67).
 | Checksum | A full bulk dump of *1403* DT1 messages parsed at *100%* checksum agreement with `sysex::checksum`.
 | Sub-block layout | An RQ1 of a patch returned sub-blocks `00 00 00 00 .. 00 00 0D 00`, lengths matching the table row counts.
 | Byte-exact decode | The preamp block `01 03 1F 57 3A 32 07 5F 00 01` decoded to On / BG Lead / Vol 31 / Bass 87 / Mid 58 / Treble 50 / Presence 7 / Master 95 / Bright off / Gain mid -- exactly per the tables.
@@ -166,3 +214,7 @@ above the catalog.
   MIDI Implementation); transcription of every sub-type offset is in progress.
 * The Control Assign source/target tables (Table 1.2 / 1.3) are catalogued but the
   editor does not yet expose assignments.
+* Patch memories: reading a header (name/level/chain) is implemented; capturing or
+  restoring a *whole* stored patch to/from JSON, editing patch names, and writing a
+  patch to a user slot are not yet done. Listing the bank with `patches` is slow
+  (~0.5 s/patch) because each RQ1 streams the entire patch.

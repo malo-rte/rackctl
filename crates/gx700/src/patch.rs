@@ -16,6 +16,63 @@ use crate::param::{self, Kind, Value};
 /// Schema version written into every patch, for forward compatibility.
 pub const PATCH_VERSION: u32 = 1;
 
+/// Number of characters in a GX-700 patch name.
+pub const NAME_LEN: usize = 12;
+
+/// Decode a GX-700 patch name: up to [`NAME_LEN`] 7-bit character codes (ASCII
+/// over the printable range), with trailing padding trimmed.
+#[must_use]
+pub fn decode_name(bytes: &[u8]) -> String {
+    let raw: String = bytes
+        .iter()
+        .take(NAME_LEN)
+        .map(|&c| {
+            if (0x20..0x7f).contains(&c) {
+                char::from(c)
+            } else {
+                ' '
+            }
+        })
+        .collect();
+    raw.trim_end().to_owned()
+}
+
+/// Encode a patch name into [`NAME_LEN`] space-padded 7-bit character bytes.
+#[must_use]
+pub fn encode_name(name: &str) -> [u8; NAME_LEN] {
+    let mut out = [0x20u8; NAME_LEN];
+    for (slot, ch) in out.iter_mut().zip(name.chars().take(NAME_LEN)) {
+        let code = u32::from(ch);
+        if (0x20..0x7f).contains(&code) {
+            *slot = u8::try_from(code).unwrap_or(0x20);
+        }
+    }
+    out
+}
+
+/// The 4-byte base address of patch memory `slot`: user patches `1..=100`
+/// (area `00`), preset patches `101..=200` (area `01`). `None` if out of range.
+#[must_use]
+pub fn patch_base(slot: u16) -> Option<[u8; 4]> {
+    let (area, index) = match slot {
+        1..=100 => (0x00u8, slot - 1),
+        101..=200 => (0x01u8, slot - 101),
+        _ => return None,
+    };
+    Some([area, u8::try_from(index).unwrap_or(0), 0x00, 0x00])
+}
+
+/// The header of a stored patch: name, output level, and effect-chain order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PatchHeader {
+    /// The patch name (trailing padding trimmed).
+    pub name: String,
+    /// Patch output level, raw `0..=100`.
+    pub output_level: u8,
+    /// The 13 effect-type bytes giving the block order in the signal chain.
+    pub chain: Vec<u8>,
+}
+
 /// A single parameter value as stored in a patch. Enums are kept as their label
 /// for readability; integers and booleans use their native JSON types.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,6 +155,25 @@ impl<T: Transport> Gx700<T> {
         })
     }
 
+    /// Read the header (name, output level, chain order) of stored patch memory
+    /// `slot` (`1..=100` user, `101..=200` preset).
+    ///
+    /// One RQ1 to the patch base returns its Level/Chain block, whose first 26
+    /// bytes are the output level, the 13 chain bytes, and the 12-char name.
+    ///
+    /// # Errors
+    /// [`Error::Patch`] if `slot` is out of range; transport errors otherwise.
+    pub fn read_patch_header(&mut self, slot: u16) -> Result<PatchHeader> {
+        let base = patch_base(slot)
+            .ok_or_else(|| Error::Patch(format!("patch slot {slot} out of range (1..=200)")))?;
+        let data = self.transport_mut().request(&base, 26)?;
+        Ok(PatchHeader {
+            output_level: data.first().copied().unwrap_or(0),
+            chain: data.get(1..14).unwrap_or(&[]).to_vec(),
+            name: decode_name(data.get(14..26).unwrap_or(&[])),
+        })
+    }
+
     /// Apply a [`Patch`], writing every parameter the patch holds that this
     /// build recognises. Keys it does not recognise are skipped; the count of
     /// applied parameters is returned.
@@ -132,6 +208,29 @@ mod tests {
 
     fn p(key: &str) -> Param {
         Param::from_key(key).unwrap()
+    }
+
+    #[test]
+    fn name_decodes_and_round_trips() {
+        let bytes = [
+            0x4E, 0x20, 0x52, 0x4F, 0x44, 0x47, 0x45, 0x52, 0x53, 0x3F, 0x20, 0x20,
+        ];
+        assert_eq!(decode_name(&bytes), "N RODGERS?");
+        assert_eq!(encode_name("N RODGERS?"), bytes);
+        // Over-long names are truncated; short ones space-padded to 12.
+        assert_eq!(decode_name(&encode_name("JAZZ TONE")), "JAZZ TONE");
+        assert_eq!(encode_name("WAY TOO LONG A NAME").len(), NAME_LEN);
+    }
+
+    #[test]
+    fn patch_base_addresses() {
+        assert_eq!(patch_base(1), Some([0x00, 0x00, 0x00, 0x00]));
+        assert_eq!(patch_base(2), Some([0x00, 0x01, 0x00, 0x00]));
+        assert_eq!(patch_base(100), Some([0x00, 0x63, 0x00, 0x00]));
+        assert_eq!(patch_base(101), Some([0x01, 0x00, 0x00, 0x00]));
+        assert_eq!(patch_base(200), Some([0x01, 0x63, 0x00, 0x00]));
+        assert_eq!(patch_base(0), None);
+        assert_eq!(patch_base(201), None);
     }
 
     #[test]

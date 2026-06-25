@@ -53,5 +53,7 @@ pub use backend::{MockTransport, Transport};
 pub use device::Gx700;
 pub use error::{Error, Result};
 pub use param::{Block, Kind, Param, Value};
-pub use patch::{PATCH_VERSION, Patch, Scalar};
+pub use patch::{
+    NAME_LEN, PATCH_VERSION, Patch, PatchHeader, Scalar, decode_name, encode_name, patch_base,
+};
 pub use sysex::{Framer, RolandMessage};

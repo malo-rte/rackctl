@@ -61,8 +61,9 @@ Examples:
   rackctl-gx700 list                           List every parameter key
   rackctl-gx700 info preamp-gain               Explain one parameter
   rackctl-gx700 --port hw:1,0 get preamp-gain  Read a value
-  rackctl-gx700 --port hw:1,0 set od-enable on Turn a block on
+  rackctl-gx700 --port hw:1,0 set dist-enable on  Turn a block on
   rackctl-gx700 --port hw:1,0 dump patch.json  Save the patch buffer
+  rackctl-gx700 --port hw:1,0 patches          List user patch names
   rackctl-gx700 --port hw:1,0 select 7         Select patch memory 7
   rackctl-gx700 --port hw:1,0 recv             Print incoming `SysEx` as hex";
 
@@ -103,6 +104,12 @@ enum Command {
     Select {
         /// Patch program number (0-127).
         n: u8,
+    },
+    /// List patch-memory slots and their names.
+    Patches {
+        /// List the 100 preset patches instead of the 100 user patches.
+        #[arg(long)]
+        preset: bool,
     },
     /// Print incoming `SysEx` messages as hex (a reverse-engineering aid).
     Recv,
@@ -190,6 +197,7 @@ fn run_command<T: Transport>(dev: &mut Gx700<T>, command: Command) -> Result<()>
         Command::Dump { file } => commands::dump(dev, file.as_deref()),
         Command::Load { file } => commands::load(dev, &file),
         Command::Select { n } => commands::select(dev, n),
+        Command::Patches { preset } => commands::patches(dev, preset),
         // The backend-free and hardware-only commands are handled before a
         // device is opened; they never reach here.
         Command::Ports

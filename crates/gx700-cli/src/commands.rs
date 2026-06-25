@@ -99,6 +99,27 @@ pub(crate) fn select<T: Transport>(dev: &mut Gx700<T>, n: u8) -> Result<()> {
     Ok(())
 }
 
+/// List patch-memory slots with their names and output level: the 100 user
+/// patches, or (with `preset`) the 100 preset patches.
+pub(crate) fn patches<T: Transport>(dev: &mut Gx700<T>, preset: bool) -> Result<()> {
+    let (slots, tag) = if preset {
+        (101u16..=200, 'P')
+    } else {
+        (1u16..=100, 'U')
+    };
+    for slot in slots {
+        let header = dev
+            .read_patch_header(slot)
+            .with_context(|| format!("reading patch {slot}"))?;
+        let n = if preset { slot - 100 } else { slot };
+        println!(
+            "{tag}{n:03}  {:<12}  out {}",
+            header.name, header.output_level
+        );
+    }
+    Ok(())
+}
+
 fn resolve(key: &str) -> Result<Param> {
     Param::from_key(key).with_context(|| format!("unknown parameter {key:?} (try `list`)"))
 }
