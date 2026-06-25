@@ -13,6 +13,9 @@ version.
   compressor section (a partial strip preset), matching the GUI's EQ/Comp preset
   tabs. `load` already applies such a preset with `-c`, setting only the controls
   it holds. The library gains a `Section` type and `Us16x08::capture_section`.
+- **Releases** — pushing a `vX.Y.Z` tag now builds the binaries and publishes a
+  GitHub Release automatically (with notes from this changelog and a tarball of
+  `tascamctl` + `tascam-mixer`), via a new release workflow.
 
 ## [0.3.0] - 2026-06-25
 

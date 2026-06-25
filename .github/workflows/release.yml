@@ -1,0 +1,87 @@
+name: Release
+
+# Build the release binaries and publish a GitHub Release whenever a version
+# tag (vMAJOR.MINOR.PATCH) is pushed. Release notes are taken from the matching
+# CHANGELOG.md section.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: build and publish ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps (alsa feature + eframe/winit)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libgl1-mesa-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check the tag matches the workspace version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          ./.claude/skills/release/scripts/bump-version check
+          got="$(./.claude/skills/release/scripts/bump-version current)"
+          if [ "$got" != "$version" ]; then
+            echo "tag $GITHUB_REF_NAME does not match workspace version $got" >&2
+            exit 1
+          fi
+
+      - name: Build release binaries
+        run: cargo build --release --workspace --locked
+
+      - name: Package
+        id: package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          name="tascam-mixer-${version}-x86_64-linux"
+          mkdir -p "dist/${name}"
+          cp target/release/tascamctl target/release/tascam-mixer "dist/${name}/"
+          cp README.adoc CHANGELOG.md LICENSE docs/user-manual.adoc "dist/${name}/"
+          tar -C dist -czf "dist/${name}.tar.gz" "${name}"
+          ( cd dist && sha256sum "${name}.tar.gz" > "${name}.tar.gz.sha256" )
+          echo "archive=dist/${name}.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "checksum=dist/${name}.tar.gz.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="$version" '
+            index($0, "## [" ver "]") == 1 { capture = 1; next }
+            capture && index($0, "## [") == 1 { exit }
+            capture { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "no CHANGELOG section for ${version}" >&2
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --notes-file notes.md \
+            "${{ steps.package.outputs.archive }}" \
+            "${{ steps.package.outputs.checksum }}"
