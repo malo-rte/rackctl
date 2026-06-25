@@ -7,6 +7,8 @@ version.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-25
+
 ### Fixed
 
 - **GUI** — the continuous device reads (meters, and the periodic re-read of the
@@ -179,7 +181,8 @@ only, via the `snd-usb-audio` driver.
 - The tools drive the DSP mixer control surface only; they do not stream audio.
   Capture to the computer is taken pre-DSP (the dry input).
 
-[Unreleased]: https://github.com/malo-rte/tascam-mixer/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/malo-rte/tascam-mixer/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/malo-rte/tascam-mixer/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/malo-rte/tascam-mixer/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/malo-rte/tascam-mixer/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/malo-rte/tascam-mixer/compare/v0.2.1...v0.3.0
