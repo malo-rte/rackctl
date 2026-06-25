@@ -10,10 +10,20 @@ mod preset_tab;
 mod routing;
 
 use anyhow::Result;
+use clap::Parser;
 use tascam_us16x08::{Backend, MockBackend, Us16x08};
 
 #[cfg(feature = "alsa")]
 use tascam_us16x08::AlsaBackend;
+
+/// Graphical mixer for the Tascam US-16x08 DSP mixer.
+#[derive(Parser)]
+#[command(name = "tascam-mixer", version)]
+struct Cli {
+    /// Use an in-memory mock device instead of real hardware.
+    #[arg(long)]
+    mock: bool,
+}
 
 /// Open the device as a boxed backend: the in-memory mock, or real hardware.
 fn open_device(mock: bool) -> Result<Us16x08<Box<dyn Backend>>> {
@@ -31,7 +41,7 @@ fn open_device(mock: bool) -> Result<Us16x08<Box<dyn Backend>>> {
 }
 
 fn main() -> Result<()> {
-    let mock = std::env::args().skip(1).any(|a| a == "--mock");
+    let mock = Cli::parse().mock;
     // Lets the app reopen the device after a USB replug.
     let reopen: app::Reopen = Box::new(move || open_device(mock));
     // Open the card now if we can. If it is absent, start disconnected with a

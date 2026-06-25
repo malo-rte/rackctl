@@ -3217,6 +3217,7 @@ name = "tascam-gui"
 version = "0.5.0"
 dependencies = [
  "anyhow",
+ "clap",
  "directories",
  "eframe",
  "egui",

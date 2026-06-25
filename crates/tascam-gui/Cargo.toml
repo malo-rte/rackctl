@@ -20,6 +20,7 @@ alsa = ["tascam-us16x08/alsa"]
 
 [dependencies]
 tascam-us16x08 = { path = "../tascam-us16x08", default-features = false }
+clap.workspace = true
 eframe.workspace = true
 egui.workspace = true
 egui_plot.workspace = true
