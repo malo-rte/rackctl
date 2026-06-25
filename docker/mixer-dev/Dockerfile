@@ -53,6 +53,20 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 # libpcsclite-dev, libusb-1.0-0-dev) come from dev-tools-build.
 RUN cargo install --locked age-plugin-yubikey
 
+# cargo-deny: the supply-chain gate (advisories/bans/licenses/sources) that
+# run-all-checks.sh runs. Installed from the upstream prebuilt static binary
+# rather than `cargo install` (a slow from-source build) -- the same approach
+# cargo-deny-action@v2 uses in CI. Keep this version roughly in step with that
+# action so a green local gate matches CI.
+ARG CARGO_DENY_VERSION=0.19.9
+RUN set -eux; \
+    url="https://github.com/EmbarkStudios/cargo-deny/releases/download/${CARGO_DENY_VERSION}/cargo-deny-${CARGO_DENY_VERSION}-x86_64-unknown-linux-musl.tar.gz"; \
+    curl -fsSL "${url}" -o /tmp/cargo-deny.tar.gz; \
+    tar -xzf /tmp/cargo-deny.tar.gz -C /tmp; \
+    install -m 0755 /tmp/cargo-deny-*/cargo-deny "${HOME}/.cargo/bin/cargo-deny"; \
+    rm -rf /tmp/cargo-deny*; \
+    cargo-deny --version
+
 ENV CLAUDE_CONFIG_DIR="/home/${USER_NAME}/.claude"
 
 RUN mkdir -p \
