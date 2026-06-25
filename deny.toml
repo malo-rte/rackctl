@@ -33,7 +33,7 @@ confidence-threshold = 0.9
 [bans]
 # Supply-chain hygiene: catch duplicate versions and unvetted sources.
 multiple-versions = "warn"   # raise to "deny" once the tree is deduplicated
-wildcard-dependencies = "deny"
+wildcards = "deny"
 deny = [
     # { crate = "openssl", reason = "use rustls; no system OpenSSL dependency" },
 ]
