@@ -2,12 +2,20 @@
 //! the mock and the real ALSA rawmidi device.
 
 use std::fs;
+use std::thread::sleep;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use rackctl_gx700::{Gx700, Kind, Param, RawPatch, Transport, param};
 
 use crate::config;
 use crate::value::{format_value, parse_value};
+
+/// Pause between patch reads when listing a whole bank. Each read makes the
+/// GX-700 stream a full patch (~14 messages); back-to-back, that sustained burst
+/// can overrun the US-16x08's MIDI input until it stalls. A short gap between
+/// reads keeps it from flooding.
+const BANK_READ_PACE: Duration = Duration::from_millis(40);
 
 /// Print the full parameter catalog. Backend-independent.
 pub(crate) fn list() {
@@ -164,6 +172,7 @@ pub(crate) fn patches<T: Transport>(dev: &mut Gx700<T>, preset: bool) -> Result<
         let header = dev
             .read_patch_header(slot)
             .with_context(|| format!("reading patch {slot}"))?;
+        sleep(BANK_READ_PACE); // ease off the US-16x08's MIDI input between dumps
         let n = if preset { slot - 100 } else { slot };
         let level = rackctl_gx700::Param::from_key("output-level").map_or_else(
             || header.output_level.to_string(),
