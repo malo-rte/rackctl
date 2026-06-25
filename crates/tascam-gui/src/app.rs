@@ -330,7 +330,13 @@ impl App {
                 }
             }
         }
-        // Hard-pan the pair: lower channel left, upper channel right.
+        self.hard_pan_pair(low);
+    }
+
+    /// Pan a linked pair hard left/right (lower channel left, upper right), the
+    /// stereo image a link maintains. Re-asserted whenever something might have
+    /// written a single pan onto both halves (e.g. pasting or loading a strip).
+    fn hard_pan_pair(&mut self, low: u32) {
         self.write_one(Control::Pan, low, Value::Int(0));
         self.write_one(Control::Pan, low + 1, Value::Int(254));
     }
@@ -522,8 +528,7 @@ impl App {
         // Keep a linked pair hard-panned: a strip preset carries one channel's
         // pan, which would otherwise collapse the stereo image onto one side.
         if let Some(low) = pair_low {
-            self.write_one(Control::Pan, low, Value::Int(0));
-            self.write_one(Control::Pan, low + 1, Value::Int(254));
+            self.hard_pan_pair(low);
         }
         self.sync_controls();
         self.status = format!(
@@ -710,6 +715,11 @@ impl App {
         };
         for (control, value) in values {
             self.set(control, ch, value);
+        }
+        // `set` mirrors each control onto the linked partner; re-assert the
+        // hard-pan so a pasted channel's pan does not collapse the pair.
+        if self.linked(ch) {
+            self.hard_pan_pair(ch & !1);
         }
         self.status = format!("pasted {} to channel {}", group.label(), ch + 1);
     }
