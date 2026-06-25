@@ -1,0 +1,5 @@
+# Third-party reference PDFs are kept here locally for convenience but are NOT
+# committed: they are vendor-copyrighted, and this is a public repository.
+# README.adoc lists each document with its source URL and checksum so anyone
+# can re-fetch it. Add the binaries back only if licensing ever permits.
+*.pdf

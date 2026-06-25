@@ -1,0 +1,168 @@
+= BOSS GX-700 — MIDI System Exclusive protocol reference
+:toc: left
+:icons: font
+:source-highlighter: rouge
+:experimental:
+
+This document describes how the BOSS GX-700 guitar effects processor is controlled
+over MIDI, as implemented by the `rackctl-gx700` crate. It records what the device
+actually does -- confirmed against a real unit -- and serves as the reference for
+the parameter catalog in `crates/gx700/src/param.rs`.
+
+The authoritative source is Roland's _GX-700 MIDI Implementation_ (see
+`external-specs/README.adoc`). Everything below was additionally verified against
+hardware (a GX-700 reached through a Tascam US-16x08's MIDI DIN); where the two
+agree, the device is the final word.
+
+NOTE: BOSS/Roland is a trademark of Roland Corporation. This is an independent,
+unofficial project, not affiliated with Roland; the names identify the hardware
+these tools control.
+
+== At a glance
+
+* The GX-700 is a patch-based guitar effects processor. It has *no* level meters
+  and no ALSA mixer surface -- it is edited entirely over MIDI.
+* Control is *Roland address-mapped System Exclusive*: every parameter lives at a
+  4-byte address; you write with a DT1 message and read with an RQ1 request.
+* Program Change selects one of 200 patch memories (100 user + 100 preset).
+* Control Change can also drive parameters in real time via the unit's "Control
+  Assign" feature (CC 1--31 / 64--95); not used by the core editor.
+
+== SysEx envelope
+
+All exclusive messages share the Roland frame:
+
+[source]
+----
+DT1 (write):  F0 41 <dev> 79 12 aa bb cc dd <data...> <sum> F7
+RQ1 (read):   F0 41 <dev> 79 11 aa bb cc dd ss tt uu vv <sum> F7
+----
+
+[cols="1,3",options="header"]
+|===
+| Field | Meaning
+| `F0` / `F7`   | SysEx start / end.
+| `41`          | Roland manufacturer id.
+| `<dev>`       | Device id = (MIDI receive channel - 1). Factory channel 1 -> `0x00`.
+| `79`          | GX-700 model id.
+| `12` / `11`   | Command: DT1 (Data Set, write) / RQ1 (Request, read).
+| `aa bb cc dd` | 4-byte address (most-significant first), 7 bits per byte.
+| `ss tt uu vv` | RQ1 only: number of bytes requested (7 bits per byte).
+| `<data>`      | DT1 only: the value bytes written at the address.
+| `<sum>`       | Roland checksum over the address (+ data/size) bytes.
+|===
+
+Checksum: `sum = (128 - (sum_of_body_bytes mod 128)) mod 128`, i.e. the value that
+makes the 7-bit sum of address+data come out to zero. The implementation uses the
+two's-complement identity `(-sum) & 0x7f` (see `sysex::checksum`). A DT1 message
+carries at most 256 data bytes; longer transfers are split into segments.
+
+An RQ1 is answered with one or more DT1 messages containing the requested data.
+
+== Address model
+
+A parameter's absolute address is *the base address of its area plus the offset of
+the parameter within a patch*.
+
+.Address areas
+[cols="1,3",options="header"]
+|===
+| Base address | Area
+| `00 00 00 00` .. `00 63 00 00` | User patches 1..100 (second byte = patch - 1).
+| `01 00 00 00` .. `01 63 00 00` | Preset patches 101..200.
+| `02 00 00 00`                  | System parameters + Program Change map.
+| `04 00 00 00`                  | Temporary buffer (the current sound), bulk access.
+| `04 7F 7F 7F`                  | Sound Change Request (SCR).
+| `08 00 00 00`                  | Temporary buffer, *individual*-parameter access.
+| `10 00 00 00`                  | Display data (read-only): the 2x16 LCD.
+|===
+
+== Editing model
+
+To *read* the current sound, RQ1 the temporary buffer (`04 00 00 00`) or a stored
+patch (`00 00 00 00 + (patch-1)<<16`). The device answers with the patch as a
+series of DT1 sub-block messages (see below).
+
+To *change* a parameter live, write a single DT1 to the *individual* temporary
+buffer: address `08 00 00 00 + offset`, data = the new value. Individual writes
+take effect immediately.
+
+Bulk writes to the temporary buffer (`04 00 00 00`) do not apply until a Sound
+Change Request is sent: DT1 to `04 7F 7F 7F` with data `00`. Individual writes do
+not need this.
+
+== Patch layout (sub-blocks)
+
+Within a patch, each effect block occupies offset `00 00 XX 00`:
+
+[cols="1,3,1,3",options="header"]
+|===
+| `XX` | Block | `XX` | Block
+| `00` | Level / Chain (output level, chain order, 12-char name, control assigns) | `07` | Speaker Simulator
+| `01` | Compressor    | `08` | Noise Suppressor
+| `02` | Wah           | `09` | Modulation (flanger/phaser/pitch/harmonist/vibrato/ring/humanizer)
+| `03` | Distortion    | `0A` | Delay
+| `04` | Preamp        | `0B` | Chorus
+| `05` | Loop          | `0C` | Tremolo / Pan
+| `06` | Equalizer     | `0D` | Reverb
+|===
+
+Each block begins with an `EFFECT ON/OFF` byte (`0`=off, `1`=on); most type-select
+bytes follow. The exhaustive per-offset map (parameter, raw range, enum labels) is
+encoded in `crates/gx700/src/param.rs`, transcribed from the MIDI Implementation
+tables. A few representative blocks:
+
+.Preamp (offset `00 00 04 NN`)
+[cols="1,2,3",options="header"]
+|===
+| `NN` | Parameter | Values
+| `00` | Effect on/off | 0 off, 1 on
+| `01` | Type | 0 JC-120, 1 Clean Twin, 2 Match Drive, 3 BG Lead, 4 MS1959(I), 5 MS1959(II), 6 MS1959(I+II), 7 SLDN Lead, 8 Metal 5150
+| `02` | Volume | 0..100
+| `03` | Bass | 0..100
+| `04` | Middle | 0..100
+| `05` | Treble | 0..100
+| `06` | Presence | 0..100
+| `07` | Master | 0..100
+| `08` | Bright | 0 off, 1 on
+| `09` | Gain | 0 low, 1 mid, 2 hi
+|===
+
+.Distortion (offset `00 00 03 NN`)
+[cols="1,2,3",options="header"]
+|===
+| `NN` | Parameter | Values
+| `00` | Effect on/off | 0 off, 1 on
+| `01` | Type | 0 Vintage OD, 1 Turbo OD, 2 Blues, 3 Distortion, 4 Turbo DS, 5 Metal, 6 Fuzz
+| `02` | Drive | 0..100
+| `03` | Bass | -50..+50 (raw 0..100)
+| `04` | Treble | -50..+50 (raw 0..100)
+| `05` | Level | 0..100
+|===
+
+Signed display ranges (e.g. `-50..+50`, `-20..+20`) and the frequency/note/time
+look-up tables (EQ mid frequency, hi/low cut, delay note values, etc.) are raw
+bytes on the wire; converting them to human units is a presentation concern handled
+above the catalog.
+
+== Verified against hardware
+
+[cols="1,3",options="header"]
+|===
+| Check | Result
+| Header / device id | Every message is `F0 41 00 79 12 ...` -- device id `0x00`, matching the factory default (channel 1).
+| Checksum | A full bulk dump of *1403* DT1 messages parsed at *100%* checksum agreement with `sysex::checksum`.
+| Sub-block layout | An RQ1 of a patch returned sub-blocks `00 00 00 00 .. 00 00 0D 00`, lengths matching the table row counts.
+| Byte-exact decode | The preamp block `01 03 1F 57 3A 32 07 5F 00 01` decoded to On / BG Lead / Vol 31 / Bass 87 / Mid 58 / Treble 50 / Presence 7 / Master 95 / Bright off / Gain mid -- exactly per the tables.
+| Program Change | Sending PC on channel 1 changed the patch on the unit (it receives omni, transmits on channel 1).
+| Edit transmit | The GX-700 does *not* transmit individual parameter edits over MIDI; it transmits only on a bulk dump. Reading state therefore uses RQ1, not change-monitoring.
+|===
+
+== Open items
+
+* `param.rs` ranges are raw 7-bit device units; display-unit conversion (dB, Hz,
+  ms, signed gains) is still to be added.
+* The Modulation block (`09`) has a large per-type parameter set (Table 10 of the
+  MIDI Implementation); transcription of every sub-type offset is in progress.
+* The Control Assign source/target tables (Table 1.2 / 1.3) are catalogued but the
+  editor does not yet expose assignments.

@@ -1,0 +1,35 @@
+= External specifications
+:icons: font
+
+Third-party reference documents used while implementing the device crates. The
+PDF binaries are *not* committed (they are vendor-copyrighted and this is a
+public repository); they are git-ignored. This manifest records what each one is
+and where to fetch it, so the reference is reproducible without redistributing
+copyrighted material.
+
+To restore the local copies, download each `URL` into this directory and check
+the SHA-256.
+
+== Documents
+
+[cols="1,2,3a",options="header"]
+|===
+| File | Source | Notes
+
+| `GX-700_MI.pdf`
+| https://cdn.roland.com/assets/media/pdf/GX-700_MI.pdf
+| Roland *GX-700 MIDI Implementation* (#10799, dated Mar 8 1996, v1.00). The
+  authoritative System Exclusive reference: the DT1/RQ1 message formats, the
+  4-byte address map, and the full parameter tables (effect blocks, ranges, enum
+  values). This is the document Roland's Owner's Manual refers to as the optional
+  "MIDI Implementation booklet". Our reverse-engineered understanding is written
+  up in `../gx700-sysex-protocol.adoc` and encoded in `crates/gx700`. +
+  SHA-256: `ecc3527ab2463a69cea1964970a1aa8dc196194e54f0b87c308a956dcf2e9fad`
+
+| `GX-700_OM.pdf`
+| https://cdn.roland.com/assets/media/pdf/GX-700_OM.pdf
+| Roland *GX-700 Owner's Manual* (72 pp, scanned). General operation, the
+  one-page MIDI Implementation Chart, and the bulk dump/load procedures. Confirms
+  the factory device id (1 -> protocol `0x00`) and the effect-chain model. +
+  SHA-256: `a1db96487bdb4f5f29cf5bb832ccea2ba081cb8d5f1f0847c06de7c504940293`
+|===
