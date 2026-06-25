@@ -119,6 +119,10 @@ const LOAD_TIMING: LoadTiming = LoadTiming {
     rounds: 6,
     settle: Duration::from_millis(50),
 };
+/// Pace between the (few) mute writes a solo toggle makes -- short, since at most
+/// 16 channels change, to keep the toggle responsive while not flooding the
+/// device.
+const SOLO_PACE: Duration = Duration::from_millis(2);
 
 /// Reopens the device (real hardware or mock). Called to recover after the
 /// device disappears, so the closure can outlive any one connection.
@@ -387,25 +391,38 @@ impl App {
     /// soloed, mute the rest (soloed channels keep their snapshotted mute); when
     /// no channel is soloed, restore the snapshot taken before solo engaged.
     fn apply_solo(&mut self) {
-        if self.solo.iter().any(|&s| s) {
+        let target = if self.solo.iter().any(|&s| s) {
             if self.pre_solo.is_none() {
                 let snap: [bool; 16] = std::array::from_fn(|i| {
                     self.cached_bool(Control::MuteSwitch, u32::try_from(i).unwrap_or(0))
                 });
                 self.pre_solo = Some(snap);
             }
-            if let Some(pre) = self.pre_solo {
-                let target = solo_mutes(self.solo, pre);
-                for ch in 0..NUM_CHANNELS {
-                    if let Some(&muted) = target.get(ch as usize) {
-                        self.write_one(Control::MuteSwitch, ch, Value::Bool(muted));
-                    }
-                }
+            match self.pre_solo {
+                Some(pre) => solo_mutes(self.solo, pre),
+                None => return,
             }
-        } else if let Some(pre) = self.pre_solo.take() {
-            for ch in 0..NUM_CHANNELS {
-                if let Some(&muted) = pre.get(ch as usize) {
-                    self.write_one(Control::MuteSwitch, ch, Value::Bool(muted));
+        } else {
+            match self.pre_solo.take() {
+                Some(pre) => pre,
+                None => return,
+            }
+        };
+        self.push_mutes(&target);
+    }
+
+    /// Write `target` to the channel mutes, but only where it differs from the
+    /// current value, and paced like a load so the burst (up to 16 writes) does
+    /// not outrun the device and get silently dropped.
+    fn push_mutes(&mut self, target: &[bool; 16]) {
+        for ch in 0..NUM_CHANNELS {
+            let Some(&want) = target.get(ch as usize) else {
+                continue;
+            };
+            if self.cached_bool(Control::MuteSwitch, ch) != want {
+                self.write_one(Control::MuteSwitch, ch, Value::Bool(want));
+                if !SOLO_PACE.is_zero() {
+                    std::thread::sleep(SOLO_PACE);
                 }
             }
         }
