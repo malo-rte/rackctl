@@ -312,10 +312,11 @@ impl App {
         };
         *slot = !*slot;
         let now_linked = *slot;
-        self.save_config();
         if now_linked {
             self.sync_pair(channel & !1);
         }
+        // Persist after sync_pair, which may also share the name across the pair.
+        self.save_config();
     }
 
     /// Persist the GUI-only state (stereo links, channel names, zoom, and window
@@ -334,13 +335,21 @@ impl App {
         self.names.get(channel as usize).map_or("", String::as_str)
     }
 
-    /// Set (and persist) the user-given name for an input channel.
-    pub(crate) fn set_channel_name(&mut self, channel: u32, name: String) {
-        let Some(slot) = self.names.get_mut(channel as usize) else {
-            return;
-        };
-        *slot = name;
+    /// Set (and persist) the user-given name for an input channel. A linked pair
+    /// shares one name, so the partner is updated too.
+    pub(crate) fn set_channel_name(&mut self, channel: u32, name: &str) {
+        self.assign_name(channel, name);
+        if self.linked(channel) {
+            self.assign_name(channel ^ 1, name);
+        }
         self.save_config();
+    }
+
+    /// Store a channel name in memory (no persistence); see [`Self::save_config`].
+    fn assign_name(&mut self, channel: u32, name: &str) {
+        if let Some(slot) = self.names.get_mut(channel as usize) {
+            name.clone_into(slot);
+        }
     }
 
     /// The persisted interface zoom factor, applied at startup.
@@ -364,6 +373,9 @@ impl App {
             }
         }
         self.hard_pan_pair(low);
+        // Share the lower channel's name across the newly linked pair.
+        let name = self.channel_name(low).to_owned();
+        self.assign_name(low + 1, &name);
     }
 
     /// Pan a linked pair hard left/right (lower channel left, upper right), the

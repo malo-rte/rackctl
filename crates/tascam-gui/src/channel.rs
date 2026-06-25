@@ -124,7 +124,7 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                     )
                     .changed()
                 {
-                    app.set_channel_name(ch, name);
+                    app.set_channel_name(ch, &name);
                 }
             });
             ui.separator();

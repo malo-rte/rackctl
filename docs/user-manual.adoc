@@ -510,8 +510,8 @@ INPUT:: An editable *Name* field for the channel (a GUI-only label such as "Kick
 or "Vox", remembered between sessions and shown in the meter bridge), the
 channel's stereo-link checkbox, phase and mute switches, a vertical volume fader
 with its level meter, and a pan slider along the bottom. When the pair is linked,
-the pan slider becomes a balance (see <<sec-gui-link>>) and the name edits the
-lower channel of the pair.
+the pan slider becomes a balance (see <<sec-gui-link>>) and the two channels share
+one name.
 
 EQ:: A `Reset` button and an enable checkbox in the title row, a response curve
 showing the combined effect of the four bands, and below it the bands as a Gain /
