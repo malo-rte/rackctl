@@ -143,10 +143,17 @@ fn input_box(app: &mut App, ui: &mut egui::Ui, ch: u32, selected: u32, linked: b
                 if ui.checkbox(&mut phase, "Phase").changed() {
                     app.set(Control::PhaseSwitch, ch, Value::Bool(phase));
                 }
-                ui.add_space(24.0);
                 let mut mute = app.cached_bool(Control::MuteSwitch, ch);
                 if ui.checkbox(&mut mute, "Mute").changed() {
                     app.set(Control::MuteSwitch, ch, Value::Bool(mute));
+                }
+                let mut solo = app.soloed(ch);
+                if ui
+                    .checkbox(&mut solo, "Solo")
+                    .on_hover_text("Mute the other channels")
+                    .changed()
+                {
+                    app.toggle_solo(ch);
                 }
             });
             ui.separator();

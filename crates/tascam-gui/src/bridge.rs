@@ -37,7 +37,10 @@ pub(crate) fn show(app: &mut App, ui: &mut egui::Ui) {
 /// The master L/R level meters and mute, shown at the right of the bridge.
 fn master_meters(app: &mut App, ui: &mut egui::Ui) {
     ui.vertical(|ui| {
-        ui.label("Master");
+        // An empty name line and a label matching the channel columns' name +
+        // selector, so the master meters sit at the same height.
+        ui.small(" ");
+        let _ = ui.selectable_label(false, "Master");
         ui.horizontal(|ui| {
             let (l, r) = app.meters().master_db();
             meter_bar(ui, fraction(l));
@@ -61,19 +64,9 @@ fn channel_strip(app: &mut App, ui: &mut egui::Ui, ch: u32) {
     ui.vertical(|ui| {
         ui.set_width(COLUMN_WIDTH);
 
-        // Label above the meter, matching the master strip's layout. A linked
-        // pair highlights together when either channel is selected.
-        let sel = u32::from(app.selected);
-        let selected = sel == ch || (app.linked(ch) && sel ^ 1 == ch);
-        if ui
-            .selectable_label(selected, format!("{}", ch + 1))
-            .clicked()
-        {
-            app.selected = u8::try_from(ch).unwrap_or(0);
-        }
-
-        // The user-given name, truncated to the column. A single line always
-        // (a space when unset) keeps every column's meter at the same height.
+        // The user-given name above the selector. A single line always (a space
+        // when unset) so every column -- and the master -- keeps its meter at the
+        // same height. Truncated to the column, full name on hover.
         let name = app.channel_name(ch);
         let shown = if name.is_empty() {
             " ".to_owned()
@@ -85,13 +78,35 @@ fn channel_strip(app: &mut App, ui: &mut egui::Ui, ch: u32) {
             label.on_hover_text(name);
         }
 
+        // Channel selector. A linked pair highlights together when either
+        // channel is selected.
+        let sel = u32::from(app.selected);
+        let selected = sel == ch || (app.linked(ch) && sel ^ 1 == ch);
+        if ui
+            .selectable_label(selected, format!("{}", ch + 1))
+            .clicked()
+        {
+            app.selected = u8::try_from(ch).unwrap_or(0);
+        }
+
         let level = app.meters().channel_db(ch).unwrap_or(0);
         meter_bar(ui, fraction(level));
 
-        let muted = app.cached_bool(Control::MuteSwitch, ch);
-        if ui.selectable_label(muted, "M").clicked() {
-            app.set(Control::MuteSwitch, ch, Value::Bool(!muted));
-        }
+        // Mute and solo, side by side under the meter.
+        ui.horizontal(|ui| {
+            let muted = app.cached_bool(Control::MuteSwitch, ch);
+            if ui.selectable_label(muted, "M").clicked() {
+                app.set(Control::MuteSwitch, ch, Value::Bool(!muted));
+            }
+            let solo = app.soloed(ch);
+            if ui
+                .selectable_label(solo, "S")
+                .on_hover_text("Solo: mute the other channels")
+                .clicked()
+            {
+                app.toggle_solo(ch);
+            }
+        });
 
         if app.linked(ch) {
             ui.small("link");

@@ -9,6 +9,10 @@ version.
 
 ### Added
 
+- **GUI** — solo: an *S* button per channel in the meter bridge (and a *Solo*
+  switch in the editor, `s` shortcut). While any channel is soloed the others are
+  muted; clearing solo restores the mutes that were in place before. A GUI-only
+  monitoring aid; linked pairs solo together.
 - **GUI** — channel names: name each of the 16 input channels (e.g. "Kick",
   "Vox") in the INPUT box. Names are GUI-only, remembered between sessions, and
   shown in the meter bridge.

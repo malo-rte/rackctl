@@ -151,6 +151,12 @@ pub(crate) struct App {
     links: [bool; 8],
     /// User-given names for the 16 input channels (GUI-only).
     names: [String; 16],
+    /// Solo state for the 16 channels (GUI-only); while any is soloed, the
+    /// non-soloed channels are muted.
+    solo: [bool; 16],
+    /// The channel mutes snapshotted when solo first engaged, restored when solo
+    /// is cleared. `None` when no channel is soloed.
+    pre_solo: Option<[bool; 16]>,
     /// Persisted interface zoom factor, saved with the default preset.
     zoom: f32,
     /// Persisted window inner size (logical points), saved with the default.
@@ -196,6 +202,8 @@ impl App {
             tab: Tab::Channel,
             links: cfg.links,
             names: cfg.names,
+            solo: [false; 16],
+            pre_solo: None,
             zoom: cfg.zoom,
             window: cfg.window,
             preset_names: HashMap::new(),
@@ -349,6 +357,57 @@ impl App {
     fn assign_name(&mut self, channel: u32, name: &str) {
         if let Some(slot) = self.names.get_mut(channel as usize) {
             name.clone_into(slot);
+        }
+    }
+
+    /// Whether `channel` is soloed.
+    pub(crate) fn soloed(&self, channel: u32) -> bool {
+        self.solo.get(channel as usize).copied().unwrap_or(false)
+    }
+
+    /// Toggle solo on `channel` (and its linked partner). Engaging solo mutes the
+    /// non-soloed channels; clearing the last solo restores the mutes that were
+    /// in place when solo first engaged.
+    pub(crate) fn toggle_solo(&mut self, channel: u32) {
+        let on = !self.soloed(channel);
+        self.set_solo(channel, on);
+        if self.linked(channel) {
+            self.set_solo(channel ^ 1, on);
+        }
+        self.apply_solo();
+    }
+
+    fn set_solo(&mut self, channel: u32, on: bool) {
+        if let Some(slot) = self.solo.get_mut(channel as usize) {
+            *slot = on;
+        }
+    }
+
+    /// Push the mutes that the current solo state implies: when any channel is
+    /// soloed, mute the rest (soloed channels keep their snapshotted mute); when
+    /// no channel is soloed, restore the snapshot taken before solo engaged.
+    fn apply_solo(&mut self) {
+        if self.solo.iter().any(|&s| s) {
+            if self.pre_solo.is_none() {
+                let snap: [bool; 16] = std::array::from_fn(|i| {
+                    self.cached_bool(Control::MuteSwitch, u32::try_from(i).unwrap_or(0))
+                });
+                self.pre_solo = Some(snap);
+            }
+            if let Some(pre) = self.pre_solo {
+                let target = solo_mutes(self.solo, pre);
+                for ch in 0..NUM_CHANNELS {
+                    if let Some(&muted) = target.get(ch as usize) {
+                        self.write_one(Control::MuteSwitch, ch, Value::Bool(muted));
+                    }
+                }
+            }
+        } else if let Some(pre) = self.pre_solo.take() {
+            for ch in 0..NUM_CHANNELS {
+                if let Some(&muted) = pre.get(ch as usize) {
+                    self.write_one(Control::MuteSwitch, ch, Value::Bool(muted));
+                }
+            }
         }
     }
 
@@ -842,7 +901,7 @@ impl eframe::App for App {
         // (Shift+m) mutes the master.
         if ctx.memory(egui::Memory::focused).is_none() {
             let (mut prev, mut next, mut quit) = (false, false, false);
-            let (mut mute_channel, mut mute_master) = (false, false);
+            let (mut mute_channel, mut mute_master, mut solo_channel) = (false, false, false);
             ctx.input(|i| {
                 prev = i.key_pressed(egui::Key::ArrowLeft);
                 next = i.key_pressed(egui::Key::ArrowRight);
@@ -854,6 +913,7 @@ impl eframe::App for App {
                         mute_channel = true;
                     }
                 }
+                solo_channel = i.key_pressed(egui::Key::S);
             });
             if quit {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -872,6 +932,9 @@ impl eframe::App for App {
             if mute_master && self.connected {
                 let muted = self.cached_bool(Control::MasterMute, 0);
                 self.set(Control::MasterMute, 0, Value::Bool(!muted));
+            }
+            if solo_channel && self.connected {
+                self.toggle_solo(u32::from(self.selected));
             }
         }
 
@@ -1018,6 +1081,18 @@ fn read_strip_values(path: &Path) -> Result<Vec<(Control, Value)>, String> {
     Ok(preset.strip_values())
 }
 
+/// The channel mutes implied by a solo state: a soloed channel keeps its
+/// snapshotted mute `pre`, every other channel is muted. With nothing soloed the
+/// result equals `pre`.
+fn solo_mutes(solo: [bool; 16], pre: [bool; 16]) -> [bool; 16] {
+    let any = solo.iter().any(|&s| s);
+    let mut out = [false; 16];
+    for ((slot, soloed), &was) in out.iter_mut().zip(solo).zip(pre.iter()) {
+        *slot = if !any || soloed { was } else { true };
+    }
+    out
+}
+
 /// The per-channel controls a copy/paste of `group` carries.
 fn group_controls(group: Group) -> Vec<Control> {
     match group {
@@ -1058,7 +1133,35 @@ fn sanitize_name(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{balance_to_levels, extract_links, levels_to_balance};
+    use super::{balance_to_levels, extract_links, levels_to_balance, solo_mutes};
+
+    #[test]
+    #[allow(clippy::indexing_slicing)]
+    fn solo_mutes_silences_the_unsoloed() {
+        let mut solo = [false; 16];
+        solo[2] = true;
+        solo[5] = true;
+        // Nothing muted beforehand.
+        let mutes = solo_mutes(solo, [false; 16]);
+        assert!(!mutes[2] && !mutes[5], "soloed channels stay unmuted");
+        assert!(
+            mutes[0] && mutes[1] && mutes[3] && mutes[15],
+            "others muted"
+        );
+
+        // With nothing soloed, the result is exactly the snapshot.
+        let mut pre = [false; 16];
+        pre[0] = true;
+        assert_eq!(solo_mutes([false; 16], pre), pre);
+
+        // A soloed channel that was muted in the snapshot stays muted.
+        let mut solo2 = [false; 16];
+        solo2[0] = true;
+        assert!(
+            solo_mutes(solo2, pre)[0],
+            "soloed but pre-muted stays muted"
+        );
+    }
 
     #[test]
     fn links_round_trip_through_preset_json() {

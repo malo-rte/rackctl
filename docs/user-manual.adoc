@@ -494,11 +494,13 @@ controls is in <<sec-gui-ref>>.
 === The meter bridge
 
 The meter bridge shows all 16 input channels and the master, always visible at
-the top. Each channel column has a number label, its name (if set, truncated with
-the full name on hover), a level meter, and a mute button. Click a channel's
-number to focus it in the editor below; the focused channel (or its linked pair)
-is highlighted. The master level meters and the master mute button sit at the
-right of the bridge.
+the top. Each channel column has its name (if set, above the number, truncated
+with the full name on hover), a number label, a level meter, and *M* (mute) and
+*S* (solo) buttons. Click a channel's number to focus it in the editor below; the
+focused channel (or its linked pair) is highlighted. *S* solos the channel: while
+any channel is soloed, the others are muted, and clearing solo restores the mutes
+that were in place before. The master level meters and the master mute button sit
+at the right of the bridge.
 
 [[sec-gui-editor]]
 === The channel editor
@@ -508,10 +510,11 @@ pair is linked. It has three boxes side by side.
 
 INPUT:: An editable *Name* field for the channel (a GUI-only label such as "Kick"
 or "Vox", remembered between sessions and shown in the meter bridge), the
-channel's stereo-link checkbox, phase and mute switches, a vertical volume fader
-with its level meter, and a pan slider along the bottom. When the pair is linked,
-the pan slider becomes a balance (see <<sec-gui-link>>) and the two channels share
-one name.
+channel's stereo-link checkbox, phase, mute, and solo switches, a vertical volume
+fader with its level meter, and a pan slider along the bottom. *Solo* mutes the
+other channels (a GUI-only monitoring aid; see the bridge). When the pair is
+linked, the pan slider becomes a balance (see <<sec-gui-link>>) and the two
+channels share one name and solo together.
 
 EQ:: A `Reset` button and an enable checkbox in the title row, a response curve
 showing the combined effect of the four bands, and below it the bands as a Gain /
@@ -649,10 +652,11 @@ window size are GUI settings, so `tascamctl default` does not change them.
 === Keyboard and zoom
 
 With no control focused, the Left and Right arrow keys move the focused channel,
-treating a linked pair as one step; `m` toggles mute on the selected channel and
-`M` (Shift+m) toggles the master mute; and Esc or Q quits the program. Ctrl with
-the plus or minus key zooms the whole interface in or out. The zoom is remembered
-by *Save default* (see <<sec-gui-presets>>).
+treating a linked pair as one step; `m` toggles mute on the selected channel, `M`
+(Shift+m) toggles the master mute, and `s` toggles solo on the selected channel;
+and Esc or Q quits the program. Ctrl with the plus or minus key zooms the whole
+interface in or out. The zoom is remembered by *Save default* (see
+<<sec-gui-presets>>).
 
 [[sec-cli-ref]]
 == Command-line reference
@@ -784,6 +788,7 @@ A Lua-configured Hyprland uses the equivalent
 
 | Left / Right arrow | Move the focused channel (no control focused). A linked pair is one step.
 | `m` / `M` | Toggle mute on the selected channel (`m`) or the master (`M`, Shift+m), no control focused.
+| `s` | Toggle solo on the selected channel (no control focused).
 | Esc / Q | Quit the program (no control focused).
 | Ctrl + / Ctrl - | Zoom the interface in or out.
 |===
