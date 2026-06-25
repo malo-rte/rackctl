@@ -26,7 +26,7 @@ impl<T: Transport> Gx700<T> {
     /// Propagates transport errors, and [`Error::Sysex`]/[`Error::Timeout`] from
     /// a hardware transport if the reply is malformed or absent.
     pub fn get(&mut self, param: Param) -> Result<Value> {
-        let bytes = self.transport.request(&[param.addr()], 1)?;
+        let bytes = self.transport.request(&param.address(), 1)?;
         let raw = bytes.first().copied().unwrap_or(0);
         Ok(match param.kind() {
             Kind::Bool => Value::Bool(raw != 0),
@@ -43,7 +43,7 @@ impl<T: Transport> Gx700<T> {
     /// - Transport errors otherwise.
     pub fn set(&mut self, param: Param, value: Value) -> Result<()> {
         let raw = encode(param, value)?;
-        self.transport.send(&[param.addr()], &[raw])
+        self.transport.send(&param.address(), &[raw])
     }
 
     /// Select a patch memory by sending a MIDI Program Change.
@@ -155,21 +155,21 @@ mod tests {
     #[test]
     fn set_get_round_trips() {
         let mut d = dev();
-        d.set(p("preamp-gain"), Value::Int(80)).unwrap();
-        assert_eq!(d.get(p("preamp-gain")).unwrap(), Value::Int(80));
+        d.set(p("preamp-volume"), Value::Int(80)).unwrap();
+        assert_eq!(d.get(p("preamp-volume")).unwrap(), Value::Int(80));
 
         d.set(p("comp-enable"), Value::Bool(true)).unwrap();
         assert_eq!(d.get(p("comp-enable")).unwrap(), Value::Bool(true));
 
-        d.set(p("od-type"), Value::Enum(2)).unwrap();
-        assert_eq!(d.get(p("od-type")).unwrap(), Value::Enum(2));
+        d.set(p("dist-type"), Value::Enum(2)).unwrap();
+        assert_eq!(d.get(p("dist-type")).unwrap(), Value::Enum(2));
     }
 
     #[test]
     fn out_of_range_is_rejected() {
         let mut d = dev();
         assert!(matches!(
-            d.set(p("preamp-gain"), Value::Int(999)),
+            d.set(p("preamp-volume"), Value::Int(999)),
             Err(Error::ValueOutOfRange { .. })
         ));
     }
@@ -186,9 +186,9 @@ mod tests {
     #[test]
     fn enum_out_of_range_is_rejected() {
         let mut d = dev();
-        let count = param::OD_TYPE_VALUES.len();
+        let count = param::DIST_TYPE_VALUES.len();
         assert!(matches!(
-            d.set(p("od-type"), Value::Enum(i32::try_from(count).unwrap())),
+            d.set(p("dist-type"), Value::Enum(i32::try_from(count).unwrap())),
             Err(Error::ValueOutOfRange { .. })
         ));
     }

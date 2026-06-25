@@ -10,23 +10,32 @@ use crate::value::{format_value, parse_value};
 
 /// Print the full parameter catalog. Backend-independent.
 pub(crate) fn list() {
-    println!("{:<20} {:<22} {:<24} ADDR", "KEY", "BLOCK", "KIND");
+    println!("{:<22} {:<18} {:<24} PATCH OFFSET", "KEY", "BLOCK", "KIND");
     for &p in param::ALL {
         println!(
-            "{:<20} {:<22} {:<24} {:#04x}",
+            "{:<22} {:<18} {:<24} {}",
             p.key(),
-            p.block(),
+            p.block_label(),
             kind_str(p),
-            p.addr()
+            hex4(p.patch_offset()),
         );
     }
+}
+
+/// Format a 4-byte address as space-separated hex.
+fn hex4(addr: [u8; 4]) -> String {
+    addr.iter()
+        .map(|b| format!("{b:02X}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Print detailed metadata for one parameter. Backend-independent.
 pub(crate) fn info(key: &str) -> Result<()> {
     let p = resolve(key)?;
-    println!("{}  ({})", p.key(), p.block());
-    println!("  addr:  {:#04x} (PROVISIONAL)", p.addr());
+    println!("{}  ({})", p.key(), p.block_label());
+    println!("  patch offset: {}", hex4(p.patch_offset()));
+    println!("  live address: {}", hex4(p.address()));
     match p.kind() {
         Kind::Bool => println!("  kind:  bool (on/off/true/false/1/0/yes/no)"),
         Kind::Int { min, max, default } => {
@@ -116,9 +125,9 @@ mod tests {
     #[test]
     fn set_then_get_round_trips() {
         let mut d = dev();
-        set(&mut d, "preamp-gain", "77").unwrap();
+        set(&mut d, "preamp-volume", "77").unwrap();
         // get() prints; assert via the device directly.
-        let p = Param::from_key("preamp-gain").unwrap();
+        let p = Param::from_key("preamp-volume").unwrap();
         assert_eq!(format_value(p, d.get(p).unwrap()), "77");
     }
 

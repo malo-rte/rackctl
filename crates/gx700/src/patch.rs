@@ -137,18 +137,18 @@ mod tests {
     #[test]
     fn patch_round_trips_through_a_fresh_device() {
         let mut a = dev();
-        a.set(p("preamp-gain"), Value::Int(90)).unwrap();
+        a.set(p("preamp-volume"), Value::Int(90)).unwrap();
         a.set(p("comp-enable"), Value::Bool(true)).unwrap();
-        a.set(p("od-type"), Value::Enum(2)).unwrap();
+        a.set(p("dist-type"), Value::Enum(2)).unwrap();
 
         let patch = a.capture_patch().unwrap();
 
         let mut b = dev();
         let applied = b.apply_patch(&patch).unwrap();
         assert_eq!(applied, param::ALL.len());
-        assert_eq!(b.get(p("preamp-gain")).unwrap(), Value::Int(90));
+        assert_eq!(b.get(p("preamp-volume")).unwrap(), Value::Int(90));
         assert_eq!(b.get(p("comp-enable")).unwrap(), Value::Bool(true));
-        assert_eq!(b.get(p("od-type")).unwrap(), Value::Enum(2));
+        assert_eq!(b.get(p("dist-type")).unwrap(), Value::Enum(2));
     }
 
     #[test]

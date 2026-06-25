@@ -30,7 +30,7 @@ impl MockTransport {
                     u8::try_from(default).unwrap_or(0)
                 }
             };
-            store.insert(vec![p.addr()], vec![default]);
+            store.insert(p.address().to_vec(), vec![default]);
         }
         Self { store, program: 0 }
     }

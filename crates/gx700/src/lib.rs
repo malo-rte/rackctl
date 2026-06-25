@@ -25,18 +25,19 @@
 //! use rackctl_gx700::{Gx700, MockTransport, Param, Value};
 //!
 //! let mut dev = Gx700::new(MockTransport::new());
-//! let preamp_gain = Param::from_key("preamp-gain").expect("known parameter");
+//! let preamp_volume = Param::from_key("preamp-volume").expect("known parameter");
 //!
-//! dev.set(preamp_gain, Value::Int(80))?;
-//! assert_eq!(dev.get(preamp_gain)?, Value::Int(80));
+//! dev.set(preamp_volume, Value::Int(80))?;
+//! assert_eq!(dev.get(preamp_volume)?, Value::Int(80));
 //! # Ok::<(), rackctl_gx700::Error>(())
 //! ```
 //!
-//! # Stage status
+//! # Catalog status
 //!
-//! The parameter catalog's addresses and ranges are **provisional**: they are
-//! decoded from a reverse-engineered patch parser and are verified against
-//! hardware in Stage 2 (see [`param`]).
+//! Parameter addresses and ranges are transcribed from the Roland *GX-700 MIDI
+//! Implementation* and confirmed against hardware (see
+//! `docs/gx700-sysex-protocol.adoc`). Values are raw device units; a few
+//! multi-byte parameters and the Modulation per-type matrix are not yet exposed.
 
 mod backend;
 mod device;
@@ -51,6 +52,6 @@ pub use backend::RawMidi;
 pub use backend::{MockTransport, Transport};
 pub use device::Gx700;
 pub use error::{Error, Result};
-pub use param::{Kind, Param, Value};
+pub use param::{Block, Kind, Param, Value};
 pub use patch::{PATCH_VERSION, Patch, Scalar};
 pub use sysex::{Framer, RolandMessage};
