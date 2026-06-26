@@ -119,12 +119,35 @@ pub(crate) fn copy<T: Transport>(dev: &mut Gx700<T>, from: u16, to: u16) -> Resu
         .with_context(|| format!("reading patch {from}"))?;
     dev.write_patch(to, &raw)
         .with_context(|| format!("writing patch {to}"))?;
+    verify_stored(dev, to, &raw)?;
     eprintln!(
         "copied {} {:?} to {}",
         slot_label(from),
         raw.name,
         slot_label(to)
     );
+    Ok(())
+}
+
+/// After writing a patch to a device slot, read it back and confirm the device
+/// actually stored it.
+///
+/// The GX-700 accepts writes to the temporary buffer (the current sound), but
+/// this unit does not persist writes to a *numbered user memory* over MIDI --
+/// storing there is a front-panel WRITE operation. Without this check a failed
+/// store looks like success; the read-back turns it into a clear error.
+fn verify_stored<T: Transport>(dev: &mut Gx700<T>, slot: u16, expected: &RawPatch) -> Result<()> {
+    let got = dev
+        .read_patch(slot)
+        .with_context(|| format!("reading back patch {slot} to verify the store"))?;
+    if got.blocks != expected.blocks {
+        bail!(
+            "the GX-700 did not store the patch to {} -- the slot is unchanged after the write. \
+             On this unit, storing to a numbered user memory did not take effect over MIDI; use \
+             the front-panel WRITE button to store. See the user manual.",
+            slot_label(slot)
+        );
+    }
     Ok(())
 }
 
@@ -187,7 +210,11 @@ pub(crate) fn load<T: Transport>(
 ) -> Result<()> {
     let raw = read_saved(name)?;
     let blocks = match to_patch {
-        Some(slot) => dev.write_patch(slot, &raw)?,
+        Some(slot) => {
+            let n = dev.write_patch(slot, &raw)?;
+            verify_stored(dev, slot, &raw)?;
+            n
+        }
         None => dev.write_current_patch(&raw)?,
     };
     let dest = to_patch.map_or_else(
@@ -262,6 +289,11 @@ pub(crate) fn scene_restore<T: Transport>(
     for (&slot, raw) in &scene.patches {
         dev.write_patch(slot, raw)
             .with_context(|| format!("writing patch {slot}"))?;
+        if count == 0 {
+            // Fail fast: confirm the very first patch actually stored before
+            // writing the rest, rather than silently "restoring" nothing.
+            verify_stored(dev, slot, raw).context("scene restore aborted after the first patch")?;
+        }
         println!("U{slot:03}  {:<12}", raw.name);
         count += 1;
         sleep(BANK_READ_PACE); // pace writes too, for the same reason

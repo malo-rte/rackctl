@@ -29,6 +29,12 @@ const DEFAULT_DEVICE_ID: u8 = 0x00;
 /// Pause between non-blocking read polls while waiting for a reply.
 const POLL_INTERVAL: Duration = Duration::from_millis(1);
 
+/// Gap left after each DT1 write. The Roland one-way transfer procedure requires
+/// *more than 20 ms* between consecutive DT1 messages of a bulk transfer (GX-700
+/// MIDI Implementation, "One-way Transfer Procedure"); without it the device
+/// drops a multi-sub-block patch write, so storing to memory silently fails.
+const WRITE_PACE: Duration = Duration::from_millis(30);
+
 /// How many [`POLL_INTERVAL`] polls to wait for a DT1 reply before giving up
 /// (about 500 ms). A bounded poll count avoids reaching for an injectable
 /// clock on this hardware-only path.
@@ -302,7 +308,11 @@ impl RawMidi {
 impl Transport for RawMidi {
     fn send(&mut self, addr: &[u8], data: &[u8]) -> Result<()> {
         let msg = sysex::build_dt1(self.device_id, addr, data);
-        self.write_all(&msg)
+        self.write_all(&msg)?;
+        // Pace consecutive DT1s so a bulk (multi-sub-block) patch write is not
+        // dropped by the device. See [`WRITE_PACE`].
+        std::thread::sleep(WRITE_PACE);
+        Ok(())
     }
 
     fn request(&mut self, addr: &[u8], len: usize) -> Result<Vec<u8>> {
