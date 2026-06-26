@@ -74,7 +74,7 @@ the parameter within a patch*.
 | `04 00 00 00`                  | Temporary buffer (the current sound), bulk access.
 | `04 7F 7F 7F`                  | Sound Change Request (SCR).
 | `08 00 00 00`                  | Temporary buffer, *individual*-parameter access.
-| `10 00 00 00`                  | Display data (read-only): the 2x16 LCD.
+| `10 00 00 00`                  | Display data, the 2x16 LCD. Listed as read-only, but does *not* answer RQ1 on the tested firmware (see <<Patch memories (presets)>>).
 |===
 
 == Editing model
@@ -106,6 +106,21 @@ Within a patch, each effect block occupies offset `00 00 XX 00`:
 | `05` | Loop          | `0C` | Tremolo / Pan
 | `06` | Equalizer     | `0D` | Reverb
 |===
+
+Each sub-block is one DT1 starting at `00 00 XX 00`; its 4th address byte is the
+parameter offset *within* the block. The byte lengths, captured from a real patch
+read (and matching the MIDI Implementation row counts), are:
+
+[cols="1,1,1,1,1,1,1,1,1,1,1,1,1,1",options="header"]
+|===
+| `00` | `01` | `02` | `03` | `04` | `05` | `06` | `07` | `08` | `09` | `0A` | `0B` | `0C` | `0D`
+| 66 | 8 | 13 | 6 | 10 | 4 | 7 | 5 | 5 | 77 | 21 | 9 | 5 | 9
+|===
+
+A whole patch is thus ~245 bytes across the 14 sub-blocks (not contiguous in
+address space -- each starts at its own `XX` boundary). Writing it back as 14
+separate sub-block DT1s is what the device expects; a single contiguous DT1 to the
+patch base does *not* work (tested).
 
 Each block begins with an `EFFECT ON/OFF` byte (`0`=off, `1`=on); most type-select
 bytes follow. The exhaustive per-offset map (parameter, raw range, enum labels) is
@@ -214,6 +229,21 @@ restore`): a patch read from one slot and written to another reproduces it. RQ1
 reads still work while the unit idles in Bulk Load mode, so the tools read each
 write back to confirm it actually stored (and otherwise report that the unit was
 not in Bulk Load mode). Press PLAY to leave the mode when done.
+
+*Bulk Load cannot be entered (or detected) over MIDI.* It is a deliberate
+front-panel safety gate, and the investigation confirmed there is no remote way in:
+
+* The MIDI Implementation's "Recognized Receive Data" is the *complete* set of
+  messages the unit accepts -- Control Change, Program Change, DT1, RQ1 -- and none
+  of them changes the operating mode. Bulk Load is listed only as a front-panel
+  *MIDI Utility Function* in the Owner's Manual.
+* Auto-detecting the mode by reading the display also fails: the display-data area
+  (`10 00 00 00`), though documented as the readable 2x16 LCD (Table-20: line 1 at
+  offset `00`..`0F`, line 2 at `10`..`1F`), *does not respond to RQ1 at all* on the
+  tested firmware -- every request to it times out while patch reads succeed. So the
+  LCD contents are not remotely readable, and the front-panel step cannot be sensed
+  or skipped. The tools therefore confirm the mode *after the fact* (read-back), not
+  before.
 
 To change the *current sound* without touching stored memory -- and without Bulk
 Load mode -- write to the temporary buffer instead (see <<Editing model>>): a bulk
