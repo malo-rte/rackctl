@@ -112,6 +112,14 @@ enum Command {
         #[arg(long)]
         patch: Option<u16>,
     },
+    /// Save every patch in a bank to disk: the 100 user patches as U001.json..,
+    /// or (with --preset) the 100 preset patches as P001.json.. These land in the
+    /// patch library, so `patches --disk`, `dump --file`, and `load` see them.
+    Backup {
+        /// Back up the 100 preset patches instead of the 100 user patches.
+        #[arg(long)]
+        preset: bool,
+    },
     /// Load a saved whole-patch file onto the device.
     Load {
         /// Saved patch name to load.
@@ -236,6 +244,7 @@ fn run_command<T: Transport>(dev: &mut Gx700<T>, command: Command) -> Result<()>
         Command::Set { param, value } => commands::set(dev, &param, &value),
         Command::Dump { patch, .. } => commands::dump_device(dev, patch),
         Command::Save { name, patch } => commands::save(dev, &name, patch),
+        Command::Backup { preset } => commands::backup(dev, preset),
         Command::Load { name, to_patch } => commands::load(dev, &name, to_patch),
         Command::Select { n } => commands::select(dev, n),
         Command::Patches { preset, .. } => commands::patches(dev, preset),

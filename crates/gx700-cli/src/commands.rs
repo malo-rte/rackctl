@@ -2,6 +2,7 @@
 //! the mock and the real ALSA rawmidi device.
 
 use std::fs;
+use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -98,14 +99,50 @@ pub(crate) fn dump_file(name: &str) -> Result<()> {
 /// lossless JSON file under the gx700 patches directory.
 pub(crate) fn save<T: Transport>(dev: &mut Gx700<T>, name: &str, slot: Option<u16>) -> Result<()> {
     let raw = read_from_device(dev, slot)?;
+    let path = write_patch_file(name, &raw)?;
+    eprintln!("saved {:?} to {}", raw.name, path.display());
+    Ok(())
+}
+
+/// Save every patch in a bank to disk: the 100 user patches, or (with `preset`)
+/// the 100 preset patches. Each is written as `U001.json` / `P001.json` in the
+/// patches directory — the same library `load`, `dump --file`, and
+/// `patches --disk` read, so a backed-up patch can be inspected or restored by
+/// name straight away. Reads are paced like [`patches`]; the port lock makes
+/// this run the device's sole accessor from start to finish.
+pub(crate) fn backup<T: Transport>(dev: &mut Gx700<T>, preset: bool) -> Result<()> {
+    let (slots, tag) = if preset {
+        (101u16..=200, 'P')
+    } else {
+        (1u16..=100, 'U')
+    };
+    let dir = config::patches_dir().context("could not determine the patches directory")?;
+    let mut count = 0u32;
+    for slot in slots {
+        let raw = dev
+            .read_patch(slot)
+            .with_context(|| format!("reading patch {slot}"))?;
+        let n = if preset { slot - 100 } else { slot };
+        let name = format!("{tag}{n:03}");
+        write_patch_file(&name, &raw)?;
+        println!("{name}  {:<12}", raw.name);
+        count += 1;
+        sleep(BANK_READ_PACE); // ease off the US-16x08's MIDI input between reads
+    }
+    eprintln!("backed up {count} patches to {}", dir.display());
+    Ok(())
+}
+
+/// Write `raw` to the patch library as `<name>.json`, creating the directory if
+/// needed, and return the path written.
+fn write_patch_file(name: &str, raw: &RawPatch) -> Result<PathBuf> {
     let path = config::patch_path(name).context("could not determine the patches directory")?;
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
     }
-    let json = serde_json::to_string_pretty(&raw).context("serializing patch")?;
+    let json = serde_json::to_string_pretty(raw).context("serializing patch")?;
     fs::write(&path, json).with_context(|| format!("writing {}", path.display()))?;
-    eprintln!("saved {:?} to {}", raw.name, path.display());
-    Ok(())
+    Ok(path)
 }
 
 /// Load a saved whole-patch file onto the device: the current sound, or (with
