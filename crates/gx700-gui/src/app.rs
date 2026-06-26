@@ -393,10 +393,16 @@ impl App {
                             actions.push(Action::SetName(row.slot, name));
                         }
 
-                        // Column 3: output-level slider.
+                        // Column 3: output-level slider. Give it a fixed allocation
+                        // so it does not expand to fill the row and starve the name
+                        // field (an egui Slider grows to its available width).
                         let mut level = i32::from(row.pending_level.unwrap_or(row.stored_level));
                         let slider = egui::Slider::new(&mut level, 0..=100).suffix("%");
-                        if ui.add_enabled(self.connected, slider).changed() {
+                        let size = [220.0, ui.spacing().interact_size.y];
+                        let changed = ui
+                            .add_enabled_ui(self.connected, |ui| ui.add_sized(size, slider).changed())
+                            .inner;
+                        if changed {
                             let level = u8::try_from(level.clamp(0, 100)).unwrap_or(0);
                             actions.push(Action::SetLevel(row.slot, level));
                         }
