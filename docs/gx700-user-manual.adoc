@@ -247,6 +247,31 @@ integers as their number. A `-` means that block carries no data in this patch.
 $ rackctl-gx700 dump --file U042
 ----
 
+[[sec-patches-copy]]
+=== Copying a patch
+
+`copy <from> <to>` duplicates a stored patch into another slot on the unit, without
+going through a file. The source may be any patch -- a user patch (1--100) or a
+preset (101--200) -- and the destination must be a user slot (1--100), which it
+overwrites:
+
+[source,console]
+----
+$ rackctl-gx700 --port hw:1,0 copy 12 42     # copy user patch 12 into user slot 42
+$ rackctl-gx700 --port hw:1,0 copy 112 42    # copy preset 12 (slot 112) into user slot 42
+----
+
+The patch's name travels with it, so the destination ends up identically named. This
+is the same as a `save` followed by a `load --to-patch`, in one step -- a handy way
+to pull a favourite preset into the user bank where you can edit it.
+
+[WARNING]
+====
+`copy` overwrites the destination patch; whatever was in that slot is lost unless
+you have saved it (with `save`, `backup`, or `scene save`). To copy *into* a preset
+slot is not possible -- the factory bank is read-only.
+====
+
 [[sec-patches-banks]]
 === User and preset banks
 
@@ -666,6 +691,7 @@ The *Needs* column shows what a command requires: _device_ (a unit via `--port`,
 | `scene restore <name> --yes`     | Restore a scene to the device (overwrites all user patches). | device
 | `scene list`                     | List scenes saved on disk. | disk
 | `load <name> [--to-patch N]`     | Load a saved patch file to the current sound or slot `N`. | device
+| `copy <from> <to>`               | Copy a stored patch to another user slot on the device (overwrites). | device
 | `select <n>`                     | Recall a patch by Program Change `n` (0--127). | device
 | `patches [--preset] [--disk]`    | List patch slots (device user/preset bank, or saved on disk). | device / disk
 | `recv`                           | Print incoming SysEx as hex. | device

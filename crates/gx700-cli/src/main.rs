@@ -135,6 +135,17 @@ enum Command {
         #[arg(long)]
         to_patch: Option<u16>,
     },
+    /// Copy a stored patch from one slot to another on the device.
+    ///
+    /// The source may be any patch (user 1-100 or preset 101-200); the
+    /// destination must be a user slot (1-100). DESTRUCTIVE: overwrites the
+    /// destination patch.
+    Copy {
+        /// Source patch slot (1-200; 101-200 are presets).
+        from: u16,
+        /// Destination user patch slot (1-100).
+        to: u16,
+    },
     /// Select a patch memory by Program Change.
     Select {
         /// Patch program number (0-127).
@@ -279,6 +290,7 @@ fn run_command<T: Transport>(dev: &mut Gx700<T>, command: Command) -> Result<()>
             SceneCommand::List => Ok(()),
         },
         Command::Load { name, to_patch } => commands::load(dev, &name, to_patch),
+        Command::Copy { from, to } => commands::copy(dev, from, to),
         Command::Select { n } => commands::select(dev, n),
         Command::Patches { preset, .. } => commands::patches(dev, preset),
         // The backend-free and hardware-only commands are handled before a

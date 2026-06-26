@@ -104,6 +104,39 @@ pub(crate) fn save<T: Transport>(dev: &mut Gx700<T>, name: &str, slot: Option<u1
     Ok(())
 }
 
+/// Copy a stored patch from one slot to another on the device. The source `from`
+/// may be any patch (user 1..=100 or preset 101..=200); the destination `to` must
+/// be a user slot (1..=100), which it overwrites.
+pub(crate) fn copy<T: Transport>(dev: &mut Gx700<T>, from: u16, to: u16) -> Result<()> {
+    if !(1..=200).contains(&from) {
+        bail!("source patch {from} out of range (1..=200)");
+    }
+    if !(1..=100).contains(&to) {
+        bail!("destination patch {to} must be a user slot (1..=100); presets are read-only");
+    }
+    let raw = dev
+        .read_patch(from)
+        .with_context(|| format!("reading patch {from}"))?;
+    dev.write_patch(to, &raw)
+        .with_context(|| format!("writing patch {to}"))?;
+    eprintln!(
+        "copied {} {:?} to {}",
+        slot_label(from),
+        raw.name,
+        slot_label(to)
+    );
+    Ok(())
+}
+
+/// A patch slot as its user/preset label: `1..=100` -> `U001`.., `101..=200` -> `P001`..
+fn slot_label(slot: u16) -> String {
+    if slot > 100 {
+        format!("P{:03}", slot - 100)
+    } else {
+        format!("U{slot:03}")
+    }
+}
+
 /// Save every patch in a bank to disk: the 100 user patches, or (with `preset`)
 /// the 100 preset patches. Each is written as `U001.json` / `P001.json` in the
 /// patches directory — the same library `load`, `dump --file`, and
