@@ -247,13 +247,36 @@ integers as their number. A `-` means that block carries no data in this patch.
 $ rackctl-gx700 dump --file U042
 ----
 
+[[sec-bulk-load]]
+=== Storing patches to the unit (BULK LOAD mode)
+
+[IMPORTANT]
+====
+The GX-700 accepts writes to its patch memories *only while it is in BULK LOAD
+mode*. Every command that stores a patch on the unit -- `copy`, `load --to-patch`,
+and `scene restore` -- needs this one extra step on the hardware first:
+
+. On the GX-700, press *TUNER/UTILITY*.
+. Use the PARAMETER buttons to select *"MIDI BULK LOAD"*; the display shows
+  *"Waiting..."*.
+. Run the `rackctl-gx700` command. The unit's display shows "receiving...", then
+  "idling...".
+. Press *PLAY* on the unit to finish.
+
+Outside BULK LOAD mode the write is silently ignored by the unit -- but the tool
+reads every write back to check it, and tells you plainly if it did not store
+("the GX-700 did not store the patch ... only in BULK LOAD mode ... re-run this
+command"), so a forgotten step never looks like success. Reading, listing, backing
+up, and editing the current sound do *not* need this mode.
+====
+
 [[sec-patches-copy]]
 === Copying a patch
 
 `copy <from> <to>` duplicates a stored patch into another slot on the unit, without
 going through a file. The source may be any patch -- a user patch (1--100) or a
 preset (101--200) -- and the destination must be a user slot (1--100), which it
-overwrites:
+overwrites. The unit must be in BULK LOAD mode (see <<sec-bulk-load>>):
 
 [source,console]
 ----
@@ -278,8 +301,8 @@ slot is not possible -- the factory bank is read-only.
 [cols="1,1,3",options="header"]
 |===
 | Bank | Slots | Notes
-| User   | `U001`..`U100` (1..100)   | Editable. `load --to-patch`, `scene restore`, and the unit's front-panel Write store here. Overwriting is destructive.
-| Preset | `P001`..`P100` (101..200) | Factory data. You can list, `dump`, and `backup --preset` them, but they cannot be restored -- the device does not accept writes to the factory area.
+| User   | `U001`..`U100` (1..100)   | Editable. `copy`, `load --to-patch`, and `scene restore` store here -- in BULK LOAD mode (see <<sec-bulk-load>>). Overwriting is destructive.
+| Preset | `P001`..`P100` (101..200) | Factory data. You can list, `dump`, and `backup --preset` them; the tools never write to them, so they are effectively read-only.
 |===
 
 [[sec-editing]]
@@ -413,11 +436,14 @@ it into a user slot:
 [source,console]
 ----
 $ rackctl-gx700 --port hw:1,0 save "my-lead"                  # current sound -> file
+# put the GX-700 in BULK LOAD mode, then:
 $ rackctl-gx700 --port hw:1,0 load "my-lead" --to-patch 42    # file -> user slot 42 (destructive)
 ----
 
-See <<sec-scenes-backups>> for saving and loading in full. (You can also store the
-current sound from the GX-700's own front panel with its Write button.)
+Writing to a stored slot needs the unit in BULK LOAD mode (see
+<<sec-bulk-load>>); see <<sec-scenes-backups>> for saving and loading in full. (You
+can also store the current sound from the GX-700's own front panel with its Write
+button.)
 
 [[sec-editing-blocks]]
 === The effect blocks
@@ -522,10 +548,12 @@ the interface to it until it reports the saved file.
 === Restoring a scene
 
 Write a saved scene back to the device. This *overwrites every user patch*, so it
-is destructive and requires `--yes` to proceed:
+is destructive and requires `--yes` to proceed -- and, because it stores to the
+user bank, the unit must be in BULK LOAD mode (see <<sec-bulk-load>>):
 
 [source,console]
 ----
+# On the GX-700: TUNER/UTILITY -> "MIDI BULK LOAD" ("Waiting...")
 $ rackctl-gx700 --port hw:1,0 scene restore "before-gig"
 error: restoring scene "before-gig" overwrites 100 user patches on the device; re-run with --yes to confirm
 
@@ -533,7 +561,11 @@ $ rackctl-gx700 --port hw:1,0 scene restore "before-gig" --yes
 U001  N RODGERS?
 ...
 restored scene "before-gig" (100 patches) to the device
+# then press PLAY on the unit to leave BULK LOAD mode
 ----
+
+If the unit is not in BULK LOAD mode, the restore stops after the first patch with
+a clear error rather than silently writing 100 patches that do not take.
 
 [WARNING]
 ====
@@ -563,12 +595,14 @@ to the current sound or to a user slot:
 [source,console]
 ----
 $ rackctl-gx700 --port hw:1,0 save "lead-tone" --patch 42   # save user patch 42
+# to write a slot, put the GX-700 in BULK LOAD mode first (see above)
 $ rackctl-gx700 --port hw:1,0 load "lead-tone" --to-patch 7 # write it into user slot 7 (destructive)
 ----
 
 Without `--patch` / `--to-patch`, `save` captures and `load` writes the *current
-sound* (the temporary buffer) instead of a stored slot. Loading to a slot overwrites
-that stored patch, so it too is destructive.
+sound* (the temporary buffer) instead of a stored slot. Writing to the current
+sound needs no special mode; writing to a stored slot with `--to-patch` overwrites
+that patch and requires BULK LOAD mode (<<sec-bulk-load>>).
 
 [[sec-backup]]
 === Backing up every patch as separate files
@@ -588,7 +622,7 @@ Because these land in the patch library, the other commands see them immediately
 ----
 $ rackctl-gx700 patches --disk        # list what you have on disk
 $ rackctl-gx700 dump --file U042       # show one patch in readable form (no device needed)
-$ rackctl-gx700 --port hw:1,0 load U042 --to-patch 42   # restore one patch
+$ rackctl-gx700 --port hw:1,0 load U042 --to-patch 42   # restore one patch (BULK LOAD mode)
 ----
 
 Use `backup` when you want to cherry-pick individual patches; use `scene save` when
@@ -732,6 +766,11 @@ interface itself has stalled after heavy use, power-cycle it.
 The GX-700 receives on its MIDI channel (omni by default); confirm the channel /
 device id if you have changed it. Remember that `set` edits the *current sound*, so
 make sure that is what you are listening to (recall a patch with `select` first).
+
+`copy` / `load --to-patch` / `scene restore` says the patch was not stored::
+The GX-700 only accepts patch-memory writes in BULK LOAD mode. On the unit, press
+TUNER/UTILITY, select "MIDI BULK LOAD" ("Waiting..."), then re-run the command, and
+press PLAY when done. See <<sec-bulk-load>>.
 
 Listing or backing up a bank is slow::
 Expected. Each patch is a complete read, and reads are paced to keep the interface

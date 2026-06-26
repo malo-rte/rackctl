@@ -194,28 +194,45 @@ patch 1's Level/Chain data begins `32 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 4E 
 
 *Writing a patch.* Storing a patch is a bulk write of its sub-blocks to the
 memory base -- this *overwrites* the user patch, so it is destructive and never
-done implicitly. Writing a whole patch to a user slot is implemented and verified
-on hardware (`Gx700::write_patch`, exposed by the CLI's `load --to-patch`, `scene
-restore`). To change the *current sound* without touching stored memory, write to
-the temporary buffer instead (see <<Editing model>>); a bulk write to `04 00 00 00`
-must be followed by a Sound Change Request (DT1 `00` to `04 7F 7F 7F`), whereas
-individual writes to `08 00 00 00` apply immediately.
+done implicitly.
+
+[IMPORTANT]
+====
+*The GX-700 accepts writes to patch memory only while it is in front-panel BULK
+LOAD mode.* On the unit, press TUNER/UTILITY and select "MIDI BULK LOAD" (the
+display shows "Waiting..."); see the Owner's Manual, "Receiving Data (Bulk Load)".
+Outside that mode, DT1 writes to a patch-memory address are *silently ignored* --
+the device acknowledges nothing and the slot is unchanged, which is exactly what a
+successful-looking no-op looks like. This is the single fact that makes patch
+storing work; it cost a long investigation to find, because the address map lists
+patch memory as receivable without mentioning the mode.
+====
+
+With the unit in Bulk Load mode, writing is verified on hardware
+(`Gx700::write_patch`, exposed by the CLI's `copy`, `load --to-patch`, `scene
+restore`): a patch read from one slot and written to another reproduces it. RQ1
+reads still work while the unit idles in Bulk Load mode, so the tools read each
+write back to confirm it actually stored (and otherwise report that the unit was
+not in Bulk Load mode). Press PLAY to leave the mode when done.
+
+To change the *current sound* without touching stored memory -- and without Bulk
+Load mode -- write to the temporary buffer instead (see <<Editing model>>): a bulk
+write to `04 00 00 00` must be followed by a Sound Change Request (DT1 `00` to
+`04 7F 7F 7F`), whereas individual writes to `08 00 00 00` apply immediately.
 
 [NOTE]
 ====
-*Presets are treated as read-only, but this is unverified.* Preset patches (area
-`01`) are factory data; the editor never writes there, and the CLI restricts
-`load --to-patch`/`scene restore` to user slots 1..100. Whether the device would
-*accept* or *reject* a write to area `01` has not been tested on hardware -- it is
-an assumption, not a confirmed fact.
+*Presets are treated as read-only.* Preset patches (area `01`) are factory data;
+the editor never writes there, and the CLI restricts `load --to-patch` / `scene
+restore` to user slots 1..100. Whether the device would accept a Bulk-Load write to
+area `01` has not been tested.
 ====
 
 *There is no "erase".* The 100 user slots always contain a patch; the GX-700 has
 no notion of an empty or deleted slot. "Clearing" a patch therefore means
-overwriting it with a blank/initialised patch. No factory-reset or patch-initialise
-*command* is mapped over MIDI, and the Roland PDFs are scanned images with no
-extractable text, so we cannot confirm one exists; any such reset is presumed to be
-a front-panel operation.
+overwriting it with a blank/initialised patch (in Bulk Load mode). Factory reset is
+a front-panel procedure (Owner's Manual, "Initialization"); no patch-initialise
+*command* is exposed over MIDI.
 
 == Concurrency and pacing
 
@@ -233,12 +250,18 @@ reader on `hw:1,0`. The rawmidi transport takes an advisory `flock` on the port
 instead of corrupting both streams. The full rationale and the planned arbitration
 daemon are in `docs/midi-arbitration.adoc`.
 
-*Pacing.* Listing or backing up a bank issues one whole-patch read per slot, each
-of which makes the device stream ~14 messages. Back to back, that sustained burst
-can overrun the US-16x08's USB-MIDI input until it stalls; a ~40 ms gap between
-reads (the CLI's `BANK_READ_PACE`) keeps it from flooding. With a sole accessor and
-this pacing, both full 100-patch banks read end to end with zero timeouts. Writes
-(`scene restore`) are paced the same way.
+*Read pacing.* Listing or backing up a bank issues one whole-patch read per slot,
+each of which makes the device stream ~14 messages. Back to back, that sustained
+burst can overrun the US-16x08's USB-MIDI input until it stalls; a ~40 ms gap
+between reads (the CLI's `BANK_READ_PACE`) keeps it from flooding. With a sole
+accessor and this pacing, both full 100-patch banks read end to end with zero
+timeouts.
+
+*Write pacing.* The Roland one-way transfer procedure (MIDI Implementation,
+"One-way Transfer Procedure") requires *more than 20 ms between consecutive DT1
+messages* of a bulk transfer. The rawmidi transport leaves a 30 ms gap after every
+DT1 (`WRITE_PACE`); this matters for the multi-sub-block patch writes and the
+temporary-buffer bulk load.
 
 == Verified against hardware
 
@@ -253,7 +276,7 @@ this pacing, both full 100-patch banks read end to end with zero timeouts. Write
 | Byte-exact decode | The preamp block `01 03 1F 57 3A 32 07 5F 00 01` decoded to On / BG Lead / Vol 31 / Bass 87 / Mid 58 / Treble 50 / Presence 7 / Master 95 / Bright off / Gain mid -- exactly per the tables.
 | Program Change | Sending PC on channel 1 changed the patch on the unit (it receives omni, transmits on channel 1).
 | Edit transmit | The GX-700 does *not* transmit individual parameter edits over MIDI; it transmits only on a bulk dump. Reading state therefore uses RQ1, not change-monitoring.
-| Whole-patch write | Reading a stored patch, then writing it back to a user slot, round-trips: a saved patch loaded with `load --to-patch` / `scene restore` reproduces the original sound (e.g. a Metal 5150 patch restored over a BG Lead slot).
+| Whole-patch write | *With the unit in BULK LOAD mode*, writing a patch to a user slot stores it: `load --to-patch 1` changed slot 1 from "STUDIO SPACE" to "TUBE STACK", and `copy 3 50` stored "SPACE OCTAVE" into slot 50, both confirmed by read-back. *Without* Bulk Load mode the identical writes are no-ops (slot unchanged) -- see the IMPORTANT note under <<Patch memories (presets)>>.
 | Sole-accessor reads | With the port lock held and ~40 ms pacing, both full banks (`patches` and `patches --preset`, 100 patches each) read with zero timeouts; a concurrent second reader reliably caused the timeouts previously blamed on the interface.
 |===
 
@@ -277,8 +300,10 @@ port lock and read pacing, and output-level display units. What remains:
   listed but unexplored and unverified.
 * *Preset-area writes.* Whether the device accepts or rejects a write to area `01`
   is untested (see the note under <<Patch memories (presets)>>).
-* *Reset / initialise.* No factory-reset or patch-initialise command is mapped over
-  MIDI, and the scanned PDFs cannot be searched to confirm one exists.
+* *Reset / initialise.* No factory-reset or patch-initialise command is exposed
+  over MIDI; both are front-panel procedures (confirmed by OCR of the Owner's
+  Manual -- the scanned PDFs were rendered to images and OCR'd to extract their
+  text, which is also how the BULK LOAD requirement was found).
 * *Bank-listing speed.* `patches` is inherently ~0.5 s/patch because each RQ1
   streams the entire patch; pacing adds a further ~40 ms/slot. This is a property of
   the protocol, not a bug -- there is no lighter "name only" request.
