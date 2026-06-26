@@ -194,7 +194,7 @@ NOTE: Verified against fixture `U001` (block `0`): output level `53H`=83, chain
 | Offset | Field | Encoding | Value
 | `00` | Effect on/off | `0000 000n` | 0:OFF 1:ON
 | `01` | Speaker type | `0000 nnnn` | `00H-0BH` (Table-8.1)
-| `02` | Mic setting | `0vvv vvvv` | 1-3 (mic distance/position)
+| `02` | Mic setting | `0000 vvvv` | `01H-0AH` (1-10)
 | `03` | Mic level | `0vvv vvvv` | `00H-64H` (0-100)
 | `04` | Direct level | `0vvv vvvv` | `00H-64H` (0-100)
 |===
@@ -245,7 +245,7 @@ field applies to).
 | `17`,`18`,`19` | P.S. pitch #1..#3 | `00vv vvvv` | `00H-32H` (-24 +24 semitones)
 | `1A`,`1B`,`1C` | P.S. fine #1..#3 | `0vvv vvvv` | `00H-64H` (-50 +50)
 | `1D` | Harmonist key | `000v vvvv` | `00H-18H` (0-24)
-| `1E`,`1F`,`20` | PS & HR pre-delay #1..#3 | `0vvv vvvv` | (per-voice pre-delay) +++<!-- rows between Harmonist key @1D and Pan#2 @22; pan#1=21 -->+++
+| `1E`,`1F`,`20` | Harmonist interval #1..#3 | `0vvv vvvv` | `00H-30H` (Table-10.2, -24..+24) — the three HR-INT voices
 | `21`,`22`,`23` | PS & HR pan #1..#3 | `0vvv vvvv` | `00H-64H` (L100:R0 - L0:R100)
 | `24`,`25`,`26` | PS & HR level #1..#3 | `0vvv vvvv` | `00H-64H` (0-100)
 | `27` | PS & HR balance | `0vvv vvvv` | `00H-64H` (D100:E0 - D0:E100)
@@ -253,14 +253,13 @@ field applies to).
 | `29`..`4C` | Harmonist scale | `00vv vvvv` | 3 voices × 12 chromatic notes (C, Db, D, Eb, E, F, F#, G, Ab, A, Bb, B), each `00H-30H` (Table-10.2)
 |===
 
-The harmonist scale at `29`..`4C` is 36 bytes: for each note (C..B) three voice
-intervals (`#1 #2 #3`), i.e. `C#1 C#2 C#3 Db#1 Db#2 Db#3 …`. Last byte `4C` =
-B voice #3, which makes the block exactly 77 bytes (`00`..`4C`).
-
-NOTE: Offsets `1E`..`20` (labelled "pre-delay") are inferred from the 3-voice
-pattern — they sit between Harmonist key (`1D`, read directly) and PS & HR pan #2
-(`22`, read directly), with pan #1 at `21`. Confirm against fixtures before relying
-on the exact field name.
+The harmonist scale at `29`..`4C` is 36 bytes: for each note (C, Db, D, Eb, E, F,
+F#, G, Ab, A, Bb, B) three voice intervals (`#1 #2 #3`), i.e.
+`C#1 C#2 C#3 Db#1 Db#2 Db#3 …`. Last byte `4C` = B voice #3, which makes the block
+exactly 77 bytes (`00`..`4C`). The Target-Type list (Table-1.2) names the assignable
+Modulation parameters and confirms this order: `PS-PITCH1..3` (67-69), `HR-KEY` (70),
+`HR-INT1..3` (71-73), `PS&HR-PAN1..3` (74-76), `PS&HR-LEV1..3` (77-79), `PS&HR-BAL`
+(80), `PS&HR-TOTAL` (81).
 
 == `0A` — Delay (21 bytes)
 
@@ -326,8 +325,8 @@ Delay times are 14-bit (two 7-bit bytes). Three taps: Center (ms), Left and Righ
 | `01` | Mode | `0000 0nnn` | 0:ROOM1 1:ROOM2 2:HALL1 3:HALL2 4:PLATE
 | `02` | Reverb time | `0ddd dddd` | `01H-64H` (0.1-10.0 sec)
 | `03` | Pre-delay | `0ddd dddd` | `00H-64H` (0-100 ms)
-| `04` | Low cut | `0000 vvvv` | `00H-0AH` (low-cut freq, Table-16)
-| `05` | Hi cut | `0000 vvvv` | `00H-0FH` (hi-cut freq, Table-15)
+| `04` | Low cut | `0000 vvvv` | `00H-0AH` (Table-16)
+| `05` | Hi cut | `0000 vvvv` | `00H-0FH` (Table-15)
 | `06` | Diffusion | `0vvv vvvv` | `00H-0AH` (0-10)
 | `07` | Effect level | `0vvv vvvv` | `00H-64H` (0-100)
 | `08` | Direct level | `0vvv vvvv` | `00H-64H` (0-100)
@@ -335,10 +334,8 @@ Delay times are 14-bit (two 7-bit bytes). Three taps: Center (ms), Left and Righ
 
 == Shared value tables
 
-Indices referenced by the blocks above. Long enumerations (Target Type Table-1.2,
-Assign Source Table-1.3, Name Table-1.4, Harmonist Scale Table-10.2) are large and
-transcribed on demand from the MI PDF (pages 3, 4); their *ranges* are given inline
-in the block tables above.
+Indices referenced by the blocks above, transcribed from the MI PDF (Tables 1.1–1.4
+on page 3; 7–16 on pages 4–6).
 
 .Table-1.1 — Effect type / chain ids
 [cols="1,3",options="header"]
@@ -359,6 +356,56 @@ in the block tables above.
 | 13 | Reverb
 |===
 
+=== Table-1.2 — Target type (control-assign target, `0`..`133`)
+
+The flat enumeration of every assignable parameter, in block order. `00`=Not
+Assign, `01`=Output Level, then each block's parameters. Used by the four
+Level/Chain control assigns (the assign Target nibble pair).
+
+[cols="1,4",options="header"]
+|===
+| Ids | Targets (in order)
+| 0-1 | NOT ASSIGN, OUTPUT LEVEL
+| 2-9 (Comp) | CS:ON/OFF, CS:MODE, CS:SUSTAIN, CS:ATTACK, LM:THRESHLD, LM:RELEASE, CS:TONE, CS:LEVEL
+| 10-19 (Wah) | ON/OFF, MODE, PEAK, PEDAL-FREQ, AUTO-POL, AUTO-SENS, AUTO-MANU, AUTO-RATE, AUTO-DEPTH, LEVEL
+| 20-25 (Dist) | ON/OFF, TYPE, DRIVE, BASS, TREBLE, LEVEL
+| 26-35 (Preamp) | ON/OFF, TYPE, VOLUME, BASS, MIDDLE, TREBLE, PRESENCE, MASTER, BRIGHT, GAIN
+| 36-39 (Loop) | ON/OFF, LEVEL, RETURN, MODE
+| 40-46 (EQ) | ON/OFF, LOW-GAIN, MID-FREQ, MID-GAIN, MID-Q, HI-GAIN, LEVEL
+| 47-51 (Speaker) | ON/OFF, TYPE, MIC-SETTING, MIC-LEVEL, DIRECT-LEV
+| 52-55 (Noise S.) | ON/OFF, THRESHOLD, RELEASE, LEVEL
+| 56-90 (Modulation) | MOD:ON/OFF(56), RATE, DEPTH, MANUAL, RESONANCE, FL-SEPARATI, FL-GATE, PH-TYPE, PH-STEP, PS-TYPE(66), PS-PITCH1..3(67-69), HR-KEY(70), HR-INT1..3(71-73), PS&HR-PAN1..3(74-76), PS&HR-LEV1..3(77-79), PS&HR-BAL(80), PS&HR-TOTAL(81), VB-TRIGGER(82), VB-RiseTIME(83), RM-FREQ(84), RM-E.LEVEL(85), RM-D.LEVEL(86), HU-TYPE(87), HU-VOWEL1(88), HU-VOWEL2(89), HU-TRIGGER(90)
+| 91-107 (Delay) | ON/OFF(91), MODE, NR-TIME C/L/R(93-95), TM-TEMPO(96), TM-INT C/L/R(97-99), FEEDBACK(100), LEVEL C/L/R(101-103), HIGH-DAMP(104), HI-CUT(105), SMOOTH(106), DIRECT-LEV(107)
+| 108-116 (Chorus) | ON/OFF(108), MODE, RATE, DEPTH, PREDELAY, LOW-CUT, HI-CUT, WAVE, EFFECT-LEV(116)
+| 117-121 (Tremolo) | ON/OFF, MODE, RATE, DEPTH, BALANCE
+| 122-131 (Reverb) | ON/OFF(122), TYPE, RevTIME, PREDELAY, LOW-CUT, HI-CUT, DIFFUSION, EFFECT-LEV, DIRECT-LEV(130) +++<!-- one Delay/Reverb level row may shift ids ±1 in 91-131 -->+++
+| 132-133 | BYPASS, TUNER
+|===
+
+NOTE: Ids `91`..`133` were read from a dense scan; the block *groupings and names*
+are reliable, but a single missed level row (Delay has both Effect and Direct level)
+could shift individual ids by ±1 in that range. Verify an exact id against the device
+before relying on it. Ids `0`..`90` are direct reads.
+
+.Table-1.3 — Assign source (`0`..`67`)
+[cols="1,4",options="header"]
+|===
+| Ids | Source
+| 0 | EXP-PEDAL
+| 1 | CTL1-PEDAL
+| 2 | CTL2-PEDAL
+| 3 | FC200EXP
+| 4 | FC200CTL
+| 5-35 | CC#1 .. CC#31 (`05H`-`23H`)
+| 36-67 | CC#64 .. CC#95 (`24H`-`43H`)
+|===
+
+.Table-1.4 — Name character code (`16H`..`7FH`)
+Codes `20H`..`7EH` are standard printable ASCII (space, `!"#$%&'()*+,-./`, `0`-`9`,
+`:;<=>?@`, `A`-`Z`, `[\]^_{backtick}`, `a`-`z`, `{|}~`). Codes `16H`..`1FH` are ten
+custom GX-700 display glyphs (musical/markup symbols). In practice patch names use
+ASCII, which `decode_name`/`encode_name` already handle.
+
 .Table-7.1 — EQ mid frequency (0..20)
 100, 125, 160, 200, 250, 315, 400, 500, 630, 800 Hz; 1.00, 1.25, 1.60, 2.00, 2.50,
 3.15, 4.00, 5.00, 6.30, 8.00, 10.0 kHz.
@@ -366,33 +413,65 @@ in the block tables above.
 .Table-7.2 — EQ Q (0..5)
 0.5, 1, 2, 4, 8, 16.
 
-.Table-8.1 — Speaker type (0..0B)
-SMALL, MIDDLE, JC-120, BUILT IN 1, BUILT IN 2, BG STACK 1, BG STACK 2,
-MS STACK 1, MS STACK 2, METAL STACK, (+ remaining to `0BH`). +++<!-- last two rows transcribe on demand -->+++
+.Table-8.1 — Speaker type (0..11 / `00H`-`0BH`)
+0:SMALL 1:MIDDLE 2:JC-120 3:BUILT IN1 4:BUILT IN2 5:BUILT IN3 6:BUILT IN4
+7:BG STACK1 8:BG STACK2 9:MS STACK1 10:MS STACK2 11:METAL STACK.
 
 .Table-10.1 — Modulation type (0..6)
 0:FLANGER 1:PHASER 2:PITCH SHIFTER 3:HARMONIST 4:VIBRATO 5:RING MODULATOR
 6:HUMANIZER.
 
-.Table-10.2 — Harmonist scale interval
-Raw `00H-30H` (0..48) maps to a musical interval (−24 .. +24); used by the 36 scale
-bytes. Full mapping on the MI page that carries Table-10.2.
+.Table-10.2 — Harmonist scale interval (`00H`-`30H`)
+Raw `0`..`48` maps linearly to interval `-24`..`+24` semitones: **interval = raw − 24**
+(`00H`=−24, `18H`=0, `30H`=+24).
 
-.Table-11.1 — Delay interval C (0..0A)
+.Table-11.1 — Delay interval C (0..10 / `00H`-`0AH`)
 0:sixteenth, 1:eighth triplet, 2:dotted sixteenth, 3:eighth, 4:quarter triplet,
 5:dotted eighth, 6:quarter, 7:dotted quarter, 8:half, 9:dotted half, 10:whole.
 
-.Table-15 / Table-16 — Hi-cut / Low-cut frequency
-Frequency-step tables (FLAT + a series from ~55 Hz to ~8 kHz) indexed by the
-hi-cut (`00H-0FH`) and low-cut (`00H-0AH`) bytes in Chorus, Delay, and Reverb.
+.Table-15 — Hi-cut frequency (0..15 / `00H`-`0FH`)
+0:500Hz 1:630Hz 2:800Hz 3:1.0kHz 4:1.25kHz 5:1.6kHz 6:2.0kHz 7:2.5kHz 8:3.15kHz
+9:4.0kHz 10:5.0kHz 11:6.3kHz 12:8.0kHz 13:10kHz 14:12.5kHz 15:FLAT.
 
-== Status / TODO
+.Table-16 — Low-cut frequency (0..10 / `00H`-`0AH`)
+0:FLAT 1:55Hz 2:110Hz 3:165Hz 4:220Hz 5:280Hz 6:340Hz 7:400Hz 8:500Hz 9:640Hz
+10:800Hz.
 
-* Block layouts (offsets, sizes, encodings) — *complete and fixture-validated.*
-* Per-block type enums (effect/mode types) — *transcribed.*
-* Open transcriptions (ranges known, full value lists pending): Target Type
-  (Table-1.2), Assign Source (Table-1.3, partial), Name char map (Table-1.4),
-  Harmonist scale interval values (Table-10.2), Speaker type tail (Table-8.1),
-  Hi/Low-cut frequency step values (Table-15/16).
-* Modulation offsets `1E`..`20` (PS & HR pre-delay) — confirm field name against
-  fixtures.
+== Appendix: system parameters (global, not patch data)
+
+The device's global settings, in their own area (one DT1 per offset). Included for
+completeness; these are *not* part of a stored patch.
+
+.Table-17 — System parameters
+[cols="1,3,3",options="header"]
+|===
+| Offset | Field | Value
+| `00` | Tuner pitch | `00H-0AH` (435-445 Hz)
+| `01` | Tuner string | 0:OFF 1:ON 2:FLAT 3:DOUBLE FLAT
+| `02` | Tuner level | `00H-64H` (0-100)
+| `03` | Output type | 0:GTR AMP(COMBO) 1:GTR AMP(STACK) 2:POWER AMP 3:POWER AMP(STACK) 4:LINE
+| `04` | Speaker simulator | 0:PATCH 1:ALWAYS OFF 2:ALWAYS ON
+| `05` | NS threshold level | `00H-28H`
+| `06`,`07` | Reverb level | nibble MSB+LSB (0-200)
+| `08` | Control1 jack | 0:NUMBER UP 1:NUMBER DOWN 2:BYPASS 3:TUNER 4:ASSIGN…
+| `09` | Control2 jack | (same set as Control1)
+| `0A`,`0B` | Number up/down min | nibble MSB+LSB (1-200)
+| `0C`,`0D` | Number up/down max | nibble MSB+LSB (1-200)
+| `0E` | Assign hold | 0:OFF 1:ON
+| `0F` | Bypass mode | 0:BYPASS 1:MUTE
+| `10` | LCD contrast | `00H-0FH` (0-15)
+| `11` | MIDI channel | `00H-0FH` (1-16)
+| `12` | Omni mode | 0:OMNI OFF 1:OMNI ON
+|===
+
+.Table-18 — MIDI program-change map
+64 entries (`#1`..`#64`), each a 2-byte (nibble MSB+LSB) patch number `1`-`200`, at
+offsets `00`,`01` (#1) through `7E`,`7F` (#64).
+
+== Status
+
+The block layouts (offsets, sizes, encodings) and every per-block enum are
+**complete and fixture-validated**. The shared value tables above are fully
+transcribed. The one caveat is the tail of the Target-Type list (ids `91`..`133`) —
+see the note there. The full table is now the authoritative reference; the MI PDF
+need not be re-read.
