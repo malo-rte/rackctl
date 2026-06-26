@@ -236,7 +236,9 @@ front-panel safety gate, and the investigation confirmed there is no remote way 
 * The MIDI Implementation's "Recognized Receive Data" is the *complete* set of
   messages the unit accepts -- Control Change, Program Change, DT1, RQ1 -- and none
   of them changes the operating mode. Bulk Load is listed only as a front-panel
-  *MIDI Utility Function* in the Owner's Manual.
+  *MIDI Utility Function* in the Owner's Manual. The *Service Notes* agree: the
+  service test mode's only MIDI item ("6. MIDI IN/OUT") is a hardware loopback
+  check, not a remote command.
 * Auto-detecting the mode by reading the display also fails: the display-data area
   (`10 00 00 00`), though documented as the readable 2x16 LCD (Table-20: line 1 at
   offset `00`..`0F`, line 2 at `10`..`1F`), *does not respond to RQ1 at all* on the
@@ -260,9 +262,12 @@ area `01` has not been tested.
 
 *There is no "erase".* The 100 user slots always contain a patch; the GX-700 has
 no notion of an empty or deleted slot. "Clearing" a patch therefore means
-overwriting it with a blank/initialised patch (in Bulk Load mode). Factory reset is
-a front-panel procedure (Owner's Manual, "Initialization"); no patch-initialise
-*command* is exposed over MIDI.
+overwriting it with a blank/initialised patch (in Bulk Load mode). The only reset is
+the front-panel *FACTORY INITIALIZE* (Service Notes: TUNER/UTILITY -> PARAMETER ->
+"FACTORY INITIALIZE"), which restores the System parameters *and* every user patch
+(P#1..P#100) to the factory presets -- this is what makes an un-restored user slot
+read identical to its preset, and it is exactly what reset the bank to presets mid
+bring-up. No patch-initialise *command* is exposed over MIDI.
 
 == Concurrency and pacing
 

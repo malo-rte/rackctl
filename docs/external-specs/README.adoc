@@ -30,6 +30,19 @@ the SHA-256.
 | https://cdn.roland.com/assets/media/pdf/GX-700_OM.pdf
 | Roland *GX-700 Owner's Manual* (72 pp, scanned). General operation, the
   one-page MIDI Implementation Chart, and the bulk dump/load procedures. Confirms
-  the factory device id (1 -> protocol `0x00`) and the effect-chain model. +
+  the factory device id (1 -> protocol `0x00`) and the effect-chain model. The
+  "Receiving Data (Bulk Load)" procedure (pp. 51-54) is the source of the BULK LOAD
+  requirement for storing patches over MIDI. +
   SHA-256: `a1db96487bdb4f5f29cf5bb832ccea2ba081cb8d5f1f0847c06de7c504940293`
+
+| `Boss-Gx-700-Service-Notes.pdf`
+| https://www.manualslib.com/manual/3677678/Boss-Gx-700.html (also on manuals.plus
+  / Scribd; no Roland CDN copy)
+| BOSS *GX-700 Service Notes* (29 pp, scanned, Feb 1996). A hardware service manual
+  -- parts list, block diagram, board layouts. Useful confirmations: the front-panel
+  *test mode* ([PREAMP]+[SP.SIM] on power-up) whose only MIDI item is a hardware
+  IN/OUT loopback test (no remote command), and the *FACTORY INITIALIZE* procedure
+  (UTILITY mode) that resets the System parameters and user patches P#1-P#100 to the
+  factory presets. No new MIDI/SysEx protocol detail beyond `GX-700_MI.pdf`. +
+  SHA-256: `cde5f8b8dccd828aa57dba3361c7302dfbcf03f1a8e1b758a86f70a5ee93ad0f`
 |===
