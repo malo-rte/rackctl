@@ -1,0 +1,235 @@
+= BOSS GX-700 User Manual
+:doc-version:   0.1
+:doc-status:    Draft
+:doc-date:      2026-06-26
+:doc-authors:   Mats Loman
+:applies-to-version: 0.7.3
+:revnumber:     {doc-version}
+:revdate:       {doc-date}
+:title-page:
+:toc:           left
+:toclevels:     3
+:sectnums:
+:sectnumlevels:  4
+:icons:         font
+:source-highlighter: rouge
+:experimental:
+
+This manual describes how to control the BOSS GX-700 guitar effects processor
+from Linux using the command-line tool `rackctl-gx700`.
+
+This is an early manual: it currently focuses on *managing patches* -- backing
+them up and restoring them. The full set of commands (reading and writing
+individual parameters, listing the catalog, monitoring MIDI) is discoverable with
+`rackctl-gx700 --help` and `rackctl-gx700 <command> --help`, and will be
+documented here over time.
+
+[NOTE]
+====
+BOSS and Roland are trademarks of Roland Corporation. This is an independent,
+unofficial project, not affiliated with or endorsed by Roland Corporation; the
+names are used only to identify the hardware these tools control.
+====
+
+[[sec-intro]]
+== Introduction
+
+The GX-700 is a rackmount guitar effects processor. Its sounds are stored as
+*patches*: 200 of them, in two banks of 100 -- the *user* patches (which you can
+overwrite) and the *preset* patches (factory data). It has no mixer and no level
+meters; it is edited entirely over MIDI.
+
+`rackctl-gx700` reaches the unit over a 5-pin DIN MIDI connection through a
+USB-MIDI interface (for example, the MIDI ports of a Tascam US-16x08). It can read
+and write individual effect parameters, select patches, and -- the subject of this
+manual -- save and restore whole patches and whole banks to your computer.
+
+[[sec-connecting]]
+== Connecting to the GX-700
+
+Connect the GX-700's MIDI IN and MIDI OUT to a USB-MIDI interface on your computer
+(OUT-to-IN in both directions), then find the interface's port:
+
+[source,console]
+----
+$ rackctl-gx700 ports
+hw:1,0
+----
+
+That `hw:CARD,DEV` address is passed to every command that talks to the hardware,
+with `--port`:
+
+[source,console]
+----
+$ rackctl-gx700 --port hw:1,0 patches
+U001  N RODGERS?    out 50%
+U002  N RODGERS?    out 38%
+...
+----
+
+[IMPORTANT]
+====
+*Only one program may use the MIDI port at a time.* The GX-700 replies to a
+request on the same port the request went out on; if two programs read it at once,
+each receives only part of every reply and both fail with a timeout that looks
+exactly like a dead interface. `rackctl-gx700` takes a lock on the port, so a
+second command fails fast with `MIDI port hw:1,0 is in use by another rackctl
+process` rather than corrupting the first. While a backup or restore is running,
+do not start another GX-700 command -- just let it finish.
+====
+
+TIP: Every command also runs against an in-memory mock device with `--mock` (and
+no `--port`), so you can try the commands and see the file layout without the
+hardware connected.
+
+[[sec-scenes-backups]]
+== Scenes & backups
+
+There are three ways to keep copies of your sounds on the computer, from a single
+patch up to the whole device. They all write plain JSON files you can copy, keep
+in version control, or move between machines.
+
+[[sec-mental-model]]
+=== Patches, scenes, and backups
+
+Single patch:: One sound. Save it with `save`, bring it back with `load`. Good for
+keeping a favourite tone or moving one patch between slots.
+
+Scene:: A snapshot of the *whole device* -- all 100 user patches -- captured under
+one name in a single file. Think of it as "everything in my GX-700 right now",
+saved as one unit for a gig or a project. Save with `scene save`, restore with
+`scene restore`.
+
+Backup:: A *flat copy of every patch as its own file* (`U001.json` ... `U100.json`),
+written into your patch library so you can inspect or restore any one of them by
+name. Save with `backup`.
+
+[NOTE]
+====
+*Scenes and restores cover the 100 user patches only.* The 100 preset patches are
+factory data, and the device does not accept writing them back, so they are never
+part of a restorable scene. You can still archive them read-only with
+`backup --preset` (writing `P001.json` ... `P100.json`), for reference.
+====
+
+[[sec-storage]]
+=== Where files are stored
+
+[cols="1,3",options="header"]
+|===
+| What | Location
+| Single patches and per-patch backups | `~/.config/rackctl/gx700/patches/<name>.json`
+| Scenes (whole-device snapshots)       | `~/.config/rackctl/gx700/scenes/<name>.json`
+|===
+
+(The exact base follows the XDG config directory; `~/.config` is the default.)
+
+[[sec-scene-save]]
+=== Saving a scene
+
+Capture all 100 user patches into one named file:
+
+[source,console]
+----
+$ rackctl-gx700 --port hw:1,0 scene save "before-gig"
+U001  N RODGERS?
+U002  CLEAN CUTTIN
+...
+U100  EXP DlyTIME
+saved scene "before-gig" (100 patches) to /home/you/.config/rackctl/gx700/scenes/before-gig.json
+----
+
+This reads every user patch in turn, so it takes a couple of minutes (each patch is
+a full read, deliberately paced so it does not overrun the MIDI interface). Leave
+the interface to it until it reports the saved file.
+
+[[sec-scene-restore]]
+=== Restoring a scene
+
+Write a saved scene back to the device. This *overwrites every user patch*, so it
+is destructive and requires `--yes` to proceed:
+
+[source,console]
+----
+$ rackctl-gx700 --port hw:1,0 scene restore "before-gig"
+error: restoring scene "before-gig" overwrites 100 user patches on the device; re-run with --yes to confirm
+
+$ rackctl-gx700 --port hw:1,0 scene restore "before-gig" --yes
+U001  N RODGERS?
+...
+restored scene "before-gig" (100 patches) to the device
+----
+
+[WARNING]
+====
+`scene restore --yes` replaces all 100 user patches on the unit with the ones in
+the file. Anything currently in those slots that you have not saved is lost. If in
+doubt, `scene save` the current state under a new name first.
+====
+
+[[sec-scene-list]]
+=== Listing scenes
+
+List the scenes you have saved (no device needed):
+
+[source,console]
+----
+$ rackctl-gx700 scene list
+before-gig
+studio-2026-06
+----
+
+[[sec-single-patch]]
+=== Saving and loading a single patch
+
+To keep just one sound, save the current sound or a numbered slot, and load it back
+to the current sound or to a user slot:
+
+[source,console]
+----
+$ rackctl-gx700 --port hw:1,0 save "lead-tone" --patch 42   # save user patch 42
+$ rackctl-gx700 --port hw:1,0 load "lead-tone" --to-patch 7 # write it into user slot 7 (destructive)
+----
+
+Without `--patch` / `--to-patch`, `save` captures and `load` writes the *current
+sound* (the temporary buffer) instead of a stored slot. Loading to a slot overwrites
+that stored patch, so it too is destructive.
+
+[[sec-backup]]
+=== Backing up every patch as separate files
+
+`backup` reads the whole user bank and writes each patch as its own file in the
+patch library, so you can list, inspect, or restore any single one by name:
+
+[source,console]
+----
+$ rackctl-gx700 --port hw:1,0 backup            # writes U001.json .. U100.json
+$ rackctl-gx700 --port hw:1,0 backup --preset   # writes P001.json .. P100.json (factory, read-only)
+----
+
+Because these land in the patch library, the other commands see them immediately:
+
+[source,console]
+----
+$ rackctl-gx700 patches --disk        # list what you have on disk
+$ rackctl-gx700 dump --file U042       # show one patch in readable form (no device needed)
+$ rackctl-gx700 --port hw:1,0 load U042 --to-patch 42   # restore one patch
+----
+
+Use `backup` when you want to cherry-pick individual patches; use `scene save` when
+you want one portable file that captures the device as a whole.
+
+[[sec-backup-tips]]
+=== Tips and timing
+
+* *One command at a time.* Do not run another GX-700 command while a backup,
+  scene save, or restore is in progress (see the note in <<sec-connecting>>).
+* *Allow a few minutes.* A full bank is 100 patches, each a complete read or write,
+  paced to keep the interface stable. Both directions report progress patch by
+  patch and a summary line at the end.
+* *Files are plain JSON.* Copy them, keep them in version control, or move them
+  between machines. A scene file is self-contained; a patch/backup file is one
+  patch.
+* *Try it without hardware.* Add `--mock` (and drop `--port`) to exercise any of
+  these commands against an in-memory device and see exactly which files are
+  written.
