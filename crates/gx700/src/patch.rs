@@ -231,6 +231,32 @@ impl RawPatch {
         self.blocks.insert(0x00, to_hex(&bytes));
         Ok(())
     }
+
+    /// Set the patch name (Level/Chain offsets `0E..=19`, 12 characters), encoding
+    /// it to the device character set (truncated/padded to [`NAME_LEN`]) and
+    /// updating the cached [`Self::name`].
+    ///
+    /// # Errors
+    /// [`Error::Patch`] if the Level/Chain block is missing or too short to hold
+    /// the name.
+    pub fn set_name(&mut self, name: &str) -> Result<()> {
+        let hex = self
+            .blocks
+            .get(&0x00)
+            .ok_or_else(|| Error::Patch("patch has no Level/Chain block".to_owned()))?;
+        let mut bytes = from_hex(hex)?;
+        let encoded = encode_name(name);
+        let Some(slot) = bytes.get_mut(14..14 + NAME_LEN) else {
+            return Err(Error::Patch(format!(
+                "Level/Chain block too short ({} bytes) to hold the name",
+                bytes.len()
+            )));
+        };
+        slot.copy_from_slice(&encoded);
+        self.blocks.insert(0x00, to_hex(&bytes));
+        self.name = decode_name(&encoded);
+        Ok(())
+    }
 }
 
 /// Format a raw device byte for one parameter in display units.
@@ -570,6 +596,30 @@ mod tests {
         patch.set_output_level(80).unwrap();
         assert_eq!(patch.output_level(), 80);
         // The chain bytes are untouched by a level change.
+        assert_eq!(patch.chain(), (1u8..=13).collect::<Vec<u8>>());
+    }
+
+    #[test]
+    fn set_name_updates_block_and_field() {
+        let mut blocks = BTreeMap::new();
+        blocks.insert(
+            0x00u8,
+            "32 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 4A 41 5A 5A 20 54 4F 4E 45 20 20 20"
+                .to_owned(),
+        );
+        let mut patch = RawPatch {
+            version: PATCH_VERSION,
+            name: "JAZZ TONE".to_owned(),
+            blocks,
+        };
+        patch.set_name("CRUNCH").unwrap();
+        assert_eq!(patch.name, "CRUNCH");
+        assert!(patch.describe().contains("CRUNCH")); // landed in the block bytes
+        // Over-long names truncate to 12 characters.
+        patch.set_name("THIS NAME IS TOO LONG").unwrap();
+        assert_eq!(patch.name, "THIS NAME IS");
+        // Level and chain are untouched by a name change.
+        assert_eq!(patch.output_level(), 0x32);
         assert_eq!(patch.chain(), (1u8..=13).collect::<Vec<u8>>());
     }
 

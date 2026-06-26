@@ -1,18 +1,17 @@
 //! The patch-librarian / level-balancer application.
 //!
-//! One screen: a list of all 100 user patches, each with its name and an
-//! output-level slider. Clicking a row auditions the patch (writes it into the
-//! current sound); dragging its slider balances the level live. Edited levels are
-//! held as pending changes; each row's Save stores just that patch and Revert
-//! drops the edit back to the on-unit value, while "Write levels to unit" stores
-//! all pending changes at once. Storing to memory requires the GX-700 in
-//! front-panel BULK LOAD mode.
+//! One screen: a list of all 100 user patches, each with an editable name and an
+//! output-level slider. Clicking a row's id auditions the patch (writes it into
+//! the current sound); editing the name or dragging the slider holds a pending
+//! change. Each row's Save stores just that patch and Revert drops the edits back
+//! to the on-unit values, while "Write changes to unit" stores all pending changes
+//! at once. Storing to memory requires the GX-700 in front-panel BULK LOAD mode.
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use eframe::egui;
-use rackctl_gx700::{Param, RawPatch, Value};
+use rackctl_gx700::{Param, RawPatch, Value, decode_name, encode_name};
 
 use crate::config::{self, CachedRow, GuiConfig};
 use crate::device::{self, Device, SharedDevice};
@@ -24,30 +23,40 @@ pub(crate) type Reopen = Box<dyn Fn() -> anyhow::Result<Device>>;
 /// One patch in the librarian list.
 struct PatchRow {
     slot: u16,
+    /// Patch name as stored on the unit (committed).
     name: String,
+    /// The editable name buffer; differs from `name` while the user is editing.
+    name_edit: String,
     /// Output level as stored on the unit (committed).
     stored_level: u8,
     /// Chain order bytes (read with the header; not edited in this view).
     chain: Vec<u8>,
     /// The full patch, loaded the first time the row is auditioned/edited.
     full: Option<RawPatch>,
-    /// A live-edited level not yet written to memory (the row is "dirty").
+    /// A live-edited level not yet written to memory.
     pending_level: Option<u8>,
+}
+
+impl PatchRow {
+    /// Whether the row has unsaved edits (a level or a name change).
+    fn dirty(&self) -> bool {
+        self.pending_level.is_some() || self.name_edit != self.name
+    }
 }
 
 /// A UI interaction to apply after the render pass (avoids borrowing `self`
 /// mutably while iterating the rows).
-#[derive(Clone, Copy)]
 enum Action {
     Audition(u16),
     SetLevel(u16, u8),
+    SetName(u16, String),
     SaveRow(u16),
     RevertRow(u16),
     Refresh,
     Retry,
     OpenBulkPrompt,
     CloseBulkPrompt,
-    WriteLevels,
+    WriteAll,
 }
 
 pub(crate) struct App {
@@ -72,6 +81,7 @@ impl App {
             .map(|slot| PatchRow {
                 slot,
                 name: String::new(),
+                name_edit: String::new(),
                 stored_level: 0,
                 chain: Vec::new(),
                 full: None,
@@ -81,7 +91,8 @@ impl App {
         // Show the cached bank instantly, before the (slow) re-read fills it in.
         for cached in config::load_cache() {
             if let Some(row) = rows.get_mut(usize::from(cached.slot.saturating_sub(1))) {
-                row.name = cached.name;
+                row.name.clone_from(&cached.name);
+                row.name_edit = cached.name;
                 row.stored_level = cached.output_level;
                 row.chain = cached.chain;
             }
@@ -120,11 +131,34 @@ impl App {
         self.rows.get_mut(usize::from(slot.saturating_sub(1)))
     }
 
-    fn pending_count(&self) -> usize {
-        self.rows
-            .iter()
-            .filter(|r| r.pending_level.is_some())
-            .count()
+    fn dirty_count(&self) -> usize {
+        self.rows.iter().filter(|r| r.dirty()).count()
+    }
+
+    /// Load a row's full patch if it isn't loaded yet (needed before storing,
+    /// e.g. a name-only edit on a patch that was never auditioned).
+    fn ensure_loaded(&mut self, slot: u16) {
+        if self.row(slot).is_some_and(|r| r.full.is_none()) {
+            let read = device::lock(&self.device).read_patch(slot);
+            if let Ok(patch) = read
+                && let Some(row) = self.row_mut(slot)
+            {
+                row.full = Some(patch);
+            }
+        }
+    }
+
+    /// After a successful store, commit the edits: the level and the (normalized,
+    /// device-encoded) name become the stored values, clearing the dirty state.
+    fn commit_row(&mut self, slot: u16) {
+        if let Some(row) = self.row_mut(slot) {
+            if let Some(level) = row.pending_level.take() {
+                row.stored_level = level;
+            }
+            let normalized = decode_name(&encode_name(&row.name_edit));
+            row.name.clone_from(&normalized);
+            row.name_edit = normalized;
+        }
     }
 
     /// Spawn (or restart) the background bank read.
@@ -207,15 +241,22 @@ impl App {
         }
     }
 
-    /// Write one patch (with `level`) to its memory slot and verify by read-back.
-    /// `Ok` on success; `Err(message)` if the patch isn't loaded or the unit isn't
-    /// in BULK LOAD mode (the write is silently ignored there).
-    fn store_one(&self, slot: u16, level: u8) -> Result<(), String> {
-        let Some(mut patch) = self.row(slot).and_then(|r| r.full.clone()) else {
+    /// Write one patch (its edited name + level) to its memory slot and verify by
+    /// read-back. `Ok` on success; `Err(message)` if the patch isn't loaded or the
+    /// unit isn't in BULK LOAD mode (the write is silently ignored there).
+    fn store_one(&self, slot: u16) -> Result<(), String> {
+        let Some(row) = self.row(slot) else {
+            return Err(format!("U{slot:03}: no such patch"));
+        };
+        let Some(mut patch) = row.full.clone() else {
             return Err(format!("U{slot:03}: patch not loaded — audition it first"));
         };
+        let level = row.pending_level.unwrap_or(row.stored_level);
         if patch.set_output_level(level).is_err() {
             return Err(format!("U{slot:03}: patch has no level block"));
+        }
+        if patch.set_name(&row.name_edit).is_err() {
+            return Err(format!("U{slot:03}: patch has no name block"));
         }
         let write = device::lock(&self.device).write_patch(slot, &patch);
         if let Err(e) = write {
@@ -231,67 +272,70 @@ impl App {
         }
     }
 
-    /// Save one patch's level to the unit (per-row Save button).
+    fn set_name_edit(&mut self, slot: u16, name: String) {
+        if let Some(row) = self.row_mut(slot) {
+            row.name_edit = name;
+        }
+    }
+
+    /// Save one patch (name + level) to the unit (per-row Save button).
     fn save_row(&mut self, slot: u16) {
-        let Some(level) = self.row(slot).and_then(|r| r.pending_level) else {
+        if !self.row(slot).is_some_and(PatchRow::dirty) {
             return;
-        };
-        match self.store_one(slot, level) {
+        }
+        self.ensure_loaded(slot);
+        match self.store_one(slot) {
             Ok(()) => {
-                if let Some(row) = self.row_mut(slot) {
-                    row.stored_level = level;
-                    row.pending_level = None;
-                }
-                self.status = format!("stored U{slot:03} at {level}%");
+                self.commit_row(slot);
+                self.status = format!("stored U{slot:03}");
                 self.save_cache();
             }
             Err(msg) => self.status = msg,
         }
     }
 
-    /// Revert one patch's level back to the value stored on the unit (per-row
-    /// Revert button), updating the cached patch and the live sound if playing.
+    /// Revert one patch's name and level back to the values stored on the unit
+    /// (per-row Revert button), updating the cached patch and live sound if playing.
     fn revert_row(&mut self, slot: u16) {
-        let stored = self.row(slot).map(|r| r.stored_level);
+        let Some((stored_level, stored_name)) =
+            self.row(slot).map(|r| (r.stored_level, r.name.clone()))
+        else {
+            return;
+        };
         if let Some(row) = self.row_mut(slot) {
             row.pending_level = None;
-            if let Some(level) = stored
-                && let Some(full) = row.full.as_mut()
-            {
-                let _ = full.set_output_level(level);
+            row.name_edit = stored_name;
+            if let Some(full) = row.full.as_mut() {
+                let _ = full.set_output_level(stored_level);
             }
         }
         if self.now_playing == Some(slot)
-            && let Some(level) = stored
             && let Some(param) = Param::from_key("output-level")
         {
-            let _ = device::lock(&self.device).set(param, Value::Int(i32::from(level)));
+            let _ = device::lock(&self.device).set(param, Value::Int(i32::from(stored_level)));
         }
-        if let Some(level) = stored {
-            self.status = format!("reverted U{slot:03} to {level}%");
-        }
+        self.status = format!("reverted U{slot:03}");
     }
 
-    /// Store every pending level change to memory in one batch (the "Write levels
-    /// to unit" button). Stops at the first failure with guidance.
-    fn write_levels(&mut self) {
-        let pending: Vec<(u16, u8)> = self
+    /// Store every pending change (name + level) to memory in one batch (the
+    /// "Write changes to unit" button). Stops at the first failure with guidance.
+    fn write_all(&mut self) {
+        let dirty: Vec<u16> = self
             .rows
             .iter()
-            .filter_map(|r| r.pending_level.map(|level| (r.slot, level)))
+            .filter(|r| r.dirty())
+            .map(|r| r.slot)
             .collect();
-        if pending.is_empty() {
-            "no pending level changes to store".clone_into(&mut self.status);
+        if dirty.is_empty() {
+            "no pending changes to store".clone_into(&mut self.status);
             return;
         }
         let mut stored = 0usize;
-        for (slot, level) in &pending {
-            match self.store_one(*slot, *level) {
+        for slot in &dirty {
+            self.ensure_loaded(*slot);
+            match self.store_one(*slot) {
                 Ok(()) => {
-                    if let Some(row) = self.row_mut(*slot) {
-                        row.stored_level = *level;
-                        row.pending_level = None;
-                    }
+                    self.commit_row(*slot);
                     stored = stored.saturating_add(1);
                 }
                 Err(msg) => {
@@ -300,8 +344,8 @@ impl App {
                 }
             }
         }
-        if stored == pending.len() {
-            self.status = format!("stored {stored} level change(s)");
+        if stored == dirty.len() {
+            self.status = format!("stored {stored} patch change(s)");
         }
         self.save_cache();
     }
@@ -326,23 +370,27 @@ impl App {
         egui::ScrollArea::vertical().show(ui, |ui| {
             egui::Grid::new("patches")
                 .striped(true)
-                .num_columns(3)
+                .num_columns(4)
                 .show(ui, |ui| {
                     for row in &self.rows {
                         let playing = self.now_playing == Some(row.slot);
-                        let name = if row.name.is_empty() {
-                            "—"
-                        } else {
-                            row.name.as_str()
-                        };
-                        let label = egui::SelectableLabel::new(
-                            playing,
-                            format!("U{:03}  {name:<12}", row.slot),
-                        );
-                        if ui.add_enabled(self.connected, label).clicked() {
+                        // Column 1: the slot id, click to audition.
+                        let id = egui::SelectableLabel::new(playing, format!("U{:03}", row.slot));
+                        if ui.add_enabled(self.connected, id).clicked() {
                             actions.push(Action::Audition(row.slot));
                         }
 
+                        // Column 2: editable patch name (egui keeps the cursor by
+                        // widget id, so a per-frame clone of the buffer is fine).
+                        let mut name = row.name_edit.clone();
+                        let edit = egui::TextEdit::singleline(&mut name)
+                            .hint_text("—")
+                            .desired_width(120.0);
+                        if ui.add_enabled(self.connected, edit).changed() {
+                            actions.push(Action::SetName(row.slot, name));
+                        }
+
+                        // Column 3: output-level slider.
                         let mut level = i32::from(row.pending_level.unwrap_or(row.stored_level));
                         let slider = egui::Slider::new(&mut level, 0..=100).suffix("%");
                         if ui.add_enabled(self.connected, slider).changed() {
@@ -350,19 +398,18 @@ impl App {
                             actions.push(Action::SetLevel(row.slot, level));
                         }
 
-                        // Save/Revert are enabled only when the row has an unsaved
-                        // edit, so their state is the "modified" indicator.
-                        let dirty = row.pending_level.is_some();
+                        // Column 4: Save/Revert, enabled only when the row has an
+                        // unsaved edit (their state is the "modified" indicator).
                         ui.horizontal(|ui| {
-                            ui.add_enabled_ui(self.connected && dirty, |ui| {
+                            ui.add_enabled_ui(self.connected && row.dirty(), |ui| {
                                 let save = ui.button("Save").on_hover_text(
-                                    "store this patch's level to the unit (needs BULK LOAD mode)",
+                                    "store this patch (name + level) to the unit (needs BULK LOAD mode)",
                                 );
                                 if save.clicked() {
                                     actions.push(Action::SaveRow(row.slot));
                                 }
                                 let revert = ui.button("Revert").on_hover_text(
-                                    "discard the edit, back to the value stored on the unit",
+                                    "discard edits, back to the values stored on the unit",
                                 );
                                 if revert.clicked() {
                                     actions.push(Action::RevertRow(row.slot));
@@ -379,15 +426,16 @@ impl App {
         match action {
             Action::Audition(slot) => self.audition(slot),
             Action::SetLevel(slot, level) => self.set_level(slot, level),
+            Action::SetName(slot, name) => self.set_name_edit(slot, name),
             Action::SaveRow(slot) => self.save_row(slot),
             Action::RevertRow(slot) => self.revert_row(slot),
             Action::Refresh => self.start_load(),
             Action::Retry => self.retry(),
             Action::OpenBulkPrompt => self.bulk_prompt = true,
             Action::CloseBulkPrompt => self.bulk_prompt = false,
-            Action::WriteLevels => {
+            Action::WriteAll => {
                 self.bulk_prompt = false;
-                self.write_levels();
+                self.write_all();
             }
         }
     }
@@ -402,7 +450,12 @@ impl App {
                 Loaded::Header(slot, header) => {
                     self.progress = self.progress.saturating_add(1);
                     if let Some(row) = self.row_mut(slot) {
+                        // Keep the edit buffer in sync unless the user is mid-edit.
+                        let untouched = row.name_edit == row.name;
                         row.name = header.name;
+                        if untouched {
+                            row.name_edit.clone_from(&row.name);
+                        }
                         row.stored_level = header.output_level;
                         row.chain = header.chain;
                     }
@@ -451,10 +504,10 @@ impl eframe::App for App {
                     } else if ui.button("Refresh").clicked() {
                         actions.push(Action::Refresh);
                     }
-                    let pending = self.pending_count();
+                    let pending = self.dirty_count();
                     ui.add_enabled_ui(pending > 0, |ui| {
                         if ui
-                            .button(format!("Write levels to unit ({pending})"))
+                            .button(format!("Write changes to unit ({pending})"))
                             .clicked()
                         {
                             actions.push(Action::OpenBulkPrompt);
@@ -478,15 +531,12 @@ impl eframe::App for App {
         });
 
         if self.bulk_prompt {
-            egui::Window::new("Write levels to the unit")
+            egui::Window::new("Write changes to the unit")
                 .collapsible(false)
                 .resizable(false)
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .show(ctx, |ui| {
-                    ui.label(format!(
-                        "{} patch level change(s) to store.",
-                        self.pending_count()
-                    ));
+                    ui.label(format!("{} patch change(s) to store.", self.dirty_count()));
                     ui.label(
                         "On the GX-700: press TUNER/UTILITY, select \"MIDI BULK LOAD\" \
                          (the display shows \"Waiting…\"), then click Write. \
@@ -494,7 +544,7 @@ impl eframe::App for App {
                     );
                     ui.horizontal(|ui| {
                         if ui.button("Write").clicked() {
-                            actions.push(Action::WriteLevels);
+                            actions.push(Action::WriteAll);
                         }
                         if ui.button("Cancel").clicked() {
                             actions.push(Action::CloseBulkPrompt);
