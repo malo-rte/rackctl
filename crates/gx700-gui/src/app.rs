@@ -35,6 +35,9 @@ struct PatchRow {
     full: Option<RawPatch>,
     /// A live-edited level not yet written to memory.
     pending_level: Option<u8>,
+    /// Set when the bank read for this slot was skipped after exhausting retries;
+    /// its name/level are stale (or empty). Cleared once a read succeeds.
+    failed: bool,
 }
 
 impl PatchRow {
@@ -86,6 +89,7 @@ impl App {
                 chain: Vec::new(),
                 full: None,
                 pending_level: None,
+                failed: false,
             })
             .collect();
         // Show the cached bank instantly, before the (slow) re-read fills it in.
@@ -168,6 +172,9 @@ impl App {
         }
         self.loader = None; // cancel + join any in-flight load first
         self.progress = 0;
+        for row in &mut self.rows {
+            row.failed = false; // clear stale marks; the re-read re-reports them
+        }
         self.loader = Some(Loader::spawn(Arc::clone(&self.device)));
         "reading patch bank…".clone_into(&mut self.status);
     }
@@ -374,9 +381,22 @@ impl App {
                 .show(ui, |ui| {
                     for row in &self.rows {
                         let playing = self.now_playing == Some(row.slot);
-                        // Column 1: the slot id, click to audition.
-                        let id = egui::SelectableLabel::new(playing, format!("U{:03}", row.slot));
-                        if ui.add_enabled(self.connected, id).clicked() {
+                        // Column 1: the slot id, click to audition. A slot whose read
+                        // was skipped is marked with a warning glyph + tint.
+                        let label = if row.failed {
+                            egui::RichText::new(format!("⚠ U{:03}", row.slot))
+                                .color(egui::Color32::from_rgb(0xE0, 0xA0, 0x30))
+                        } else {
+                            egui::RichText::new(format!("U{:03}", row.slot))
+                        };
+                        let id = egui::SelectableLabel::new(playing, label);
+                        let resp = ui.add_enabled(self.connected, id);
+                        let resp = if row.failed {
+                            resp.on_hover_text("read failed — value may be stale; Refresh to retry")
+                        } else {
+                            resp
+                        };
+                        if resp.clicked() {
                             actions.push(Action::Audition(row.slot));
                         }
 
@@ -473,10 +493,14 @@ impl App {
                         }
                         row.stored_level = header.output_level;
                         row.chain = header.chain;
+                        row.failed = false;
                     }
                 }
                 Loaded::Failed(slot, msg) => {
                     self.progress = self.progress.saturating_add(1);
+                    if let Some(row) = self.row_mut(slot) {
+                        row.failed = true;
+                    }
                     self.status = format!("U{slot:03}: {msg}");
                 }
                 Loaded::Done => done = true,

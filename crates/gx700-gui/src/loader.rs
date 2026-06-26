@@ -20,6 +20,10 @@ pub(crate) const USER_SLOTS: u16 = 100;
 /// same pacing the CLI's `patches` uses).
 const READ_PACE: Duration = Duration::from_millis(40);
 
+/// How many times to read a slot before giving up and skipping it. A single
+/// dropped device reply shouldn't abort the whole bank load.
+const READ_ATTEMPTS: u32 = 3;
+
 /// A result from the loader.
 pub(crate) enum Loaded {
     /// One slot's header arrived.
@@ -74,15 +78,33 @@ fn run(device: &SharedDevice, cancel: &AtomicBool, tx: &Sender<Loaded>) {
         if cancel.load(Ordering::Relaxed) {
             break;
         }
-        let result = lock(device).read_patch_header(slot);
-        let msg = match result {
-            Ok(header) => Loaded::Header(slot, header),
-            Err(e) => Loaded::Failed(slot, e.to_string()),
-        };
-        if tx.send(msg).is_err() {
+        if tx.send(read_slot(device, cancel, slot)).is_err() {
             return; // UI gone
         }
         thread::sleep(READ_PACE);
     }
     let _ = tx.send(Loaded::Done);
+}
+
+/// Read one slot's header, retrying up to [`READ_ATTEMPTS`] times before giving up
+/// so a single dropped reply skips just that slot rather than the whole bank.
+fn read_slot(device: &SharedDevice, cancel: &AtomicBool, slot: u16) -> Loaded {
+    let mut last = String::new();
+    for attempt in 1..=READ_ATTEMPTS {
+        if cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        match lock(device).read_patch_header(slot) {
+            Ok(header) => return Loaded::Header(slot, header),
+            Err(e) => last = e.to_string(),
+        }
+        // Pace before the next try, giving the interface time to settle.
+        if attempt < READ_ATTEMPTS {
+            thread::sleep(READ_PACE);
+        }
+    }
+    Loaded::Failed(
+        slot,
+        format!("{last} (skipped after {READ_ATTEMPTS} attempts)"),
+    )
 }
