@@ -123,9 +123,9 @@ separate sub-block DT1s is what the device expects; a single contiguous DT1 to t
 patch base does *not* work (tested).
 
 Each block begins with an `EFFECT ON/OFF` byte (`0`=off, `1`=on); most type-select
-bytes follow. The exhaustive per-offset map (parameter, raw range, enum labels) is
-encoded in `crates/gx700/src/param.rs`, transcribed from the MIDI Implementation
-tables. A few representative blocks:
+bytes follow. The *complete* per-offset map for all 14 blocks is in
+<<Appendix: patch data format>> (generated from `crates/gx700/src/param.rs`). Two
+representative blocks inline here:
 
 .Preamp (offset `00 00 04 NN`)
 [cols="1,2,3",options="header"]
@@ -342,3 +342,216 @@ port lock and read pacing, and output-level display units. What remains:
 * *Bank-listing speed.* `patches` is inherently ~0.5 s/patch because each RQ1
   streams the entire patch; pacing adds a further ~40 ms/slot. This is a property of
   the protocol, not a bug -- there is no lighter "name only" request.
+
+== Appendix: patch data format
+
+A patch is the fourteen sub-blocks of <<Patch layout (sub-blocks)>>, each sent as
+one DT1 at `00 00 XX 00` (`XX` is the sub-block id in each heading below). Within a
+sub-block the 4th address byte is the *Offset* in the tables, and every parameter is
+a single 7-bit byte (`00H`..`7FH`) unless noted. `int` ranges are raw device units;
+`enum` gives the value -> label mapping.
+
+These tables are generated from the parameter catalog in
+`crates/gx700/src/param.rs` -- run `cargo run -p rackctl-gx700 --example
+gen_patch_format` to regenerate -- so they match the shipping code exactly.
+
+[NOTE]
+====
+Two parts of a patch are not fully expanded as individual parameters here:
+
+* *Level/Chain* (`00`) carries more than `output-level`: offsets `01`..`0D` are the
+  thirteen effect-chain-order bytes, `0E`..`19` the twelve name characters, and
+  `1A`+ the four control assigns. See <<Patch memories (presets)>> ("The Level/Chain
+  block") and MI Tables 1.2-1.4.
+* *Modulation* (`09`) has a large per-*type* parameter matrix (MI Table-10) that is
+  only partially transcribed; only the on/off and type bytes are catalogued so far.
+====
+
+=== Level/Chain -- sub-block `00`
+
+[cols="1,3,6",options="header"]
+|===
+| Offset | Parameter | Type / values
+| `00` | `output-level` | int `0`..`100`
+|===
+
+=== Compressor -- sub-block `01`
+
+[cols="1,3,6",options="header"]
+|===
+| Offset | Parameter | Type / values
+| `00` | `comp-enable` | bool (`0`=off, `1`=on)
+| `01` | `comp-type` | enum -- `0`=Compressor, `1`=Limiter
+| `02` | `comp-sustain` | int `0`..`100`
+| `03` | `comp-attack` | int `0`..`100`
+| `04` | `comp-threshold` | int `0`..`100`
+| `05` | `comp-release` | int `0`..`100`
+| `06` | `comp-tone` | int `0`..`100`
+| `07` | `comp-level` | int `0`..`100`
+|===
+
+=== Wah -- sub-block `02`
+
+[cols="1,3,6",options="header"]
+|===
+| Offset | Parameter | Type / values
+| `00` | `wah-enable` | bool (`0`=off, `1`=on)
+| `01` | `wah-mode` | enum -- `0`=Pedal Wah, `1`=SW-Pedal Wah, `2`=Auto Wah
+| `02` | `wah-pedal-freq` | int `0`..`100`
+| `03` | `wah-auto-polarity` | enum -- `0`=Down, `1`=Up
+| `04` | `wah-auto-sens` | int `0`..`100`
+| `05` | `wah-peak` | int `0`..`100`
+| `06` | `wah-pedal-source` | int `0`..`65`
+| `07` | `wah-pedal-min` | int `0`..`100`
+| `08` | `wah-pedal-max` | int `0`..`100`
+| `09` | `wah-auto-rate` | int `0`..`100`
+| `0A` | `wah-auto-depth` | int `0`..`100`
+| `0C` | `wah-level` | int `0`..`100`
+|===
+
+=== Distortion -- sub-block `03`
+
+[cols="1,3,6",options="header"]
+|===
+| Offset | Parameter | Type / values
+| `00` | `dist-enable` | bool (`0`=off, `1`=on)
+| `01` | `dist-type` | enum -- `0`=Vintage OD, `1`=Turbo OD, `2`=Blues, `3`=Distortion, `4`=Turbo DS, `5`=Metal, `6`=Fuzz
+| `02` | `dist-drive` | int `0`..`100`
+| `03` | `dist-bass` | int `0`..`100`
+| `04` | `dist-treble` | int `0`..`100`
+| `05` | `dist-level` | int `0`..`100`
+|===
+
+=== Preamp -- sub-block `04`
+
+[cols="1,3,6",options="header"]
+|===
+| Offset | Parameter | Type / values
+| `00` | `preamp-enable` | bool (`0`=off, `1`=on)
+| `01` | `preamp-type` | enum -- `0`=JC-120, `1`=Clean Twin, `2`=Match Drive, `3`=BG Lead, `4`=MS1959 (I), `5`=MS1959 (II), `6`=MS1959 (I+II), `7`=SLDN Lead, `8`=Metal 5150
+| `02` | `preamp-volume` | int `0`..`100`
+| `03` | `preamp-bass` | int `0`..`100`
+| `04` | `preamp-middle` | int `0`..`100`
+| `05` | `preamp-treble` | int `0`..`100`
+| `06` | `preamp-presence` | int `0`..`100`
+| `07` | `preamp-master` | int `0`..`100`
+| `08` | `preamp-bright` | bool (`0`=off, `1`=on)
+| `09` | `preamp-gain` | enum -- `0`=Low, `1`=Mid, `2`=Hi
+|===
+
+=== Loop -- sub-block `05`
+
+[cols="1,3,6",options="header"]
+|===
+| Offset | Parameter | Type / values
+| `00` | `loop-enable` | bool (`0`=off, `1`=on)
+| `01` | `loop-return-level` | int `0`..`100`
+| `02` | `loop-send-level` | int `0`..`100`
+| `03` | `loop-mode` | enum -- `0`=Series, `1`=Parallel
+|===
+
+=== Equalizer -- sub-block `06`
+
+[cols="1,3,6",options="header"]
+|===
+| Offset | Parameter | Type / values
+| `00` | `eq-enable` | bool (`0`=off, `1`=on)
+| `01` | `eq-low-gain` | int `0`..`40`
+| `02` | `eq-mid-freq` | enum -- `0`=100Hz, `1`=125Hz, `2`=160Hz, `3`=200Hz, `4`=250Hz, `5`=315Hz, `6`=400Hz, `7`=500Hz, `8`=630Hz, `9`=800Hz, `10`=1kHz, `11`=1.25kHz, `12`=1.6kHz, `13`=2kHz, `14`=2.5kHz, `15`=3.15kHz, `16`=4kHz, `17`=5kHz, `18`=6.3kHz, `19`=8kHz, `20`=10kHz
+| `03` | `eq-mid-gain` | int `0`..`40`
+| `04` | `eq-mid-q` | enum -- `0`=0.5, `1`=1, `2`=2, `3`=4, `4`=8, `5`=16
+| `05` | `eq-high-gain` | int `0`..`40`
+| `06` | `eq-level` | int `0`..`40`
+|===
+
+=== Speaker Sim -- sub-block `07`
+
+[cols="1,3,6",options="header"]
+|===
+| Offset | Parameter | Type / values
+| `00` | `speaker-enable` | bool (`0`=off, `1`=on)
+| `01` | `speaker-type` | enum -- `0`=Small, `1`=Middle, `2`=JC-120, `3`=Built-In 1, `4`=Built-In 2, `5`=Built-In 3, `6`=Built-In 4, `7`=BG Stack 1, `8`=BG Stack 2, `9`=MS Stack 1, `10`=MS Stack 2, `11`=Metal Stack
+| `02` | `speaker-mic-setting` | int `1`..`10`
+| `03` | `speaker-mic-level` | int `0`..`100`
+| `04` | `speaker-direct-level` | int `0`..`100`
+|===
+
+=== Noise Suppressor -- sub-block `08`
+
+[cols="1,3,6",options="header"]
+|===
+| Offset | Parameter | Type / values
+| `00` | `ns-enable` | bool (`0`=off, `1`=on)
+| `01` | `ns-threshold` | int `0`..`100`
+| `02` | `ns-release` | int `0`..`100`
+| `03` | `ns-detect` | enum -- `0`=Guitar In, `1`=NS In
+| `04` | `ns-level` | int `0`..`100`
+|===
+
+=== Modulation -- sub-block `09`
+
+[cols="1,3,6",options="header"]
+|===
+| Offset | Parameter | Type / values
+| `00` | `mod-enable` | bool (`0`=off, `1`=on)
+| `01` | `mod-type` | enum -- `0`=Flanger, `1`=Phaser, `2`=Pitch Shifter, `3`=Harmonist, `4`=Vibrato, `5`=Ring Modulator, `6`=Humanizer
+|===
+
+=== Delay -- sub-block `0A`
+
+[cols="1,3,6",options="header"]
+|===
+| Offset | Parameter | Type / values
+| `00` | `delay-enable` | bool (`0`=off, `1`=on)
+| `01` | `delay-mode` | enum -- `0`=Normal, `1`=Tempo
+| `0C` | `delay-feedback` | int `0`..`100`
+| `0D` | `delay-level-c` | int `0`..`100`
+| `0E` | `delay-level-l` | int `0`..`100`
+| `0F` | `delay-level-r` | int `0`..`100`
+| `10` | `delay-high-damp` | int `0`..`50`
+| `11` | `delay-hi-cut` | enum -- `0`=500Hz, `1`=630Hz, `2`=800Hz, `3`=1kHz, `4`=1.25kHz, `5`=1.6kHz, `6`=2kHz, `7`=2.5kHz, `8`=3.15kHz, `9`=4kHz, `10`=5kHz, `11`=6.3kHz, `12`=8kHz, `13`=10kHz, `14`=12.5kHz, `15`=Flat
+| `12` | `delay-smooth` | bool (`0`=off, `1`=on)
+| `13` | `delay-effect-level` | int `0`..`100`
+| `14` | `delay-direct-level` | int `0`..`100`
+|===
+
+=== Chorus -- sub-block `0B`
+
+[cols="1,3,6",options="header"]
+|===
+| Offset | Parameter | Type / values
+| `00` | `chorus-enable` | bool (`0`=off, `1`=on)
+| `01` | `chorus-mode` | enum -- `0`=Mono, `1`=Stereo
+| `02` | `chorus-rate` | int `0`..`100`
+| `03` | `chorus-depth` | int `0`..`100`
+| `05` | `chorus-low-cut` | enum -- `0`=Flat, `1`=55Hz, `2`=110Hz, `3`=165Hz, `4`=220Hz, `5`=280Hz, `6`=340Hz, `7`=400Hz, `8`=500Hz, `9`=640Hz, `10`=800Hz
+| `06` | `chorus-hi-cut` | enum -- `0`=500Hz, `1`=630Hz, `2`=800Hz, `3`=1kHz, `4`=1.25kHz, `5`=1.6kHz, `6`=2kHz, `7`=2.5kHz, `8`=3.15kHz, `9`=4kHz, `10`=5kHz, `11`=6.3kHz, `12`=8kHz, `13`=10kHz, `14`=12.5kHz, `15`=Flat
+| `07` | `chorus-mod-wave` | int `0`..`10`
+| `08` | `chorus-effect-level` | int `0`..`100`
+|===
+
+=== Tremolo/Pan -- sub-block `0C`
+
+[cols="1,3,6",options="header"]
+|===
+| Offset | Parameter | Type / values
+| `00` | `tremolo-enable` | bool (`0`=off, `1`=on)
+| `01` | `tremolo-mode` | enum -- `0`=Tremolo (Tri), `1`=Tremolo (Sqr), `2`=Pan (Sqr), `3`=Pan (Tri)
+| `02` | `tremolo-rate` | int `0`..`100`
+| `03` | `tremolo-depth` | int `0`..`100`
+| `04` | `tremolo-balance` | int `0`..`100`
+|===
+
+=== Reverb -- sub-block `0D`
+
+[cols="1,3,6",options="header"]
+|===
+| Offset | Parameter | Type / values
+| `00` | `reverb-enable` | bool (`0`=off, `1`=on)
+| `01` | `reverb-mode` | enum -- `0`=Room 1, `1`=Room 2, `2`=Hall 1, `3`=Hall 2, `4`=Plate
+| `04` | `reverb-low-cut` | enum -- `0`=Flat, `1`=55Hz, `2`=110Hz, `3`=165Hz, `4`=220Hz, `5`=280Hz, `6`=340Hz, `7`=400Hz, `8`=500Hz, `9`=640Hz, `10`=800Hz
+| `05` | `reverb-hi-cut` | enum -- `0`=500Hz, `1`=630Hz, `2`=800Hz, `3`=1kHz, `4`=1.25kHz, `5`=1.6kHz, `6`=2kHz, `7`=2.5kHz, `8`=3.15kHz, `9`=4kHz, `10`=5kHz, `11`=6.3kHz, `12`=8kHz, `13`=10kHz, `14`=12.5kHz, `15`=Flat
+| `06` | `reverb-diffusion` | int `0`..`10`
+| `07` | `reverb-effect-level` | int `0`..`100`
+| `08` | `reverb-direct-level` | int `0`..`100`
+|===
