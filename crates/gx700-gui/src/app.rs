@@ -350,13 +350,10 @@ impl App {
                             actions.push(Action::SetLevel(row.slot, level));
                         }
 
+                        // Save/Revert are enabled only when the row has an unsaved
+                        // edit, so their state is the "modified" indicator.
                         let dirty = row.pending_level.is_some();
                         ui.horizontal(|ui| {
-                            if dirty {
-                                ui.colored_label(egui::Color32::LIGHT_BLUE, "●");
-                            } else {
-                                ui.label(" ");
-                            }
                             ui.add_enabled_ui(self.connected && dirty, |ui| {
                                 let save = ui.button("Save").on_hover_text(
                                     "store this patch's level to the unit (needs BULK LOAD mode)",
