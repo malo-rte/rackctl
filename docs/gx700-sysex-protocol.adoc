@@ -257,12 +257,17 @@ not in Bulk Load mode). Press PLAY to leave the mode when done.
 
 Bulk Load mode is otherwise *normal MIDI operation* -- it is not a frozen state.
 The unit keeps processing audio (the current sound stays live and audible), and
-live edits to the current sound take effect immediately: verified by ear -- with a
-patch playing in Bulk Load mode, `set output-level 0` silenced the output and `80`
-restored it. So reading, live parameter editing, *and* memory storing all work in
-this mode; only the front panel is parked in the utility menu (no by-hand patch
-recall). Recalling stored patches over MIDI in this mode (`select` / Program Change)
-is not yet tested.
+both *single-parameter* and *whole-patch* edits to the current sound take effect
+immediately. Verified by ear, in Bulk Load mode: `set output-level 0` silenced the
+output and `80` restored it; and writing a patch to the temporary buffer
+(`write_current_patch`, the CLI's `preview` / `load`) changed the sound to that
+patch. So reading, live editing, previewing into the active sound, *and* memory
+storing all work in this mode.
+
+The *one* thing that does not work in Bulk Load mode is Program Change:
+`select` left the sound unchanged (the front panel is in the utility menu, with no
+patch recall). This is exactly why `preview` writes a patch into the active sound
+rather than recalling it -- a software audition that works in any mode.
 
 *Bulk Load cannot be entered (or detected) over MIDI.* It is a deliberate
 front-panel safety gate, and the investigation confirmed there is no remote way in:

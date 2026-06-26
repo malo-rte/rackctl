@@ -226,6 +226,23 @@ pub(crate) fn load<T: Transport>(
     Ok(())
 }
 
+/// Preview a stored patch by writing it into the active sound (current sound),
+/// without storing it. Non-destructive to memory, and works in any mode -- unlike
+/// Program Change (`select`), it functions even while the unit is in BULK LOAD
+/// mode, since it edits the temporary buffer rather than recalling a memory.
+pub(crate) fn preview<T: Transport>(dev: &mut Gx700<T>, slot: u16) -> Result<()> {
+    let raw = dev
+        .read_patch(slot)
+        .with_context(|| format!("reading patch {slot}"))?;
+    let blocks = dev.write_current_patch(&raw)?;
+    eprintln!(
+        "previewing {} {:?} in the current sound ({blocks} sub-blocks) -- not stored",
+        slot_label(slot),
+        raw.name
+    );
+    Ok(())
+}
+
 /// Show or reorder the signal chain of a saved patch (on disk, no device). With
 /// `set`, reorders the blocks and saves the patch; then load it with
 /// `load --to-patch` (in BULK LOAD mode) to apply it on the unit.

@@ -200,6 +200,24 @@ Change map, a GX-700 system setting. Recalling a patch replaces the current soun
 so any unsaved edits to it (see <<sec-editing>>) are lost.
 ====
 
+[[sec-patches-preview]]
+=== Previewing a patch
+
+`preview <slot>` writes a stored patch (by its *slot number*, 1--200, user or
+preset) into the active sound so you can *hear* it, without storing it anywhere:
+
+[source,console]
+----
+$ rackctl-gx700 --port hw:1,0 preview 112   # audition preset 12 (slot 112)
+----
+
+Unlike `select`, `preview` takes the actual patch slot (not a Program Change
+number), and -- because it edits the active sound rather than recalling a memory --
+it works *even while the unit is in BULK LOAD mode* (where Program Change does
+nothing). It is non-destructive: nothing in memory changes; recall any patch (or
+power-cycle) to restore the original sound. This is the way to audition presets one
+by one -- e.g. before `copy`-ing a favourite into the user bank.
+
 [[sec-patches-dump]]
 === Viewing a patch in detail
 
@@ -776,6 +794,7 @@ The *Needs* column shows what a command requires: _device_ (a unit via `--port`,
 | `copy <from> <to>`               | Copy a stored patch to another user slot on the device (overwrites). | device
 | `chain <name> [--set …]`         | Show or reorder the signal chain (block order) of a saved patch. | disk
 | `select <n>`                     | Recall a patch by Program Change `n` (0--127). | device
+| `preview <slot>`                 | Write a stored patch into the active sound to hear it, without storing. | device
 | `patches [--preset] [--disk]`    | List patch slots (device user/preset bank, or saved on disk). | device / disk
 | `recv`                           | Print incoming SysEx as hex. | device
 | `monitor`                        | Print every incoming MIDI message, decoded. | device

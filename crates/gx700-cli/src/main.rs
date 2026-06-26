@@ -165,6 +165,15 @@ enum Command {
         /// Patch program number (0-127).
         n: u8,
     },
+    /// Preview a stored patch by writing it into the active sound, without storing.
+    ///
+    /// Non-destructive to memory; unlike `select` it works in any mode (including
+    /// BULK LOAD), since it edits the temporary buffer rather than recalling a
+    /// memory. Re-select a patch (or power-cycle) to restore the original sound.
+    Preview {
+        /// Patch slot to preview (1-200; 101-200 are presets).
+        slot: u16,
+    },
     /// List patch-memory slots and their names (on the device, or saved on disk).
     Patches {
         /// List the 100 preset patches instead of the 100 user patches.
@@ -307,6 +316,7 @@ fn run_command<T: Transport>(dev: &mut Gx700<T>, command: Command) -> Result<()>
         Command::Load { name, to_patch } => commands::load(dev, &name, to_patch),
         Command::Copy { from, to } => commands::copy(dev, from, to),
         Command::Select { n } => commands::select(dev, n),
+        Command::Preview { slot } => commands::preview(dev, slot),
         Command::Patches { preset, .. } => commands::patches(dev, preset),
         // The backend-free and hardware-only commands are handled before a
         // device is opened; they never reach here.
