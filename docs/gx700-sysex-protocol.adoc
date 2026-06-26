@@ -160,12 +160,21 @@ the 13 effect blocks), at the patch's base address.
 |===
 
 *Reading a patch.* An RQ1 to a patch base makes the GX-700 stream the *whole
-patch* back as its 14 sub-block DT1 messages, roughly 20 ms apart (the requested
-size is ignored). A reader must therefore consume the entire stream before issuing
-the next request, or the next reply collides with the tail of this one -- the
-rawmidi transport drains the input until it has been silent for ~35 ms for exactly
-this reason. `Gx700::read_patch_header` reads one patch's Level/Chain block this
-way; the CLI `patches` command lists every slot's name and output level.
+patch* back as its 14 sub-block DT1 messages, roughly 20 ms apart. A reader must
+therefore consume the entire stream before issuing the next request, or the next
+reply collides with the tail of this one -- the rawmidi transport drains the input
+until it has been silent for ~35 ms for exactly this reason. `Gx700::read_patch`
+reads the whole patch this way; `read_patch_header` reads just the Level/Chain
+block; the CLI `patches` command lists every slot's name and output level.
+
+NOTE: The requested *size* in the RQ1 is normally ignored (the device streams the
+whole patch regardless) -- but an *over-large* size is not: a size of e.g. `0x200`
+makes the unit reply with *nothing at all*, so the request silently times out. The
+transport therefore sends a modest size, encoded 7 bits per byte big-endian across
+the size field (a naive single low byte truncates `0x200` to `0`, which also fails).
+
+See <<Concurrency and pacing>> for the equally important rule that only *one*
+process may read the port at a time.
 
 *The Level/Chain block (`00`).* This patch-common block carries, in order:
 
@@ -183,13 +192,53 @@ patch 1's Level/Chain data begins `32 01 02 03 04 05 06 07 08 09 0A 0B 0C 0D 4E 
 52 4F 44 47 45 52 53 3F 20 20 ...` = output 50, the default chain order, name
 "N RODGERS?".
 
-*Writing a patch.* Storing a patch is a bulk DT1 to its memory base -- this
-*overwrites* a user patch, so it is destructive and not done implicitly. Preset
-patches (area `01`) are factory data. To change the *current sound* without
-touching stored memory, write to the temporary buffer instead (see
-<<Editing model>>); a bulk write to `04 00 00 00` must be followed by a Sound
-Change Request (DT1 `00` to `04 7F 7F 7F`), whereas individual writes to
-`08 00 00 00` apply immediately.
+*Writing a patch.* Storing a patch is a bulk write of its sub-blocks to the
+memory base -- this *overwrites* the user patch, so it is destructive and never
+done implicitly. Writing a whole patch to a user slot is implemented and verified
+on hardware (`Gx700::write_patch`, exposed by the CLI's `load --to-patch`, `scene
+restore`). To change the *current sound* without touching stored memory, write to
+the temporary buffer instead (see <<Editing model>>); a bulk write to `04 00 00 00`
+must be followed by a Sound Change Request (DT1 `00` to `04 7F 7F 7F`), whereas
+individual writes to `08 00 00 00` apply immediately.
+
+[NOTE]
+====
+*Presets are treated as read-only, but this is unverified.* Preset patches (area
+`01`) are factory data; the editor never writes there, and the CLI restricts
+`load --to-patch`/`scene restore` to user slots 1..100. Whether the device would
+*accept* or *reject* a write to area `01` has not been tested on hardware -- it is
+an assumption, not a confirmed fact.
+====
+
+*There is no "erase".* The 100 user slots always contain a patch; the GX-700 has
+no notion of an empty or deleted slot. "Clearing" a patch therefore means
+overwriting it with a blank/initialised patch. No factory-reset or patch-initialise
+*command* is mapped over MIDI, and the Roland PDFs are scanned images with no
+extractable text, so we cannot confirm one exists; any such reset is presumed to be
+a front-panel operation.
+
+== Concurrency and pacing
+
+These are not protocol rules in the spec, but hard operational findings -- ignore
+them and reads fail in ways that masquerade as a broken interface.
+
+*One owner per port.* A MIDI device answers a request on the *same* port the
+request went out on. If two processes read that port at once, the operating system
+hands each arriving chunk to whichever reader is scheduled first; the reply is split
+between them and *neither* assembles a complete message, so both time out. This is
+indistinguishable from a stalled interface but is pure contention -- during GX-700
+bring-up, every apparent "the US-16x08 keeps dying under bulk reads" was a second
+reader on `hw:1,0`. The rawmidi transport takes an advisory `flock` on the port
+(`backend::PortLock`) so a second `rackctl` process fails fast with `PortBusy`
+instead of corrupting both streams. The full rationale and the planned arbitration
+daemon are in `docs/midi-arbitration.adoc`.
+
+*Pacing.* Listing or backing up a bank issues one whole-patch read per slot, each
+of which makes the device stream ~14 messages. Back to back, that sustained burst
+can overrun the US-16x08's USB-MIDI input until it stalls; a ~40 ms gap between
+reads (the CLI's `BANK_READ_PACE`) keeps it from flooding. With a sole accessor and
+this pacing, both full 100-patch banks read end to end with zero timeouts. Writes
+(`scene restore`) are paced the same way.
 
 == Verified against hardware
 
@@ -204,17 +253,32 @@ Change Request (DT1 `00` to `04 7F 7F 7F`), whereas individual writes to
 | Byte-exact decode | The preamp block `01 03 1F 57 3A 32 07 5F 00 01` decoded to On / BG Lead / Vol 31 / Bass 87 / Mid 58 / Treble 50 / Presence 7 / Master 95 / Bright off / Gain mid -- exactly per the tables.
 | Program Change | Sending PC on channel 1 changed the patch on the unit (it receives omni, transmits on channel 1).
 | Edit transmit | The GX-700 does *not* transmit individual parameter edits over MIDI; it transmits only on a bulk dump. Reading state therefore uses RQ1, not change-monitoring.
+| Whole-patch write | Reading a stored patch, then writing it back to a user slot, round-trips: a saved patch loaded with `load --to-patch` / `scene restore` reproduces the original sound (e.g. a Metal 5150 patch restored over a BG Lead slot).
+| Sole-accessor reads | With the port lock held and ~40 ms pacing, both full banks (`patches` and `patches --preset`, 100 patches each) read with zero timeouts; a concurrent second reader reliably caused the timeouts previously blamed on the interface.
 |===
 
 == Open items
 
-* `param.rs` ranges are raw 7-bit device units; display-unit conversion (dB, Hz,
-  ms, signed gains) is still to be added.
-* The Modulation block (`09`) has a large per-type parameter set (Table 10 of the
-  MIDI Implementation); transcription of every sub-type offset is in progress.
-* The Control Assign source/target tables (Table 1.2 / 1.3) are catalogued but the
-  editor does not yet expose assignments.
-* Patch memories: reading a header (name/level/chain) is implemented; capturing or
-  restoring a *whole* stored patch to/from JSON, editing patch names, and writing a
-  patch to a user slot are not yet done. Listing the bank with `patches` is slow
-  (~0.5 s/patch) because each RQ1 streams the entire patch.
+Done since the first draft (recorded here so the list above is not misread as
+pending): reading a whole patch, capturing/restoring a whole patch to/from JSON,
+writing a patch to a user slot, whole-device scenes and a per-patch `backup`, the
+port lock and read pacing, and output-level display units. What remains:
+
+* *Display units.* Output level now shows as a percentage; the rest of the catalog
+  is still raw 7-bit units -- signed gains (`-50..+50`), and the dB / Hz / ms / note
+  look-up tables (EQ frequencies, delay/reverb times) -- are not yet converted.
+* *Modulation block (`09`).* Its large per-type parameter set (Table 10 of the MIDI
+  Implementation) is only partially transcribed; not every sub-type offset is mapped.
+* *Control Assigns.* The source/target tables (1.2 / 1.3) are catalogued, but the
+  editor does not yet read or write a patch's assignments.
+* *Patch names.* `encode_name`/`decode_name` round-trip names, but no command edits
+  a stored patch's name in place.
+* *System area (`02 00 00 00`).* The system parameters and Program Change map are
+  listed but unexplored and unverified.
+* *Preset-area writes.* Whether the device accepts or rejects a write to area `01`
+  is untested (see the note under <<Patch memories (presets)>>).
+* *Reset / initialise.* No factory-reset or patch-initialise command is mapped over
+  MIDI, and the scanned PDFs cannot be searched to confirm one exists.
+* *Bank-listing speed.* `patches` is inherently ~0.5 s/patch because each RQ1
+  streams the entire patch; pacing adds a further ~40 ms/slot. This is a property of
+  the protocol, not a bug -- there is no lighter "name only" request.
