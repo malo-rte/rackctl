@@ -33,7 +33,12 @@ fn main() -> Result<()> {
         Err(_) => (device::placeholder(), false),
     };
 
-    let mut viewport = eframe::egui::ViewportBuilder::default().with_app_id("rackctl-gx700-gui");
+    let mut viewport = eframe::egui::ViewportBuilder::default()
+        .with_app_id("rackctl-gx700-gui")
+        // A default wide enough that, at the default 1.5x zoom, the id + name +
+        // level + buttons row fits without squeezing the name column. The UI gets
+        // roughly width/zoom egui points, so 880/1.5 ≈ 585 points of usable width.
+        .with_inner_size([880.0, 820.0]);
     if let Some([w, h]) = config::load().window {
         viewport = viewport.with_inner_size([w, h]);
     }

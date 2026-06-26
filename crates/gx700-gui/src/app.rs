@@ -386,7 +386,9 @@ impl App {
                         let edit = egui::TextEdit::singleline(&mut name)
                             .hint_text("—")
                             .char_limit(NAME_LEN)
-                            .desired_width(200.0);
+                            // ~160pt comfortably holds a 12-char name; smaller than
+                            // this lets the whole row fit in narrower windows.
+                            .desired_width(160.0);
                         if ui.add_enabled(self.connected, edit).changed() {
                             actions.push(Action::SetName(row.slot, name));
                         }
