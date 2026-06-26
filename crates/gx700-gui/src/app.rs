@@ -62,6 +62,46 @@ enum Action {
     WriteAll,
 }
 
+/// Semantic category of a button, mapped to a fill colour so the GUI signals an
+/// action's *consequence* (commit vs. read vs. discard) consistently everywhere.
+#[derive(Clone, Copy)]
+enum ActionKind {
+    /// Persists edits to the device (Save, Write changes). Green.
+    Commit,
+    /// Pulls data in; changes nothing (Refresh, Reconnect). Blue.
+    Read,
+    /// Discards unsaved work, reversible by re-reading (Revert). Amber.
+    Caution,
+    /// No consequence (Cancel, Close). The egui default, no tint.
+    Neutral,
+}
+
+impl ActionKind {
+    /// Muted dark-theme fill, or `None` to keep the default button colour.
+    fn fill(self) -> Option<egui::Color32> {
+        match self {
+            ActionKind::Commit => Some(egui::Color32::from_rgb(46, 120, 75)),
+            ActionKind::Read => Some(egui::Color32::from_rgb(45, 95, 145)),
+            ActionKind::Caution => Some(egui::Color32::from_rgb(155, 110, 30)),
+            ActionKind::Neutral => None,
+        }
+    }
+}
+
+/// Add a button whose fill encodes its [`ActionKind`]. Returns the `Response` so
+/// callers can chain `.on_hover_text(..)` / test `.clicked()`.
+fn action_button(
+    ui: &mut egui::Ui,
+    label: impl Into<egui::WidgetText>,
+    kind: ActionKind,
+) -> egui::Response {
+    let mut button = egui::Button::new(label);
+    if let Some(fill) = kind.fill() {
+        button = button.fill(fill);
+    }
+    ui.add(button)
+}
+
 pub(crate) struct App {
     device: SharedDevice,
     connected: bool,
@@ -437,15 +477,17 @@ impl App {
                         // unsaved edit (their state is the "modified" indicator).
                         ui.horizontal(|ui| {
                             ui.add_enabled_ui(self.connected && row.dirty(), |ui| {
-                                let save = ui.button("Save").on_hover_text(
-                                    "store this patch (name + level) to the unit (needs BULK LOAD mode)",
-                                );
+                                let save = action_button(ui, "Save", ActionKind::Commit)
+                                    .on_hover_text(
+                                        "store this patch (name + level) to the unit (needs BULK LOAD mode)",
+                                    );
                                 if save.clicked() {
                                     actions.push(Action::SaveRow(row.slot));
                                 }
-                                let revert = ui.button("Revert").on_hover_text(
-                                    "discard edits, back to the values stored on the unit",
-                                );
+                                let revert = action_button(ui, "Revert", ActionKind::Caution)
+                                    .on_hover_text(
+                                        "discard edits, back to the values stored on the unit",
+                                    );
                                 if revert.clicked() {
                                     actions.push(Action::RevertRow(row.slot));
                                 }
@@ -550,21 +592,24 @@ impl eframe::App for App {
                                 .desired_width(160.0)
                                 .text(format!("reading {}/{USER_SLOTS}", self.progress)),
                         );
-                    } else if ui.button("Refresh").clicked() {
+                    } else if action_button(ui, "Refresh", ActionKind::Read).clicked() {
                         actions.push(Action::Refresh);
                     }
                     let pending = self.dirty_count();
                     ui.add_enabled_ui(pending > 0, |ui| {
-                        if ui
-                            .button(format!("Write changes to unit ({pending})"))
-                            .clicked()
+                        if action_button(
+                            ui,
+                            format!("Write changes to unit ({pending})"),
+                            ActionKind::Commit,
+                        )
+                        .clicked()
                         {
                             actions.push(Action::OpenBulkPrompt);
                         }
                     });
                 } else {
                     ui.colored_label(egui::Color32::YELLOW, "not connected");
-                    if ui.button("Retry").clicked() {
+                    if action_button(ui, "Retry", ActionKind::Read).clicked() {
                         actions.push(Action::Retry);
                     }
                 }
@@ -592,10 +637,10 @@ impl eframe::App for App {
                          Press PLAY on the unit when done.",
                     );
                     ui.horizontal(|ui| {
-                        if ui.button("Write").clicked() {
+                        if action_button(ui, "Write", ActionKind::Commit).clicked() {
                             actions.push(Action::WriteAll);
                         }
-                        if ui.button("Cancel").clicked() {
+                        if action_button(ui, "Cancel", ActionKind::Neutral).clicked() {
                             actions.push(Action::CloseBulkPrompt);
                         }
                     });
