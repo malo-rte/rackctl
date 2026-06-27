@@ -365,6 +365,51 @@ fn show_reverb_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
         });
 }
 
+/// Draw an *indicative* distortion transfer curve (input -> output, normalised
+/// ±1): a soft-clip waveshaper that steepens and squares off as Drive rises. The
+/// shape illustrates how Drive reshapes the signal; it is not the device's actual
+/// clipping and ignores the type/tone voicings.
+fn show_dist_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
+    let raw = |k: &str| match typed.get(k) {
+        Some(Value::Int(v) | Value::Enum(v)) => v,
+        _ => 0,
+    };
+    let active = matches!(typed.get("dist-enable"), Some(Value::Bool(true)));
+    let drive = f64::from(raw("dist-drive")); // 0..100
+    let gain = 1.0 + drive / 100.0 * 11.0; // 1..12 into the clipper
+    let norm = gain.tanh(); // keep the curve's ends at ±1
+    let points: Vec<[f64; 2]> = (0..=120)
+        .map(|i| {
+            let x = -1.0 + 2.0 * (f64::from(i) / 120.0);
+            let y = if active { (gain * x).tanh() / norm } else { x };
+            [x, y]
+        })
+        .collect();
+    Plot::new("gx700-dist")
+        .height(150.0)
+        .data_aspect(1.0)
+        .allow_drag(false)
+        .allow_zoom(false)
+        .allow_scroll(false)
+        .include_x(-1.0)
+        .include_x(1.0)
+        .include_y(-1.0)
+        .include_y(1.0)
+        .x_axis_formatter(|_, _| String::new())
+        .y_axis_formatter(|_, _| String::new())
+        .show(ui, |plot| {
+            plot.line(
+                Line::new(PlotPoints::from(points)).color(egui::Color32::from_rgb(90, 170, 220)),
+            );
+            // 1:1 reference (clean / no clipping) diagonal.
+            plot.line(
+                Line::new(PlotPoints::from(vec![[-1.0, -1.0], [1.0, 1.0]]))
+                    .color(egui::Color32::from_gray(110))
+                    .style(LineStyle::dashed_loose()),
+            );
+        });
+}
+
 /// One EQ band row in the Gain/Freq/Q grid. Shelves pass `None` for freq/q and
 /// get an em dash in those cells; the mid band passes its enum keys.
 #[allow(clippy::too_many_arguments)]
@@ -1211,6 +1256,10 @@ impl App {
                 self.show_reverb_editor(ui, slot, &typed, actions);
                 return;
             }
+            if block == Block::Distortion {
+                self.show_dist_editor(ui, slot, &typed, actions);
+                return;
+            }
             for &p in param::ALL {
                 if p.block() != block {
                     continue;
@@ -1465,6 +1514,59 @@ impl App {
                 ui.label("Direct (dry)")
                     .on_hover_text("Level of the un-reverbed signal in the mix.");
                 param_drag(ui, slot, "reverb-direct-level", typed, connected, actions);
+                ui.end_row();
+            });
+    }
+
+    /// The Distortion's custom UI: enable + type, an indicative waveshaper transfer
+    /// curve that hardens with Drive, then Drive / Level and the Bass / Treble tone
+    /// controls (each −50…+50).
+    fn show_dist_editor(
+        &self,
+        ui: &mut egui::Ui,
+        slot: u16,
+        typed: &TypedPatch,
+        actions: &mut Vec<Action>,
+    ) {
+        let connected = self.editable();
+        let enabled = block_enabled(typed, Block::Distortion);
+        ui.add_enabled_ui(connected, |ui| {
+            let mut on = enabled;
+            if ui.checkbox(&mut on, "Distortion enabled").changed() {
+                actions.push(Action::SetParam(slot, "dist-enable", Value::Bool(on)));
+            }
+            ui.horizontal(|ui| {
+                ui.label("Type")
+                    .on_hover_text("Overdrive / distortion voicing, from light overdrive to fuzz.");
+                param_combo(ui, slot, "dist-type", typed, connected, actions);
+            });
+        });
+        show_dist_curve(ui, typed);
+        ui.add_space(2.0);
+        ui.label(
+            egui::RichText::new("Indicative — the clipping squares off as Drive rises.").weak(),
+        );
+        ui.add_space(4.0);
+        egui::Grid::new("gx700-dist-grid")
+            .num_columns(4)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Drive").on_hover_text(
+                    "Amount of overdrive/distortion driven into the clipping stage.",
+                );
+                param_drag(ui, slot, "dist-drive", typed, connected, actions);
+                ui.label("Level").on_hover_text(
+                    "Output volume of this block (a mid-chain gain stage). For overall \
+                     patch loudness use the master output level on the Patches tab.",
+                );
+                param_drag(ui, slot, "dist-level", typed, connected, actions);
+                ui.end_row();
+                ui.label("Bass")
+                    .on_hover_text("Low-frequency tone, −50…+50.");
+                param_drag(ui, slot, "dist-bass", typed, connected, actions);
+                ui.label("Treble")
+                    .on_hover_text("High-frequency tone, −50…+50.");
+                param_drag(ui, slot, "dist-treble", typed, connected, actions);
                 ui.end_row();
             });
     }
