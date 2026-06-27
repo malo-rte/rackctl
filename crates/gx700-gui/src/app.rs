@@ -313,6 +313,58 @@ fn show_ns_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
         });
 }
 
+/// Draw an *indicative* reverb decay envelope (level over time): the dry signal as
+/// a spike at t=0 (its height = Direct level), then after the pre-delay gap the wet
+/// tail starting at the Effect level and decaying over the reverb Time. Tonal
+/// controls (mode, cuts, diffusion) aren't shown; this is the shape, not a measure.
+fn show_reverb_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
+    let raw = |k: &str| match typed.get(k) {
+        Some(Value::Int(v) | Value::Enum(v)) => v,
+        _ => 0,
+    };
+    let active = matches!(typed.get("reverb-enable"), Some(Value::Bool(true)));
+    let time_s = f64::from(raw("reverb-time").max(1)) / 10.0; // 0.1..10.0 s
+    let pre_s = f64::from(raw("reverb-pre-delay")) / 1000.0; // 0..0.1 s
+    let effect = f64::from(raw("reverb-effect-level")); // 0..100 (wet tail height)
+    let direct = f64::from(raw("reverb-direct-level")); // 0..100 (dry spike height)
+    let span = (pre_s + time_s).max(0.2);
+    // Tail decays to ~5% of its start by the end of the reverb Time.
+    let tau = (time_s / 3.0).max(0.01);
+    let tail: Vec<[f64; 2]> = (0..=120)
+        .map(|i| {
+            let t = pre_s + time_s * (f64::from(i) / 120.0);
+            let level = if active {
+                effect * (-(t - pre_s) / tau).exp()
+            } else {
+                0.0
+            };
+            [t, level]
+        })
+        .collect();
+    Plot::new("gx700-reverb")
+        .height(150.0)
+        .allow_drag(false)
+        .allow_zoom(false)
+        .allow_scroll(false)
+        .include_x(0.0)
+        .include_x(span)
+        .include_y(0.0)
+        .include_y(100.0)
+        .x_axis_formatter(|mark, _| format!("{:.1}s", mark.value))
+        .y_axis_formatter(|mark, _| format!("{:.0}", mark.value))
+        .show(ui, |plot| {
+            // Dry signal: a spike at t=0 whose height is the Direct level.
+            plot.line(
+                Line::new(PlotPoints::from(vec![[0.0, 0.0], [0.0, direct]]))
+                    .color(egui::Color32::from_gray(150)),
+            );
+            // Wet tail: starts after the pre-delay at the Effect level, then decays.
+            plot.line(
+                Line::new(PlotPoints::from(tail)).color(egui::Color32::from_rgb(90, 170, 220)),
+            );
+        });
+}
+
 /// One EQ band row in the Gain/Freq/Q grid. Shelves pass `None` for freq/q and
 /// get an em dash in those cells; the mid band passes its enum keys.
 #[allow(clippy::too_many_arguments)]
@@ -1155,6 +1207,10 @@ impl App {
                 self.show_ns_editor(ui, slot, &typed, actions);
                 return;
             }
+            if block == Block::Reverb {
+                self.show_reverb_editor(ui, slot, &typed, actions);
+                return;
+            }
             for &p in param::ALL {
                 if p.block() != block {
                     continue;
@@ -1344,6 +1400,71 @@ impl App {
                      use the master output level on the Patches tab.",
                 );
                 param_drag(ui, slot, "ns-level", typed, connected, actions);
+                ui.end_row();
+            });
+    }
+
+    /// The Reverb's custom UI: enable + mode, a decay-envelope graphic (pre-delay
+    /// gap, then a tail decaying over the reverb Time), then the time/tone controls
+    /// and the wet (Effect) / dry (Direct) level mix.
+    fn show_reverb_editor(
+        &self,
+        ui: &mut egui::Ui,
+        slot: u16,
+        typed: &TypedPatch,
+        actions: &mut Vec<Action>,
+    ) {
+        let connected = self.editable();
+        let enabled = block_enabled(typed, Block::Reverb);
+        ui.add_enabled_ui(connected, |ui| {
+            let mut on = enabled;
+            if ui.checkbox(&mut on, "Reverb enabled").changed() {
+                actions.push(Action::SetParam(slot, "reverb-enable", Value::Bool(on)));
+            }
+            ui.horizontal(|ui| {
+                ui.label("Mode").on_hover_text(
+                    "Reverb character — small rooms through large halls and a plate.",
+                );
+                param_combo(ui, slot, "reverb-mode", typed, connected, actions);
+            });
+        });
+        show_reverb_curve(ui, typed);
+        ui.add_space(2.0);
+        ui.label(
+            egui::RichText::new("Indicative — dry spike at 0, then the wet tail decays over Time.")
+                .weak(),
+        );
+        ui.add_space(4.0);
+        egui::Grid::new("gx700-reverb-grid")
+            .num_columns(4)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Time")
+                    .on_hover_text("Reverb decay length, 0.1–10.0 s.");
+                param_drag(ui, slot, "reverb-time", typed, connected, actions);
+                ui.label("Pre-delay")
+                    .on_hover_text("Gap before the reverb tail starts (0–100 ms).");
+                param_drag(ui, slot, "reverb-pre-delay", typed, connected, actions);
+                ui.end_row();
+                ui.label("Low cut")
+                    .on_hover_text("Roll off the tail below this frequency (thins boom).");
+                param_combo(ui, slot, "reverb-low-cut", typed, connected, actions);
+                ui.label("Hi cut")
+                    .on_hover_text("Roll off the tail above this frequency (darkens the tail).");
+                param_combo(ui, slot, "reverb-hi-cut", typed, connected, actions);
+                ui.end_row();
+                ui.label("Diffusion")
+                    .on_hover_text("Density of the reflections, 0–10 (lower = grainier).");
+                param_drag(ui, slot, "reverb-diffusion", typed, connected, actions);
+                ui.label("");
+                ui.label("");
+                ui.end_row();
+                ui.label("Effect (wet)")
+                    .on_hover_text("Level of the reverb tail in the mix.");
+                param_drag(ui, slot, "reverb-effect-level", typed, connected, actions);
+                ui.label("Direct (dry)")
+                    .on_hover_text("Level of the un-reverbed signal in the mix.");
+                param_drag(ui, slot, "reverb-direct-level", typed, connected, actions);
                 ui.end_row();
             });
     }

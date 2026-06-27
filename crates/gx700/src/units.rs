@@ -55,8 +55,8 @@ fn format_int(key: &str, raw: i32) -> String {
         }
         // Delay high damp: raw 0..50 = -50..0 dB.
         "delay-high-damp" => format!("{} dB", signed(raw - 50)),
-        // Delay centre time, in milliseconds.
-        "delay-time-c" => format!("{raw} ms"),
+        // Times in milliseconds: delay centre time, and reverb pre-delay (0..100).
+        "delay-time-c" | "reverb-pre-delay" => format!("{raw} ms"),
         // Delay tempo: raw 0..250 = 50..300 BPM.
         "delay-tempo" => format!("{} BPM", raw + 50),
         // Reverb time: raw 1..100 = 0.1..10.0 s (tenths of a second).
@@ -111,6 +111,7 @@ mod tests {
         assert_eq!(fmt("delay-time-l", 200), "200%");
         assert_eq!(fmt("delay-tempo", 70), "120 BPM");
         assert_eq!(fmt("reverb-time", 50), "5.0 s");
+        assert_eq!(fmt("reverb-pre-delay", 40), "40 ms");
         assert_eq!(fmt("chorus-pre-delay", 3), "1.5 ms");
         assert_eq!(fmt("mod-harmonist-interval1", 24), "0");
         assert_eq!(fmt("mod-hr-scale-c1", 36), "+12");
