@@ -2508,6 +2508,15 @@ impl eframe::App for App {
                         actions.push(Action::Retry);
                     }
                 }
+                // Exit in the far-right corner (config is saved on close via Drop).
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if action_button(ui, "Exit", ActionKind::Neutral)
+                        .on_hover_text("close the editor (pending changes are kept until written)")
+                        .clicked()
+                    {
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                });
             });
         });
 
