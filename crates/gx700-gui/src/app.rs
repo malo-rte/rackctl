@@ -566,17 +566,21 @@ fn show_delay_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
             if !active {
                 return;
             }
-            // Centre tap, echoing with feedback decay.
-            let mut h = f64::from(raw("delay-level-c"));
-            let mut t = c;
-            while t <= span && h >= 1.0 {
-                plot.line(Line::new(tap(t, h)).color(blue));
-                t += c;
-                h *= fb;
+            // Each tap recirculates through the feedback loop (period = centre time),
+            // so the C / L / R taps all repeat, decaying by the feedback each pass.
+            for (base_t, level_key, color) in [
+                (c, "delay-level-c", blue),
+                (lt, "delay-level-l", green),
+                (rt, "delay-level-r", red),
+            ] {
+                let mut t = base_t;
+                let mut h = f64::from(raw(level_key));
+                while t <= span && h >= 1.0 {
+                    plot.line(Line::new(tap(t, h)).color(color));
+                    t += c;
+                    h *= fb;
+                }
             }
-            // Left (green) / right (red) taps (single).
-            plot.line(Line::new(tap(lt, f64::from(raw("delay-level-l")))).color(green));
-            plot.line(Line::new(tap(rt, f64::from(raw("delay-level-r")))).color(red));
         });
 }
 
