@@ -969,7 +969,9 @@ impl App {
                     ui.label("Release");
                     param_drag(ui, slot, "comp-release", typed, connected, actions);
                 } else {
-                    ui.label("Sustain");
+                    ui.label("Sustain").on_hover_text(
+                        "Compression amount — the GX-700 has no separate ratio control.",
+                    );
                     param_drag(ui, slot, "comp-sustain", typed, connected, actions);
                     ui.label("Attack");
                     param_drag(ui, slot, "comp-attack", typed, connected, actions);
@@ -977,7 +979,8 @@ impl App {
                 ui.end_row();
                 ui.label("Tone");
                 param_drag(ui, slot, "comp-tone", typed, connected, actions);
-                ui.label("Level");
+                ui.label("Level")
+                    .on_hover_text("Compressor output level — acts as the make-up gain.");
                 param_drag(ui, slot, "comp-level", typed, connected, actions);
                 ui.end_row();
             });
