@@ -453,6 +453,25 @@ impl Param {
     pub fn from_key(key: &str) -> Option<Param> {
         ALL.iter().copied().find(|p| p.key == key)
     }
+
+    /// Decode this parameter's raw value from its block's byte slice (`block_bytes`
+    /// starts at the block's offset `0`). Missing bytes read as 0.
+    #[must_use]
+    pub fn decode(self, block_bytes: &[u8]) -> i32 {
+        let off = usize::from(self.offset);
+        self.encoding.decode(block_bytes.get(off..).unwrap_or(&[]))
+    }
+
+    /// Encode `value` (assumed range-checked) into its block's byte buffer at this
+    /// parameter's offset, writing [`Self::width`] bytes.
+    pub fn encode_into(self, value: i32, block_bytes: &mut [u8]) {
+        let off = usize::from(self.offset);
+        let mut buf = [0u8; 2];
+        let n = self.encoding.encode(value, &mut buf);
+        if let Some(slot) = block_bytes.get_mut(off..off + n) {
+            slot.copy_from_slice(buf.get(..n).unwrap_or(&buf));
+        }
+    }
 }
 
 /// A bool (typically a block enable) parameter.

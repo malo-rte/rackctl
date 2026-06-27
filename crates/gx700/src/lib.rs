@@ -48,6 +48,7 @@ pub mod monitor;
 pub mod param;
 pub mod scene;
 pub mod sysex;
+pub mod typed;
 pub mod units;
 
 #[cfg(feature = "alsa")]
