@@ -95,6 +95,16 @@ enum Command {
         /// The value to write (number, on/off, or enum index/label).
         value: String,
     },
+    /// Edit a saved patch file in place: set one parameter by key. No device
+    /// needed; the change round-trips through the typed patch model.
+    Edit {
+        /// Saved patch name (in the gx700 patches directory).
+        name: String,
+        /// Parameter key (see `list`), e.g. `preamp-gain`.
+        key: String,
+        /// The value to write (number, on/off, or enum index/label).
+        value: String,
+    },
     /// Print a patch in readable form: the current sound, a device slot, or a
     /// saved file.
     Dump {
@@ -104,6 +114,10 @@ enum Command {
         /// Read a saved patch by name (no device needed) instead.
         #[arg(long)]
         file: Option<String>,
+        /// Emit the typed patch model as block-grouped JSON instead of the
+        /// human-readable decode.
+        #[arg(long)]
+        json: bool,
     },
     /// Save a whole patch to disk: the current sound, or device slot N.
     Save {
@@ -304,7 +318,7 @@ fn run_command<T: Transport>(dev: &mut Gx700<T>, command: Command) -> Result<()>
     match command {
         Command::Get { param } => commands::get(dev, &param),
         Command::Set { param, value } => commands::set(dev, &param, &value),
-        Command::Dump { patch, .. } => commands::dump_device(dev, patch),
+        Command::Dump { patch, json, .. } => commands::dump_device(dev, patch, json),
         Command::Save { name, patch } => commands::save(dev, &name, patch),
         Command::Backup { preset } => commands::backup(dev, preset),
         Command::Scene { command } => match command {
@@ -326,6 +340,7 @@ fn run_command<T: Transport>(dev: &mut Gx700<T>, command: Command) -> Result<()>
         | Command::Recv
         | Command::Monitor
         | Command::Chain { .. }
+        | Command::Edit { .. }
         | Command::Completions { .. } => Ok(()),
     }
 }
@@ -359,9 +374,12 @@ fn run() -> Result<()> {
             return Ok(());
         }
         Command::Dump {
-            file: Some(name), ..
-        } => return commands::dump_file(name),
+            file: Some(name),
+            json,
+            ..
+        } => return commands::dump_file(name, *json),
         Command::Chain { name, set } => return commands::chain(name, set.as_deref()),
+        Command::Edit { name, key, value } => return commands::edit_file(name, key, value),
         _ => {}
     }
 

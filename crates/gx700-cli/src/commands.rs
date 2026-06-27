@@ -83,15 +83,47 @@ pub(crate) fn set<T: Transport>(dev: &mut Gx700<T>, key: &str, raw_value: &str) 
 }
 
 /// Print a patch in readable form: the current sound, or device slot `patch`.
-pub(crate) fn dump_device<T: Transport>(dev: &mut Gx700<T>, patch: Option<u16>) -> Result<()> {
-    let raw = read_from_device(dev, patch)?;
-    print!("{}", raw.describe());
-    Ok(())
+pub(crate) fn dump_device<T: Transport>(
+    dev: &mut Gx700<T>,
+    patch: Option<u16>,
+    json: bool,
+) -> Result<()> {
+    print_patch(&read_from_device(dev, patch)?, json)
 }
 
 /// Print a saved patch file in readable form. Backend-free.
-pub(crate) fn dump_file(name: &str) -> Result<()> {
-    print!("{}", read_saved(name)?.describe());
+pub(crate) fn dump_file(name: &str, json: bool) -> Result<()> {
+    print_patch(&read_saved(name)?, json)
+}
+
+/// Edit a saved patch file in place: set one parameter by its catalog key, via
+/// the typed model (decode → set(key) → re-encode byte-exact). Backend-free.
+pub(crate) fn edit_file(name: &str, key: &str, raw_value: &str) -> Result<()> {
+    let p = resolve(key)?;
+    let value = parse_value(p, raw_value)?;
+    let mut typed = rackctl_gx700::typed::Patch::from_raw(&read_saved(name)?);
+    typed.set(key, value)?;
+    let dest = write_patch_file(name, &typed.to_raw())?;
+    eprintln!(
+        "set {key} = {} in {}",
+        format_value(p, value),
+        dest.display()
+    );
+    Ok(())
+}
+
+/// Print a patch as the human-readable decode, or (with `json`) the typed model
+/// serialised to block-grouped JSON.
+fn print_patch(raw: &RawPatch, json: bool) -> Result<()> {
+    if json {
+        let typed = rackctl_gx700::typed::Patch::from_raw(raw);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&typed).context("serialising the typed patch")?
+        );
+    } else {
+        print!("{}", raw.describe());
+    }
     Ok(())
 }
 

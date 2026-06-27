@@ -784,7 +784,8 @@ The *Needs* column shows what a command requires: _device_ (a unit via `--port`,
 | `info <param>`                   | Show one parameter's block, kind, range, and enum values. | none
 | `get <param>`                    | Read a parameter's current value. | device
 | `set <param> <value>`            | Write a value to a parameter (current sound). | device
-| `dump [--patch N \| --file NAME]` | Print a patch readably: current sound, slot `N`, or a saved file. | device / disk
+| `edit <name> <key> <value>`      | Set one parameter by key in a saved patch file (via the typed model). | disk
+| `dump [--patch N \| --file NAME] [--json]` | Print a patch: readable decode, or `--json` for the typed block-grouped model. | device / disk
 | `save <name> [--patch N]`        | Save a patch (current sound, or slot `N`) to disk. | device
 | `backup [--preset]`              | Save a whole bank as per-patch files. | device
 | `scene save <name>`              | Save all 100 user patches as one scene file. | device
