@@ -474,12 +474,13 @@ order (`01`..`0D`) and the twelve name characters (`0E`..`19`), which
 | `02` | `wah-pedal-freq` | int `0`..`100`
 | `03` | `wah-auto-polarity` | enum -- `0`=Down, `1`=Up
 | `04` | `wah-auto-sens` | int `0`..`100`
-| `05` | `wah-peak` | int `0`..`100`
-| `06` | `wah-pedal-source` | int `0`..`65`
-| `07` | `wah-pedal-min` | int `0`..`100`
-| `08` | `wah-pedal-max` | int `0`..`100`
-| `09` | `wah-auto-rate` | int `0`..`100`
-| `0A` | `wah-auto-depth` | int `0`..`100`
+| `05` | `wah-auto-manual` | int `0`..`100`
+| `06` | `wah-peak` | int `0`..`100`
+| `07` | `wah-pedal-source` | int `0`..`65`
+| `08` | `wah-pedal-min` | int `0`..`100`
+| `09` | `wah-pedal-max` | int `0`..`100`
+| `0A` | `wah-auto-rate` | int `0`..`100`
+| `0B` | `wah-auto-depth` | int `0`..`100`
 | `0C` | `wah-level` | int `0`..`100`
 |===
 
@@ -588,9 +589,9 @@ order (`01`..`0D`) and the twelve name characters (`0E`..`19`), which
 | `14` | `mod-ring-effect-level` | int `0`..`100`
 | `15` | `mod-ring-direct-level` | int `0`..`100`
 | `16` | `mod-ps-type` | enum -- `0`=Slow, `1`=Fast, `2`=Mono
-| `17` | `mod-ps-pitch1` | int `0`..`50`
-| `18` | `mod-ps-pitch2` | int `0`..`50`
-| `19` | `mod-ps-pitch3` | int `0`..`50`
+| `17` | `mod-ps-pitch1` | int `0`..`48`
+| `18` | `mod-ps-pitch2` | int `0`..`48`
+| `19` | `mod-ps-pitch3` | int `0`..`48`
 | `1A` | `mod-ps-fine1` | int `0`..`100`
 | `1B` | `mod-ps-fine2` | int `0`..`100`
 | `1C` | `mod-ps-fine3` | int `0`..`100`

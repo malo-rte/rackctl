@@ -119,6 +119,29 @@ impl Block {
         })
     }
 
+    /// The sub-block's length in device bytes (its offsets run `0..byte_len`).
+    /// Fixed by the patch format and identical across every patch.
+    #[must_use]
+    #[allow(clippy::match_same_arms)] // keep the explicit per-block size listing
+    pub const fn byte_len(self) -> usize {
+        match self {
+            Block::LevelChain => 66,
+            Block::Compressor => 8,
+            Block::Wah => 13,
+            Block::Distortion => 6,
+            Block::Preamp => 10,
+            Block::Loop => 4,
+            Block::Equalizer => 7,
+            Block::SpeakerSim => 5,
+            Block::NoiseSuppressor => 5,
+            Block::Modulation => 77,
+            Block::Delay => 21,
+            Block::Chorus => 9,
+            Block::TremoloPan => 5,
+            Block::Reverb => 9,
+        }
+    }
+
     /// A human-readable block label, for listings.
     #[must_use]
     pub const fn label(self) -> &'static str {
@@ -566,12 +589,13 @@ pub const ALL: &[Param] = &[
     i100("wah-pedal-freq", Wah, 0x02),
     e("wah-auto-polarity", Wah, 0x03, WAH_POLARITY_VALUES),
     i100("wah-auto-sens", Wah, 0x04),
-    i100("wah-peak", Wah, 0x05),
-    i("wah-pedal-source", Wah, 0x06, 0, 65, 0), // 0 fixed,1 exp,2 fc200,3..33 cc1..31,34..65 cc64..95
-    i100("wah-pedal-min", Wah, 0x07),
-    i100("wah-pedal-max", Wah, 0x08),
-    i100("wah-auto-rate", Wah, 0x09),
-    i100("wah-auto-depth", Wah, 0x0A),
+    i100("wah-auto-manual", Wah, 0x05),
+    i100("wah-peak", Wah, 0x06),
+    i("wah-pedal-source", Wah, 0x07, 0, 65, 0), // 0 fixed,1 exp,2 fc200,3..33 cc1..31,34..65 cc64..95
+    i100("wah-pedal-min", Wah, 0x08),
+    i100("wah-pedal-max", Wah, 0x09),
+    i100("wah-auto-rate", Wah, 0x0A),
+    i100("wah-auto-depth", Wah, 0x0B),
     i100("wah-level", Wah, 0x0C),
     // Distortion (Table 4).
     b("dist-enable", Distortion, 0x00),
@@ -833,6 +857,36 @@ mod tests {
             assert_eq!(n, enc.width());
             assert_eq!(&buf[..n], bytes, "encode {enc:?}");
             assert_eq!(enc.decode(&buf[..n]), value, "decode {enc:?}");
+        }
+    }
+
+    #[test]
+    fn every_block_byte_is_catalogued() {
+        // Every device byte of every block must be claimed by exactly one
+        // parameter -- except the Level/Chain chain order (0x01..=0x0D) and the
+        // 12-char name (0x0E..=0x19), which are structured, not parameters. A gap
+        // here means a missing or mis-offset parameter (this guards against the
+        // Wah `0x0B` shift that the range-only bank check could not catch).
+        for base in 0u8..=13 {
+            let block = Block::from_base(base).unwrap();
+            let claimed: HashSet<usize> = ALL
+                .iter()
+                .filter(|p| p.block() == block)
+                .flat_map(|p| {
+                    let o = usize::from(p.offset());
+                    o..o + p.width()
+                })
+                .collect();
+            for off in 0..block.byte_len() {
+                if block == Block::LevelChain && (1..=0x19).contains(&off) {
+                    continue; // chain order + name
+                }
+                assert!(
+                    claimed.contains(&off),
+                    "block {} byte {off:#04x} is not catalogued",
+                    block.label()
+                );
+            }
         }
     }
 
