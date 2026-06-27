@@ -365,10 +365,28 @@ fn show_reverb_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
         });
 }
 
-/// Draw an *indicative* distortion transfer curve (input -> output, normalised
-/// ±1): a soft-clip waveshaper that steepens and squares off as Drive rises. The
-/// shape illustrates how Drive reshapes the signal; it is not the device's actual
-/// clipping and ignores the type/tone voicings.
+/// A *hand-picked* clipping "hardness" (0 = smooth overdrive .. 1 = hard, squared
+/// fuzz) for each `dist-type`, by ear/reputation only — the GX-700 exposes nothing
+/// about each type's real transfer function. Purely to make the schematic curve
+/// differ by type; replace with measured shapes if we ever capture them.
+fn dist_hardness(type_index: i32) -> f64 {
+    match type_index {
+        0 => 0.10, // Vintage OD
+        1 => 0.30, // Turbo OD
+        2 => 0.12, // Blues
+        3 => 0.45, // Distortion
+        4 => 0.60, // Turbo DS
+        5 => 0.78, // Metal
+        6 => 0.95, // Fuzz
+        _ => 0.40,
+    }
+}
+
+/// Draw a *schematic* distortion transfer curve (input -> output, normalised ±1):
+/// a waveshaper that steepens with Drive and squares off more for the harder types
+/// (Metal/Fuzz) than the overdrives. The per-type hardness is hand-picked, not
+/// measured (see [`dist_hardness`]), and tone/level aren't modelled — it conveys
+/// the *idea*, not the device's real clipping.
 fn show_dist_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
     let raw = |k: &str| match typed.get(k) {
         Some(Value::Int(v) | Value::Enum(v)) => v,
@@ -376,12 +394,21 @@ fn show_dist_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
     };
     let active = matches!(typed.get("dist-enable"), Some(Value::Bool(true)));
     let drive = f64::from(raw("dist-drive")); // 0..100
-    let gain = 1.0 + drive / 100.0 * 11.0; // 1..12 into the clipper
-    let norm = gain.tanh(); // keep the curve's ends at ±1
+    let hardness = dist_hardness(raw("dist-type"));
+    // Harder types reach more gain and lean toward a hard clip; softer ones stay
+    // near a smooth tanh saturation.
+    let gain = 1.0 + drive / 100.0 * (6.0 + hardness * 10.0);
+    let norm = gain.tanh(); // keep the soft curve's ends at ±1
     let points: Vec<[f64; 2]> = (0..=120)
         .map(|i| {
             let x = -1.0 + 2.0 * (f64::from(i) / 120.0);
-            let y = if active { (gain * x).tanh() / norm } else { x };
+            let y = if active {
+                let soft = (gain * x).tanh() / norm;
+                let hard = (gain * x).clamp(-1.0, 1.0);
+                soft * (1.0 - hardness) + hard * hardness
+            } else {
+                x
+            };
             [x, y]
         })
         .collect();
@@ -1544,7 +1571,10 @@ impl App {
         show_dist_curve(ui, typed);
         ui.add_space(2.0);
         ui.label(
-            egui::RichText::new("Indicative — the clipping squares off as Drive rises.").weak(),
+            egui::RichText::new(
+                "Schematic — shape estimated by type (hand-picked, not measured) and Drive.",
+            )
+            .weak(),
         );
         ui.add_space(4.0);
         egui::Grid::new("gx700-dist-grid")
