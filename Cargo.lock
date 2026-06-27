@@ -2774,6 +2774,7 @@ dependencies = [
  "directories",
  "eframe",
  "egui",
+ "egui_plot",
  "rackctl-gx700",
  "rackctl-ui",
  "serde",

@@ -11,8 +11,11 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use eframe::egui;
+use egui_plot::{Line, Plot, PlotPoints};
+use rackctl_gx700::param::{EQ_MID_FREQ_VALUES, EQ_MID_Q_VALUES};
 use rackctl_gx700::typed::Patch as TypedPatch;
 use rackctl_gx700::{Block, Kind, NAME_LEN, Param, RawPatch, Value, param, units};
+use rackctl_ui::eq::{BandType, EqBand, eq_response_db};
 use rackctl_ui::{ActionKind, action_button};
 
 use crate::config::{self, CachedRow, GuiConfig};
@@ -89,6 +92,91 @@ fn block_enabled(typed: &TypedPatch, block: Block) -> bool {
         .find(|p| p.block() == block && p.offset() == 0 && matches!(p.kind(), Kind::Bool))
         .and_then(|p| typed.get(p.key()))
         .is_some_and(|v| matches!(v, Value::Bool(true)))
+}
+
+/// Draw the GX-700 3-band EQ response curve for the patch's current settings.
+/// Low/high shelf corner frequencies are fixed on the device (not published), so
+/// the absolute low/high Hz are indicative; the mid band and gains are exact.
+fn show_eq_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
+    let raw = |k: &str| match typed.get(k) {
+        Some(Value::Int(v) | Value::Enum(v)) => v,
+        _ => 0,
+    };
+    // EQ gains are raw 0..40 centred at 20 = 0 dB.
+    let gain = |k: &str| f64::from(raw(k) - 20);
+    let mid_freq = EQ_MID_FREQ_VALUES
+        .get(usize::try_from(raw("eq-mid-freq")).unwrap_or(0))
+        .map_or(1000.0, |s| hz_from_label(s));
+    let q = EQ_MID_Q_VALUES
+        .get(usize::try_from(raw("eq-mid-q")).unwrap_or(0))
+        .and_then(|s| s.parse::<f64>().ok())
+        .unwrap_or(1.0);
+    let level = gain("eq-level");
+    let active = matches!(typed.get("eq-enable"), Some(Value::Bool(true)));
+    let bands = [
+        EqBand {
+            kind: BandType::LowShelf,
+            f0: 100.0,
+            q: 0.7,
+            gain_db: gain("eq-low-gain"),
+        },
+        EqBand {
+            kind: BandType::Peaking,
+            f0: mid_freq,
+            q,
+            gain_db: gain("eq-mid-gain"),
+        },
+        EqBand {
+            kind: BandType::HighShelf,
+            f0: 8000.0,
+            q: 0.7,
+            gain_db: gain("eq-high-gain"),
+        },
+    ];
+    // x is log10(Hz) over ~20 Hz .. 20 kHz; the output level shifts the whole curve.
+    let points: Vec<[f64; 2]> = (0..=200)
+        .map(|i| {
+            let lf = 1.3 + (4.3 - 1.3) * (f64::from(i) / 200.0);
+            let db = if active {
+                eq_response_db(&bands, 10f64.powf(lf)) + level
+            } else {
+                0.0
+            };
+            [lf, db]
+        })
+        .collect();
+    Plot::new("gx700-eq")
+        .height(150.0)
+        .allow_drag(false)
+        .allow_zoom(false)
+        .allow_scroll(false)
+        .include_y(-24.0)
+        .include_y(24.0)
+        .x_axis_formatter(|mark, _| hz_label(mark.value))
+        .y_axis_formatter(|mark, _| format!("{:.0} dB", mark.value))
+        .show(ui, |plot| plot.line(Line::new(PlotPoints::from(points))));
+}
+
+/// Format a log10(Hz) axis value as a frequency label (`100`, `1k`, `10k`).
+fn hz_label(log_hz: f64) -> String {
+    let hz = 10f64.powf(log_hz);
+    if hz >= 1000.0 {
+        format!("{:.0}k", hz / 1000.0)
+    } else {
+        format!("{hz:.0}")
+    }
+}
+
+/// Parse a frequency label (`"100Hz"`, `"1.6kHz"`) into Hz.
+fn hz_from_label(s: &str) -> f64 {
+    let t = s.trim();
+    if let Some(k) = t.strip_suffix("kHz") {
+        k.trim().parse::<f64>().unwrap_or(1.0) * 1000.0
+    } else if let Some(h) = t.strip_suffix("Hz") {
+        h.trim().parse().unwrap_or(1000.0)
+    } else {
+        t.parse().unwrap_or(1000.0)
+    }
 }
 
 /// Render one parameter as a live widget (checkbox / slider / combo by kind),
@@ -596,6 +684,11 @@ impl App {
         let block = self.selected_block;
         ui.heading(block.label());
         egui::ScrollArea::vertical().show(ui, |ui| {
+            // Custom per-block visualisations go above the generic controls.
+            if block == Block::Equalizer {
+                show_eq_curve(ui, &typed);
+                ui.separator();
+            }
             for &p in param::ALL {
                 if p.block() != block {
                     continue;

@@ -25,6 +25,7 @@ rackctl-ui = { path = "../ui-common" }
 clap.workspace = true
 eframe.workspace = true
 egui.workspace = true
+egui_plot.workspace = true
 directories.workspace = true
 serde = { workspace = true }
 serde_json.workspace = true
