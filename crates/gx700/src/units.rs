@@ -20,15 +20,28 @@ pub fn display(param: Param, value: Value) -> String {
 
 /// Format an integer value, applying the parameter's display unit/offset.
 fn format_int(key: &str, raw: i32) -> String {
-    // Harmonist scale (36 bytes) and interval voices: an interval in semitones,
-    // raw 0..48 centred at 24.
+    // Harmonist scale (36 bytes), interval voices, and pitch-shifter pitch: an
+    // interval in semitones, raw 0..48 centred at 24.
     if key.starts_with("mod-hr-scale-")
         || matches!(
             key,
-            "mod-harmonist-interval1" | "mod-harmonist-interval2" | "mod-harmonist-interval3"
+            "mod-harmonist-interval1"
+                | "mod-harmonist-interval2"
+                | "mod-harmonist-interval3"
+                | "mod-ps-pitch1"
+                | "mod-ps-pitch2"
+                | "mod-ps-pitch3"
         )
     {
         return signed(raw - 24);
+    }
+    // Stereo pans and the tremolo balance: a left/right level split (raw 0 = hard
+    // left, 100 = hard right).
+    if matches!(
+        key,
+        "mod-pshr-pan1" | "mod-pshr-pan2" | "mod-pshr-pan3" | "tremolo-balance"
+    ) {
+        return format!("L{}:R{}", 100 - raw, raw);
     }
     match key {
         // Percentages: output level and the delay L/R times (% of the centre tap).
@@ -50,6 +63,8 @@ fn format_int(key: &str, raw: i32) -> String {
         "reverb-time" => format!("{}.{} s", raw / 10, raw % 10),
         // Chorus pre-delay: raw 0..100 in half-millisecond steps (0.0..50.0 ms).
         "chorus-pre-delay" => format!("{}.{} ms", raw / 2, (raw % 2) * 5),
+        // Pitch-shifter & harmonist direct/effect balance (raw 0 = all direct).
+        "mod-pshr-balance" => format!("D{}:E{}", 100 - raw, raw),
         _ => raw.to_string(),
     }
 }
@@ -100,6 +115,16 @@ mod tests {
         assert_eq!(fmt("mod-harmonist-interval1", 24), "0");
         assert_eq!(fmt("mod-hr-scale-c1", 36), "+12");
         assert_eq!(fmt("mod-hr-scale-b3", 12), "-12");
+        // Pitch-shifter pitch: semitone offset, raw 0..48 centred at 24.
+        assert_eq!(fmt("mod-ps-pitch1", 24), "0");
+        assert_eq!(fmt("mod-ps-pitch2", 36), "+12");
+        // Stereo pan / tremolo balance: a left/right level split.
+        assert_eq!(fmt("mod-pshr-pan1", 0), "L100:R0");
+        assert_eq!(fmt("mod-pshr-pan1", 50), "L50:R50");
+        assert_eq!(fmt("tremolo-balance", 100), "L0:R100");
+        // Pitch-shifter direct/effect balance.
+        assert_eq!(fmt("mod-pshr-balance", 0), "D100:E0");
+        assert_eq!(fmt("mod-pshr-balance", 30), "D70:E30");
         // A plain 0..100 value keeps its raw form.
         assert_eq!(fmt("preamp-volume", 75), "75");
     }

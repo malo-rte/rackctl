@@ -671,9 +671,9 @@ pub const ALL: &[Param] = &[
     i100("mod-ring-effect-level", Modulation, 0x14),
     i100("mod-ring-direct-level", Modulation, 0x15),
     e("mod-ps-type", Modulation, 0x16, PS_TYPE_VALUES),
-    i("mod-ps-pitch1", Modulation, 0x17, 0, 50, 25), // raw 0..50 = -24..+24
-    i("mod-ps-pitch2", Modulation, 0x18, 0, 50, 25),
-    i("mod-ps-pitch3", Modulation, 0x19, 0, 50, 25),
+    i("mod-ps-pitch1", Modulation, 0x17, 0, 48, 24), // raw 0..48 = -24..+24 semitones
+    i("mod-ps-pitch2", Modulation, 0x18, 0, 48, 24),
+    i("mod-ps-pitch3", Modulation, 0x19, 0, 48, 24),
     i("mod-ps-fine1", Modulation, 0x1A, 0, 100, 50), // raw 0..100 = -50..+50
     i("mod-ps-fine2", Modulation, 0x1B, 0, 100, 50),
     i("mod-ps-fine3", Modulation, 0x1C, 0, 100, 50),
