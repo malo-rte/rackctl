@@ -852,6 +852,268 @@ fn show_trem_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
         });
 }
 
+/// A grid cell pair: a label then the parameter `key` as a drag-value.
+fn grid_drag(
+    ui: &mut egui::Ui,
+    slot: u16,
+    label: &str,
+    key: &'static str,
+    typed: &TypedPatch,
+    on: bool,
+    actions: &mut Vec<Action>,
+) {
+    ui.label(label);
+    param_drag(ui, slot, key, typed, on, actions);
+}
+
+/// A grid cell pair: a label then the parameter `key` as a combo box.
+fn grid_combo(
+    ui: &mut egui::Ui,
+    slot: u16,
+    label: &str,
+    key: &'static str,
+    typed: &TypedPatch,
+    on: bool,
+    actions: &mut Vec<Action>,
+) {
+    ui.label(label);
+    param_combo(ui, slot, key, typed, on, actions);
+}
+
+/// A short caption line under a Modulation type's controls.
+fn mod_caption(ui: &mut egui::Ui, text: &str) {
+    ui.add_space(4.0);
+    ui.label(egui::RichText::new(text).weak());
+}
+
+fn mod_flanger(ui: &mut egui::Ui, slot: u16, t: &TypedPatch, on: bool, a: &mut Vec<Action>) {
+    egui::Grid::new("mod-flanger")
+        .num_columns(4)
+        .spacing([12.0, 6.0])
+        .show(ui, |ui| {
+            grid_drag(ui, slot, "Rate", "mod-rate", t, on, a);
+            grid_drag(ui, slot, "Depth", "mod-depth", t, on, a);
+            ui.end_row();
+            grid_drag(ui, slot, "Manual", "mod-manual", t, on, a);
+            grid_drag(ui, slot, "Resonance", "mod-resonance", t, on, a);
+            ui.end_row();
+            grid_drag(ui, slot, "Separation", "mod-flanger-separation", t, on, a);
+            grid_drag(ui, slot, "Gate", "mod-flanger-gate", t, on, a);
+            ui.end_row();
+        });
+    mod_caption(
+        ui,
+        "Jet-like sweep. Resonance feeds back (negative = reversed phase); Gate chops the output.",
+    );
+}
+
+fn mod_phaser(ui: &mut egui::Ui, slot: u16, t: &TypedPatch, on: bool, a: &mut Vec<Action>) {
+    egui::Grid::new("mod-phaser")
+        .num_columns(4)
+        .spacing([12.0, 6.0])
+        .show(ui, |ui| {
+            grid_combo(ui, slot, "Stage", "mod-phaser-stage", t, on, a);
+            grid_drag(ui, slot, "Rate", "mod-rate", t, on, a);
+            ui.end_row();
+            grid_drag(ui, slot, "Depth", "mod-depth", t, on, a);
+            grid_drag(ui, slot, "Manual", "mod-manual", t, on, a);
+            ui.end_row();
+            grid_drag(ui, slot, "Resonance", "mod-resonance", t, on, a);
+            grid_drag(ui, slot, "Step", "mod-phaser-step-rate", t, on, a);
+            ui.end_row();
+        });
+    mod_caption(
+        ui,
+        "Swirling phase effect. Stage = number of phase stages; Step makes the sweep stepped.",
+    );
+}
+
+fn mod_vibrato(ui: &mut egui::Ui, slot: u16, t: &TypedPatch, on: bool, a: &mut Vec<Action>) {
+    egui::Grid::new("mod-vibrato")
+        .num_columns(4)
+        .spacing([12.0, 6.0])
+        .show(ui, |ui| {
+            grid_combo(ui, slot, "Trigger", "mod-vibrato-trigger", t, on, a);
+            grid_drag(ui, slot, "Rise time", "mod-vibrato-rise-time", t, on, a);
+            ui.end_row();
+            grid_drag(ui, slot, "Rate", "mod-rate", t, on, a);
+            grid_drag(ui, slot, "Depth", "mod-depth", t, on, a);
+            ui.end_row();
+        });
+    mod_caption(
+        ui,
+        "Pitch vibrato. Trigger: On follows a footswitch, Auto applies on each pick.",
+    );
+}
+
+fn mod_ring(ui: &mut egui::Ui, slot: u16, t: &TypedPatch, on: bool, a: &mut Vec<Action>) {
+    egui::Grid::new("mod-ring")
+        .num_columns(4)
+        .spacing([12.0, 6.0])
+        .show(ui, |ui| {
+            grid_drag(ui, slot, "Frequency", "mod-ring-frequency", t, on, a);
+            grid_drag(ui, slot, "Effect level", "mod-ring-effect-level", t, on, a);
+            ui.end_row();
+            grid_drag(ui, slot, "Direct level", "mod-ring-direct-level", t, on, a);
+            ui.end_row();
+        });
+    mod_caption(
+        ui,
+        "Bell-like, unpitched. Frequency 'INT' (0) tracks your playing's pitch.",
+    );
+}
+
+fn mod_humanizer(ui: &mut egui::Ui, slot: u16, t: &TypedPatch, on: bool, a: &mut Vec<Action>) {
+    let pedal = matches!(t.get("mod-humanizer-type"), Some(Value::Enum(1)));
+    egui::Grid::new("mod-humanizer")
+        .num_columns(4)
+        .spacing([12.0, 6.0])
+        .show(ui, |ui| {
+            grid_combo(ui, slot, "Type", "mod-humanizer-type", t, on, a);
+            ui.end_row();
+            grid_combo(ui, slot, "Vowel 1", "mod-humanizer-vowel1", t, on, a);
+            grid_combo(ui, slot, "Vowel 2", "mod-humanizer-vowel2", t, on, a);
+            ui.end_row();
+            if pedal {
+                grid_drag(
+                    ui,
+                    slot,
+                    "Pedal source",
+                    "mod-humanizer-pedal-source",
+                    t,
+                    on,
+                    a,
+                );
+            } else {
+                grid_drag(ui, slot, "Rate", "mod-rate", t, on, a);
+                grid_drag(ui, slot, "Depth", "mod-depth", t, on, a);
+                ui.end_row();
+                grid_combo(ui, slot, "Trigger", "mod-humanizer-trigger", t, on, a);
+            }
+            ui.end_row();
+        });
+    mod_caption(
+        ui,
+        "Talk/vowel effect between two vowels. Auto sweeps; Pedal switches them by pedal.",
+    );
+}
+
+fn mod_pitch_shifter(ui: &mut egui::Ui, slot: u16, t: &TypedPatch, on: bool, a: &mut Vec<Action>) {
+    ui.horizontal(|ui| {
+        ui.label("Type");
+        param_combo(ui, slot, "mod-ps-type", t, on, a);
+    });
+    ui.add_space(4.0);
+    egui::Grid::new("mod-ps-voices")
+        .num_columns(5)
+        .spacing([10.0, 6.0])
+        .show(ui, |ui| {
+            ui.label("");
+            ui.strong("Pitch");
+            ui.strong("Fine");
+            ui.strong("Pan");
+            ui.strong("Level");
+            ui.end_row();
+            let voices = [
+                (
+                    "mod-ps-pitch1",
+                    "mod-ps-fine1",
+                    "mod-pshr-pan1",
+                    "mod-pshr-level1",
+                ),
+                (
+                    "mod-ps-pitch2",
+                    "mod-ps-fine2",
+                    "mod-pshr-pan2",
+                    "mod-pshr-level2",
+                ),
+                (
+                    "mod-ps-pitch3",
+                    "mod-ps-fine3",
+                    "mod-pshr-pan3",
+                    "mod-pshr-level3",
+                ),
+            ];
+            for (n, (pitch, fine, pan, level)) in voices.into_iter().enumerate() {
+                ui.label(format!("Voice {}", n + 1));
+                param_drag(ui, slot, pitch, t, on, a);
+                param_drag(ui, slot, fine, t, on, a);
+                param_drag(ui, slot, pan, t, on, a);
+                param_drag(ui, slot, level, t, on, a);
+                ui.end_row();
+            }
+        });
+    ui.add_space(4.0);
+    egui::Grid::new("mod-ps-mix")
+        .num_columns(4)
+        .spacing([12.0, 6.0])
+        .show(ui, |ui| {
+            grid_drag(ui, slot, "Balance", "mod-pshr-balance", t, on, a);
+            grid_drag(ui, slot, "Total level", "mod-pshr-total-level", t, on, a);
+            ui.end_row();
+        });
+    mod_caption(
+        ui,
+        "Up to 3 pitched voices (±2 oct). Fine: ±50 = one semitone.",
+    );
+}
+
+fn mod_harmonist(ui: &mut egui::Ui, slot: u16, t: &TypedPatch, on: bool, a: &mut Vec<Action>) {
+    ui.horizontal(|ui| {
+        ui.label("Key")
+            .on_hover_text("Song key, so the harmony fits the scale (0–24).");
+        param_drag(ui, slot, "mod-harmonist-key", t, on, a);
+    });
+    ui.add_space(4.0);
+    egui::Grid::new("mod-hr-voices")
+        .num_columns(4)
+        .spacing([10.0, 6.0])
+        .show(ui, |ui| {
+            ui.label("");
+            ui.strong("Interval");
+            ui.strong("Pan");
+            ui.strong("Level");
+            ui.end_row();
+            let voices = [
+                (
+                    "mod-harmonist-interval1",
+                    "mod-pshr-pan1",
+                    "mod-pshr-level1",
+                ),
+                (
+                    "mod-harmonist-interval2",
+                    "mod-pshr-pan2",
+                    "mod-pshr-level2",
+                ),
+                (
+                    "mod-harmonist-interval3",
+                    "mod-pshr-pan3",
+                    "mod-pshr-level3",
+                ),
+            ];
+            for (n, (interval, pan, level)) in voices.into_iter().enumerate() {
+                ui.label(format!("Voice {}", n + 1));
+                param_drag(ui, slot, interval, t, on, a);
+                param_drag(ui, slot, pan, t, on, a);
+                param_drag(ui, slot, level, t, on, a);
+                ui.end_row();
+            }
+        });
+    ui.add_space(4.0);
+    egui::Grid::new("mod-hr-mix")
+        .num_columns(4)
+        .spacing([12.0, 6.0])
+        .show(ui, |ui| {
+            grid_drag(ui, slot, "Balance", "mod-pshr-balance", t, on, a);
+            grid_drag(ui, slot, "Total level", "mod-pshr-total-level", t, on, a);
+            ui.end_row();
+        });
+    mod_caption(
+        ui,
+        "Scale-aware harmony — play single notes. (The user scale isn't editable here.)",
+    );
+}
+
 /// One EQ band row in the Gain/Freq/Q grid. Shelves pass `None` for freq/q and
 /// get an em dash in those cells; the mid band passes its enum keys.
 #[allow(clippy::too_many_arguments)]
@@ -1732,6 +1994,10 @@ impl App {
                 self.show_trem_editor(ui, slot, &typed, actions);
                 return;
             }
+            if block == Block::Modulation {
+                self.show_mod_editor(ui, slot, &typed, actions);
+                return;
+            }
             for &p in param::ALL {
                 if p.block() != block {
                     continue;
@@ -2220,6 +2486,44 @@ impl App {
     /// The Speaker Sim's custom UI: enable + cabinet model and mic setting, a
     /// generic cabinet response curve (the mic setting tilts the top end), then the
     /// mic (wet) / direct (dry) level mix.
+    /// The Modulation's custom UI: enable + Type, then only the selected type's
+    /// controls (Flanger / Phaser / Pitch Shifter / Harmonist / Vibrato / Ring
+    /// Modulator / Humanizer), grouped per the manual.
+    fn show_mod_editor(
+        &self,
+        ui: &mut egui::Ui,
+        slot: u16,
+        typed: &TypedPatch,
+        actions: &mut Vec<Action>,
+    ) {
+        let connected = self.editable();
+        let enabled = block_enabled(typed, Block::Modulation);
+        ui.add_enabled_ui(connected, |ui| {
+            let mut on = enabled;
+            if ui.checkbox(&mut on, "Modulation enabled").changed() {
+                actions.push(Action::SetParam(slot, "mod-enable", Value::Bool(on)));
+            }
+            ui.horizontal(|ui| {
+                ui.label("Type").on_hover_text(
+                    "The modulation effect — only this type's settings are shown below.",
+                );
+                param_combo(ui, slot, "mod-type", typed, connected, actions);
+            });
+        });
+        ui.separator();
+        // mod-type: 0 Flanger, 1 Phaser, 2 Pitch Shifter, 3 Harmonist, 4 Vibrato,
+        // 5 Ring Modulator, 6 Humanizer.
+        match typed.get("mod-type") {
+            Some(Value::Enum(1)) => mod_phaser(ui, slot, typed, connected, actions),
+            Some(Value::Enum(2)) => mod_pitch_shifter(ui, slot, typed, connected, actions),
+            Some(Value::Enum(3)) => mod_harmonist(ui, slot, typed, connected, actions),
+            Some(Value::Enum(4)) => mod_vibrato(ui, slot, typed, connected, actions),
+            Some(Value::Enum(5)) => mod_ring(ui, slot, typed, connected, actions),
+            Some(Value::Enum(6)) => mod_humanizer(ui, slot, typed, connected, actions),
+            _ => mod_flanger(ui, slot, typed, connected, actions),
+        }
+    }
+
     /// The Tremolo/Pan's custom UI: enable + mode, an LFO-waveform view (volume for
     /// Tremolo, anti-phase L/R for Pan; triangle or square), then Rate / Depth /
     /// Balance.

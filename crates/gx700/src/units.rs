@@ -65,6 +65,16 @@ fn format_int(key: &str, raw: i32) -> String {
         "chorus-pre-delay" => format!("{}.{} ms", raw / 2, (raw % 2) * 5),
         // Chorus LFO wave: raw 0..10 is a triangle↔sine blend (0 = all triangle).
         "chorus-mod-wave" => format!("Tri{}:Sin{}", 10 - raw, raw),
+        // Flanger/Phaser resonance and flanger separation: raw 0..200 = -100..+100.
+        "mod-resonance" | "mod-flanger-separation" => signed(raw - 100),
+        // Ring-modulator frequency: 0 = INTELLIGENT (tracks the input pitch).
+        "mod-ring-frequency" => {
+            if raw == 0 {
+                "INT".to_owned()
+            } else {
+                raw.to_string()
+            }
+        }
         // Pitch-shifter & harmonist direct/effect balance (raw 0 = all direct).
         "mod-pshr-balance" => format!("D{}:E{}", 100 - raw, raw),
         _ => raw.to_string(),
@@ -117,6 +127,9 @@ mod tests {
         assert_eq!(fmt("chorus-pre-delay", 3), "1.5 ms");
         assert_eq!(fmt("chorus-mod-wave", 0), "Tri10:Sin0");
         assert_eq!(fmt("chorus-mod-wave", 10), "Tri0:Sin10");
+        assert_eq!(fmt("mod-resonance", 100), "0");
+        assert_eq!(fmt("mod-flanger-separation", 200), "+100");
+        assert_eq!(fmt("mod-ring-frequency", 0), "INT");
         assert_eq!(fmt("mod-harmonist-interval1", 24), "0");
         assert_eq!(fmt("mod-hr-scale-c1", 36), "+12");
         assert_eq!(fmt("mod-hr-scale-b3", 12), "-12");
