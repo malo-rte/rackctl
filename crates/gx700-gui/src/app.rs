@@ -2279,16 +2279,20 @@ impl App {
                         };
                         ui.label(name);
                         ui.label(format!("{}%", row.stored_level));
-                        ui.add_enabled_ui(self.editable(), |ui| {
-                            if action_button(ui, "Copy", ActionKind::Read)
-                                .on_hover_text(
-                                    "copy this preset to the clipboard, then Paste it onto a \
-                                     user slot on the Patches tab",
-                                )
-                                .clicked()
-                            {
-                                actions.push(Action::CopyRow(row.slot));
-                            }
+                        ui.horizontal(|ui| {
+                            ui.add_enabled_ui(self.editable(), |ui| {
+                                if action_button(ui, "Copy", ActionKind::Read)
+                                    .on_hover_text(
+                                        "copy this preset to the clipboard, then Paste it onto a \
+                                         user slot on the Patches tab",
+                                    )
+                                    .clicked()
+                                {
+                                    actions.push(Action::CopyRow(row.slot));
+                                }
+                            });
+                            // Keep the button clear of the vertical scrollbar.
+                            ui.add_space(18.0);
                         });
                         ui.end_row();
                     }
