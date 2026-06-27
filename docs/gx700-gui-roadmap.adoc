@@ -11,8 +11,11 @@ Roadmap for the *graphical patch editor* for the BOSS GX-700 (Rackctl Stage 4),
 audition, an *editable patch name*, and inline output-level balancing. Each row has
 *Save* (store just that patch -- name and level) and *Revert* (drop the edits back to
 the on-unit values), plus a batch "Write changes to unit" that stores every pending
-change; all guide the user into BULK LOAD mode. The rest of this document records the
-remaining ideas and how they map onto the existing building blocks.
+change; all guide the user into BULK LOAD mode. Rows can also be *dragged to re-order the
+bank* -- the move shifts the slots in between and stages each affected slot's new content
+(like Paste), so the whole reorder is reviewable and written in one BULK LOAD batch. The
+rest of this document records the remaining ideas and how they map onto the existing
+building blocks.
 
 NOTE: BOSS and Roland are trademarks of Roland Corporation. This is an independent,
 unofficial project, not affiliated with Roland.
@@ -104,9 +107,9 @@ reach into `preamp-master` / `preamp-volume`, which belongs in the *effect edito
    Release for Limiter, plus Tone/Level) -- US-16x08 style (`rackctl-ui::comp`). Reading current values goes through
   the typed model (`typed::Patch::get`) and edits stage through it (`set` →
   `to_raw`), applied live via `Gx700::set` and saved/reverted with the rest of the
-  row's pending changes. Still to do here: drag-to-reorder the chain (the library
-  has `RawPatch::chain` / `set_chain` and the CLI `chain` command), and a per-block
-  enable toggle in the list.
+  row's pending changes. The block list also carries a *per-block enable checkbox*
+  and supports *drag-to-reorder the chain* (drop one block onto another →
+  `RawPatch::set_chain`, staged into the row's pending patch and re-auditioned live).
 * *Patch librarian* -- save / load / `backup` / `scene` from the GUI, reusing the
   US-16x08 GUI's preset-tab patterns.
 * *Per-block response curves* -- reuse the US-16x08 GUI's `curves.rs` (EQ, etc.).

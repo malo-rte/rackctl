@@ -65,6 +65,7 @@ enum Action {
     SelectTab(Tab),
     SelectBlock(Block),
     ReorderChain(u16, usize, usize),
+    ReorderPatch(u16, u16),
     SetName(u16, String),
     SaveRow(u16),
     RevertRow(u16),
@@ -774,6 +775,60 @@ impl App {
         self.status = format!("cleared U{slot:03} to Empty — Save to store");
     }
 
+    /// Move the patch at `from_slot` to `to_slot`, shifting the slots in between by
+    /// one to fill the gap. The new contents are *staged* per slot (exactly like
+    /// Paste) so nothing is written until the user runs "Write changes" in BULK LOAD
+    /// mode, and each affected row's Revert still restores its original patch.
+    fn reorder_patches(&mut self, from_slot: u16, to_slot: u16) {
+        if from_slot == to_slot {
+            return;
+        }
+        let from = usize::from(from_slot.saturating_sub(1));
+        let to = usize::from(to_slot.saturating_sub(1));
+        if from >= self.rows.len() || to >= self.rows.len() {
+            return;
+        }
+        let (lo, hi) = (from.min(to), from.max(to));
+        // Snapshot every affected slot's current content (loading on demand). Bail
+        // as a whole if any can't be read, so we never stage a partial reorder.
+        let mut contents = Vec::with_capacity(hi - lo + 1);
+        for idx in lo..=hi {
+            let slot = u16::try_from(idx + 1).unwrap_or(0);
+            self.ensure_loaded(slot);
+            let Some(patch) = self.effective_patch(slot) else {
+                self.status =
+                    format!("U{slot:03}: read the bank first — reorder needs every patch loaded");
+                return;
+            };
+            contents.push(patch);
+        }
+        // Rotate the window: the dragged patch lands at `to`, the rest shift by one.
+        let moved = contents.remove(from - lo);
+        contents.insert(to - lo, moved);
+        // Stage each affected slot with its new content (name + level + patch).
+        for (patch, idx) in contents.into_iter().zip(lo..=hi) {
+            let slot = u16::try_from(idx + 1).unwrap_or(0);
+            let name = patch.name.clone();
+            let level = patch.output_level();
+            if let Some(row) = self.row_mut(slot) {
+                row.name_edit = name;
+                row.pending_level = Some(level);
+                row.pending_patch = Some(patch);
+            }
+        }
+        // Re-audition the now-playing slot if it sits inside the moved window.
+        if let Some(playing) = self.now_playing {
+            let pi = usize::from(playing.saturating_sub(1));
+            if (lo..=hi).contains(&pi) {
+                self.audition(playing);
+            }
+        }
+        self.status = format!(
+            "moved U{from_slot:03} → U{to_slot:03}; {} patches staged — Write changes in BULK LOAD",
+            hi - lo + 1
+        );
+    }
+
     /// Store every pending change (name + level) to memory in one batch (the
     /// "Write changes to unit" button). Attempts every dirty row even if some fail,
     /// committing each success so its row clears, and reports any failures.
@@ -1055,6 +1110,12 @@ impl App {
     }
 
     fn show_patch_list(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        ui.label(
+            egui::RichText::new(
+                "Click a slot to audition · drag a slot onto another to re-order the bank.",
+            )
+            .weak(),
+        );
         egui::ScrollArea::vertical().show(ui, |ui| {
             egui::Grid::new("patches")
                 .striped(true)
@@ -1070,15 +1131,27 @@ impl App {
                         } else {
                             egui::RichText::new(format!("U{:03}", row.slot))
                         };
+                        // The slot id is the audition click target *and* the
+                        // drag handle: drag one row onto another to re-order the
+                        // bank (the move is staged, written via "Write changes").
                         let id = egui::SelectableLabel::new(playing, label);
-                        let resp = ui.add_enabled(self.editable(), id);
+                        let drag_id = egui::Id::new(("patch-slot", row.slot));
+                        let isr = ui.dnd_drag_source(drag_id, row.slot, |ui| {
+                            ui.add_enabled(self.editable(), id)
+                        });
                         let resp = if row.failed {
-                            resp.on_hover_text("read failed — value may be stale; Refresh to retry")
+                            isr.inner
+                                .on_hover_text("read failed — value may be stale; Refresh to retry")
                         } else {
-                            resp
+                            isr.inner
                         };
                         if resp.clicked() {
                             actions.push(Action::Audition(row.slot));
+                        }
+                        if self.editable()
+                            && let Some(from) = isr.response.dnd_release_payload::<u16>()
+                        {
+                            actions.push(Action::ReorderPatch(*from, row.slot));
                         }
 
                         // Column 2: editable patch name (egui keeps the cursor by
@@ -1183,6 +1256,7 @@ impl App {
             Action::SelectTab(tab) => self.tab = tab,
             Action::SelectBlock(block) => self.selected_block = block,
             Action::ReorderChain(slot, from, to) => self.reorder_chain(slot, from, to),
+            Action::ReorderPatch(from, to) => self.reorder_patches(from, to),
             Action::SetName(slot, name) => self.set_name_edit(slot, name),
             Action::SaveRow(slot) => self.save_row(slot),
             Action::RevertRow(slot) => self.revert_row(slot),
