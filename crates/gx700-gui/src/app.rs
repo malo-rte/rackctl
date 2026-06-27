@@ -586,6 +586,61 @@ fn show_delay_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
         });
 }
 
+/// Draw a *generic* speaker-cabinet response: a guitar cab is essentially a
+/// band-pass (lows roll off, a presence bump, then the highs roll off), and the
+/// Mic setting tilts the top end (lower ≈ brighter, higher ≈ darker). The actual
+/// 12 cabinet models differ — this conveys the band-limiting, not their voicings.
+fn show_speaker_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
+    let raw = |k: &str| match typed.get(k) {
+        Some(Value::Int(v) | Value::Enum(v)) => v,
+        _ => 0,
+    };
+    let active = matches!(typed.get("speaker-enable"), Some(Value::Bool(true)));
+    // Mic 1..10 -> a few dB of high-shelf tilt, centred near 5.
+    let tilt = (5.5 - f64::from(raw("speaker-mic-setting").clamp(1, 10))) * 1.5;
+    let bands = [
+        EqBand {
+            kind: BandType::LowShelf,
+            f0: 90.0,
+            q: 0.7,
+            gain_db: -12.0,
+        },
+        EqBand {
+            kind: BandType::Peaking,
+            f0: 2600.0,
+            q: 1.0,
+            gain_db: 5.0,
+        },
+        EqBand {
+            kind: BandType::HighShelf,
+            f0: 4500.0,
+            q: 0.7,
+            gain_db: -16.0 + tilt,
+        },
+    ];
+    let points: Vec<[f64; 2]> = (0..=200)
+        .map(|i| {
+            let lf = 1.3 + (4.3 - 1.3) * (f64::from(i) / 200.0);
+            let db = if active {
+                eq_response_db(&bands, 10f64.powf(lf))
+            } else {
+                0.0
+            };
+            [lf, db]
+        })
+        .collect();
+    Plot::new("gx700-speaker")
+        .height(150.0)
+        .allow_drag(false)
+        .allow_zoom(false)
+        .allow_scroll(false)
+        .include_y(-30.0)
+        .include_y(12.0)
+        .x_axis_formatter(|mark, _| hz_label(mark.value))
+        .y_axis_formatter(|mark, _| format!("{:.0} dB", mark.value))
+        .show(ui, |plot| plot.line(Line::new(PlotPoints::from(points))));
+}
+
 /// One EQ band row in the Gain/Freq/Q grid. Shelves pass `None` for freq/q and
 /// get an em dash in those cells; the mid band passes its enum keys.
 #[allow(clippy::too_many_arguments)]
@@ -1444,6 +1499,10 @@ impl App {
                 self.show_delay_editor(ui, slot, &typed, actions);
                 return;
             }
+            if block == Block::SpeakerSim {
+                self.show_speaker_editor(ui, slot, &typed, actions);
+                return;
+            }
             for &p in param::ALL {
                 if p.block() != block {
                     continue;
@@ -1925,6 +1984,61 @@ impl App {
                 ui.label("Direct (dry)")
                     .on_hover_text("Level of the un-delayed signal in the mix.");
                 param_drag(ui, slot, "delay-direct-level", typed, connected, actions);
+                ui.end_row();
+            });
+    }
+
+    /// The Speaker Sim's custom UI: enable + cabinet model and mic setting, a
+    /// generic cabinet response curve (the mic setting tilts the top end), then the
+    /// mic (wet) / direct (dry) level mix.
+    fn show_speaker_editor(
+        &self,
+        ui: &mut egui::Ui,
+        slot: u16,
+        typed: &TypedPatch,
+        actions: &mut Vec<Action>,
+    ) {
+        let connected = self.editable();
+        let enabled = block_enabled(typed, Block::SpeakerSim);
+        ui.add_enabled_ui(connected, |ui| {
+            let mut on = enabled;
+            if ui.checkbox(&mut on, "Speaker Sim enabled").changed() {
+                actions.push(Action::SetParam(slot, "speaker-enable", Value::Bool(on)));
+            }
+            egui::Grid::new("gx700-speaker-head")
+                .num_columns(2)
+                .spacing([12.0, 6.0])
+                .show(ui, |ui| {
+                    ui.label("Cabinet")
+                        .on_hover_text("Speaker / cabinet model.");
+                    param_combo(ui, slot, "speaker-type", typed, connected, actions);
+                    ui.end_row();
+                    ui.label("Mic setting").on_hover_text(
+                        "Mic position, 1–10 (lower ≈ brighter/closer, higher ≈ darker/edge — indicative).",
+                    );
+                    param_drag(ui, slot, "speaker-mic-setting", typed, connected, actions);
+                    ui.end_row();
+                });
+        });
+        show_speaker_curve(ui, typed);
+        ui.add_space(2.0);
+        ui.label(
+            egui::RichText::new(
+                "Generic cab response — the 12 models differ; Mic setting tilts the top.",
+            )
+            .weak(),
+        );
+        ui.add_space(4.0);
+        egui::Grid::new("gx700-speaker-grid")
+            .num_columns(4)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Mic (wet)")
+                    .on_hover_text("Level of the mic'd, cabinet-simulated signal.");
+                param_drag(ui, slot, "speaker-mic-level", typed, connected, actions);
+                ui.label("Direct (dry)")
+                    .on_hover_text("Level of the direct, un-simulated signal.");
+                param_drag(ui, slot, "speaker-direct-level", typed, connected, actions);
                 ui.end_row();
             });
     }
