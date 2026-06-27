@@ -86,11 +86,17 @@ enum Tab {
     Edit,
 }
 
-/// Whether `block`'s enable byte (its offset-0 bool) is on in `typed`.
-fn block_enabled(typed: &TypedPatch, block: Block) -> bool {
+/// A block's enable parameter (its offset-0 bool), if any.
+fn block_enable_param(block: Block) -> Option<Param> {
     param::ALL
         .iter()
+        .copied()
         .find(|p| p.block() == block && p.offset() == 0 && matches!(p.kind(), Kind::Bool))
+}
+
+/// Whether `block`'s enable byte (its offset-0 bool) is on in `typed`.
+fn block_enabled(typed: &TypedPatch, block: Block) -> bool {
+    block_enable_param(block)
         .and_then(|p| typed.get(p.key()))
         .is_some_and(|v| matches!(v, Value::Bool(true)))
 }
@@ -816,18 +822,28 @@ impl App {
             let Some(block) = Block::from_base(id) else {
                 continue;
             };
-            let mark = if block_enabled(&typed, block) {
-                "●"
-            } else {
-                "○"
-            };
+            let enabled = block_enabled(&typed, block);
             let selected = self.selected_block == block;
-            if ui
-                .selectable_label(selected, format!("{mark}  {}", block.label()))
-                .clicked()
-            {
-                actions.push(Action::SelectBlock(block));
-            }
+            ui.horizontal(|ui| {
+                // A checkbox toggles the block's bypass directly; the name selects
+                // it for editing on the right.
+                if let Some(p) = block_enable_param(block) {
+                    ui.add_enabled_ui(self.editable(), |ui| {
+                        let mut on = enabled;
+                        if ui.checkbox(&mut on, "").changed() {
+                            actions.push(Action::SetParam(slot, p.key(), Value::Bool(on)));
+                        }
+                    });
+                }
+                let label = if enabled {
+                    egui::RichText::new(block.label())
+                } else {
+                    egui::RichText::new(block.label()).weak()
+                };
+                if ui.selectable_label(selected, label).clicked() {
+                    actions.push(Action::SelectBlock(block));
+                }
+            });
         }
     }
 
