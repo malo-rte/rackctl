@@ -586,6 +586,27 @@ fn show_delay_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
         });
 }
 
+/// A one-line description of each `speaker-type` cabinet (from the GX-700 manual):
+/// enclosure + speaker count, the simulated mic ("On Mic" = dynamic, "Off Mic" =
+/// condenser), and the preamp model it's voiced to pair with.
+fn speaker_cab_desc(index: i32) -> &'static str {
+    match index {
+        0 => "Small open-back 1×10, dynamic mic",
+        1 => "Open-back 1×12, dynamic mic",
+        2 => "Open-back 2×12, dynamic mic — Roland JC-120",
+        3 => "Open-back 2×12, dynamic mic — pairs with Clean Twin",
+        4 => "Open-back 2×12, condenser mic — pairs with Clean Twin",
+        5 => "Open-back 2×12, dynamic mic — pairs with Match Drive",
+        6 => "Open-back 2×12, condenser mic — pairs with Match Drive",
+        7 => "Sealed 2×12 stack, dynamic mic — pairs with BG Lead",
+        8 => "Sealed 2×12 stack, condenser mic — pairs with BG Lead",
+        9 => "Sealed 4×12 stack, dynamic mic — pairs with MS1959",
+        10 => "Sealed 4×12 stack, condenser mic — pairs with MS1959",
+        11 => "Large dual 4×12 stack, condenser mic",
+        _ => "",
+    }
+}
+
 /// Draw a *generic* speaker-cabinet response: a guitar cab is essentially a
 /// band-pass (lows roll off, a presence bump, then the highs roll off), and the
 /// Mic setting tilts the top end (lower ≈ brighter, higher ≈ darker). The actual
@@ -2014,11 +2035,18 @@ impl App {
                     param_combo(ui, slot, "speaker-type", typed, connected, actions);
                     ui.end_row();
                     ui.label("Mic setting").on_hover_text(
-                        "Mic position, 1–10 (lower ≈ brighter/closer, higher ≈ darker/edge — indicative).",
+                        "Mic placement: 1 = centre of the speaker cone (brightest); \
+                         higher moves the mic progressively further away (mellower).",
                     );
                     param_drag(ui, slot, "speaker-mic-setting", typed, connected, actions);
                     ui.end_row();
                 });
+            // Describe the selected cabinet (enclosure, speakers, mic, best pairing).
+            let cab = match typed.get("speaker-type") {
+                Some(Value::Enum(v)) => v,
+                _ => 0,
+            };
+            ui.label(egui::RichText::new(speaker_cab_desc(cab)).weak());
         });
         show_speaker_curve(ui, typed);
         ui.add_space(2.0);

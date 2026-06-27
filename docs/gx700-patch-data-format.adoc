@@ -207,6 +207,27 @@ dB plot.
 | `04` | Direct level | `0vvv vvvv` | `00H-64H` (0-100)
 |===
 
+The speaker types (OM p.38) are real cabinets with a simulated mic; "On Mic" =
+dynamic-mic voicing, "Off Mic" = condenser. Mic Setting `1` = mic at the centre of
+the cone, higher = progressively further away.
+
+[cols="1,3,2",options="header"]
+|===
+| Type | Cabinet (enclosure / speakers / mic) | Best-match preamp
+| `0` Small       | Small open-back 1x10, dynamic | --
+| `1` Middle      | Open-back 1x12, dynamic | --
+| `2` JC-120      | Open-back 2x12, dynamic | JC-120
+| `3` Built-In 1  | Open-back 2x12, dynamic | Clean Twin
+| `4` Built-In 2  | Open-back 2x12, condenser | Clean Twin
+| `5` Built-In 3  | Open-back 2x12, dynamic | Match Drive
+| `6` Built-In 4  | Open-back 2x12, condenser | Match Drive
+| `7` BG Stack 1  | Sealed 2x12 stack, dynamic | BG Lead
+| `8` BG Stack 2  | Sealed 2x12 stack, condenser | BG Lead
+| `9` MS Stack 1  | Sealed 4x12 stack, dynamic | MS1959 / SLDN Lead / Metal 5150
+| `10` MS Stack 2 | Sealed 4x12 stack, condenser | MS1959 / SLDN Lead / Metal 5150
+| `11` Metal Stack| Large dual 4x12 stack, condenser | MS1959 / SLDN Lead / Metal 5150
+|===
+
 == `08` — Noise Suppressor (5 bytes)
 
 [cols="1,3,2,3",options="header"]
