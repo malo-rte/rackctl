@@ -505,6 +505,81 @@ fn show_preamp_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
         .show(ui, |plot| plot.line(Line::new(PlotPoints::from(points))));
 }
 
+/// Center-tap delay time in milliseconds: a literal time in Normal mode, or derived
+/// from the tempo (BPM) and the note interval in Tempo mode.
+fn delay_center_ms(typed: &TypedPatch) -> f64 {
+    let raw = |k: &str| match typed.get(k) {
+        Some(Value::Int(v) | Value::Enum(v)) => v,
+        _ => 0,
+    };
+    if matches!(typed.get("delay-mode"), Some(Value::Enum(1))) {
+        let bpm = f64::from(raw("delay-tempo") + 50).max(50.0); // raw 0..250 = 50..300
+        // Note-value fractions of a beat (1/4), matching DELAY_INTERVAL_VALUES.
+        let frac = [
+            0.25, 0.333_333, 0.375, 0.5, 0.666_667, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0,
+        ]
+        .get(usize::try_from(raw("delay-interval-c")).unwrap_or(0))
+        .copied()
+        .unwrap_or(1.0);
+        60_000.0 / bpm * frac
+    } else {
+        f64::from(raw("delay-time-c")) // already in ms
+    }
+}
+
+/// Draw the delay as a *tap diagram*: a dry spike at t=0, the Left/Right taps at
+/// their times (a % of the centre time) and levels, and the centre tap echoing
+/// every centre-time, decaying by the feedback. Heights are the per-tap levels.
+fn show_delay_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
+    let raw = |k: &str| match typed.get(k) {
+        Some(Value::Int(v) | Value::Enum(v)) => v,
+        _ => 0,
+    };
+    let active = matches!(typed.get("delay-enable"), Some(Value::Bool(true)));
+    let c = delay_center_ms(typed).max(1.0);
+    let lt = c * f64::from(raw("delay-time-l")) / 100.0;
+    let rt = c * f64::from(raw("delay-time-r")) / 100.0;
+    let fb = f64::from(raw("delay-feedback")) / 100.0;
+    let span = (c * 3.5).max(lt).max(rt).max(50.0);
+    let blue = egui::Color32::from_rgb(90, 170, 220);
+    let teal = egui::Color32::from_rgb(90, 200, 170);
+    let amber = egui::Color32::from_rgb(220, 170, 90);
+    // A vertical impulse line (time, height).
+    let tap = |t: f64, h: f64| PlotPoints::from(vec![[t, 0.0], [t, h]]);
+    Plot::new("gx700-delay")
+        .height(150.0)
+        .allow_drag(false)
+        .allow_zoom(false)
+        .allow_scroll(false)
+        .include_x(0.0)
+        .include_x(span)
+        .include_y(0.0)
+        .include_y(100.0)
+        .x_axis_formatter(|mark, _| format!("{:.2}s", mark.value / 1000.0))
+        .y_axis_formatter(|mark, _| format!("{:.0}", mark.value))
+        .show(ui, |plot| {
+            // Dry signal at t=0.
+            plot.line(
+                Line::new(tap(0.0, f64::from(raw("delay-direct-level"))))
+                    .color(egui::Color32::from_gray(150)),
+            );
+            if !active {
+                return;
+            }
+            // Centre tap, echoing with feedback decay.
+            let mut h = f64::from(raw("delay-level-c"));
+            let mut t = c;
+            while t <= span && h >= 1.0 {
+                plot.line(Line::new(tap(t, h)).color(blue));
+                t += c;
+                h *= fb;
+            }
+            // Left / right taps (single).
+            plot.line(Line::new(tap(lt, f64::from(raw("delay-level-l")))).color(teal));
+            plot.line(Line::new(tap(rt, f64::from(raw("delay-level-r")))).color(amber));
+        });
+}
+
 /// One EQ band row in the Gain/Freq/Q grid. Shelves pass `None` for freq/q and
 /// get an em dash in those cells; the mid band passes its enum keys.
 #[allow(clippy::too_many_arguments)]
@@ -1359,6 +1434,10 @@ impl App {
                 self.show_preamp_editor(ui, slot, &typed, actions);
                 return;
             }
+            if block == Block::Delay {
+                self.show_delay_editor(ui, slot, &typed, actions);
+                return;
+            }
             for &p in param::ALL {
                 if p.block() != block {
                     continue;
@@ -1744,6 +1823,99 @@ impl App {
                 ui.label("Master")
                     .on_hover_text("Preamp master output level (after the tone stack).");
                 param_drag(ui, slot, "preamp-master", typed, connected, actions);
+                ui.end_row();
+            });
+    }
+
+    /// The Delay's custom UI: enable + mode, a 3-tap diagram (centre echoes with
+    /// feedback, plus the L/R taps), then the timing (ms or tempo-synced), the
+    /// per-tap levels, feedback, tone (high-damp / hi-cut / smooth), and wet/dry.
+    fn show_delay_editor(
+        &self,
+        ui: &mut egui::Ui,
+        slot: u16,
+        typed: &TypedPatch,
+        actions: &mut Vec<Action>,
+    ) {
+        let connected = self.editable();
+        let enabled = block_enabled(typed, Block::Delay);
+        let tempo = matches!(typed.get("delay-mode"), Some(Value::Enum(1)));
+        ui.add_enabled_ui(connected, |ui| {
+            let mut on = enabled;
+            if ui.checkbox(&mut on, "Delay enabled").changed() {
+                actions.push(Action::SetParam(slot, "delay-enable", Value::Bool(on)));
+            }
+            ui.horizontal(|ui| {
+                ui.label("Mode").on_hover_text(
+                    "Normal = centre time set in ms; Tempo = synced to a BPM + note value.",
+                );
+                param_combo(ui, slot, "delay-mode", typed, connected, actions);
+            });
+        });
+        show_delay_curve(ui, typed);
+        ui.add_space(2.0);
+        ui.label(egui::RichText::new("Tap diagram — centre echoes (feedback), L/R taps.").weak());
+        ui.add_space(4.0);
+        egui::Grid::new("gx700-delay-grid")
+            .num_columns(4)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                if tempo {
+                    ui.label("Tempo").on_hover_text("Delay tempo, 50–300 BPM.");
+                    param_drag(ui, slot, "delay-tempo", typed, connected, actions);
+                    ui.label("Interval")
+                        .on_hover_text("Note value of the centre tap, synced to the tempo.");
+                    param_combo(ui, slot, "delay-interval-c", typed, connected, actions);
+                } else {
+                    ui.label("Time (C)")
+                        .on_hover_text("Centre delay time, in ms.");
+                    param_drag(ui, slot, "delay-time-c", typed, connected, actions);
+                    ui.label("");
+                    ui.label("");
+                }
+                ui.end_row();
+                ui.label("Time L")
+                    .on_hover_text("Left tap time, as a % of the centre time.");
+                param_drag(ui, slot, "delay-time-l", typed, connected, actions);
+                ui.label("Time R")
+                    .on_hover_text("Right tap time, as a % of the centre time.");
+                param_drag(ui, slot, "delay-time-r", typed, connected, actions);
+                ui.end_row();
+                ui.label("Level C");
+                param_drag(ui, slot, "delay-level-c", typed, connected, actions);
+                ui.label("Feedback")
+                    .on_hover_text("How much the centre tap is fed back — the number of repeats.");
+                param_drag(ui, slot, "delay-feedback", typed, connected, actions);
+                ui.end_row();
+                ui.label("Level L");
+                param_drag(ui, slot, "delay-level-l", typed, connected, actions);
+                ui.label("Level R");
+                param_drag(ui, slot, "delay-level-r", typed, connected, actions);
+                ui.end_row();
+                ui.label("High damp")
+                    .on_hover_text("Rolls off the highs as the repeats decay (−50…0 dB).");
+                param_drag(ui, slot, "delay-high-damp", typed, connected, actions);
+                ui.label("Hi cut")
+                    .on_hover_text("Low-pass on the delayed signal.");
+                param_combo(ui, slot, "delay-hi-cut", typed, connected, actions);
+                ui.end_row();
+                ui.label("Smooth")
+                    .on_hover_text("Smooths pitch glitches when the delay time is changed.");
+                let mut smooth = matches!(typed.get("delay-smooth"), Some(Value::Bool(true)));
+                ui.add_enabled_ui(connected, |ui| {
+                    if ui.checkbox(&mut smooth, "").changed() {
+                        actions.push(Action::SetParam(slot, "delay-smooth", Value::Bool(smooth)));
+                    }
+                });
+                ui.label("");
+                ui.label("");
+                ui.end_row();
+                ui.label("Effect (wet)")
+                    .on_hover_text("Level of the delayed signal in the mix.");
+                param_drag(ui, slot, "delay-effect-level", typed, connected, actions);
+                ui.label("Direct (dry)")
+                    .on_hover_text("Level of the un-delayed signal in the mix.");
+                param_drag(ui, slot, "delay-direct-level", typed, connected, actions);
                 ui.end_row();
             });
     }
