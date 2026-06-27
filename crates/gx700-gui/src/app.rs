@@ -735,6 +735,57 @@ fn show_wah_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
         });
 }
 
+/// Draw the chorus LFO: the modulation waveform over time, blending triangle→sine
+/// per Mod wave, with Rate as the cycle density and Depth as the amplitude. In
+/// Stereo mode a second (anti-phase) trace shows the L/R offset. Depth 0 is flat
+/// (doubling). It illustrates the movement, not absolute pitch/time.
+fn show_chorus_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
+    let raw = |k: &str| match typed.get(k) {
+        Some(Value::Int(v) | Value::Enum(v)) => v,
+        _ => 0,
+    };
+    let active = matches!(typed.get("chorus-enable"), Some(Value::Bool(true)));
+    let stereo = matches!(typed.get("chorus-mode"), Some(Value::Enum(1)));
+    let depth = f64::from(raw("chorus-depth")) / 100.0;
+    let blend = f64::from(raw("chorus-mod-wave").clamp(0, 10)) / 10.0; // 0=triangle 1=sine
+    let freq = 0.3 + f64::from(raw("chorus-rate")) / 100.0 * 6.0; // cycles over the window
+    let window = 2.0;
+    let amp = if active { depth * 50.0 } else { 0.0 };
+    let lfo = |phase: f64| -> Vec<[f64; 2]> {
+        (0..=240)
+            .map(|i| {
+                let t = window * f64::from(i) / 240.0;
+                let ph = std::f64::consts::TAU * freq * t + phase;
+                let sine = ph.sin();
+                let tri = (2.0 / std::f64::consts::PI) * sine.asin();
+                [t, amp * ((1.0 - blend) * tri + blend * sine)]
+            })
+            .collect()
+    };
+    Plot::new("gx700-chorus")
+        .height(150.0)
+        .allow_drag(false)
+        .allow_zoom(false)
+        .allow_scroll(false)
+        .include_x(0.0)
+        .include_x(window)
+        .include_y(-55.0)
+        .include_y(55.0)
+        .x_axis_formatter(|_, _| String::new())
+        .y_axis_formatter(|_, _| String::new())
+        .show(ui, |plot| {
+            if stereo {
+                plot.line(
+                    Line::new(PlotPoints::from(lfo(std::f64::consts::PI)))
+                        .color(egui::Color32::from_rgb(80, 200, 100)),
+                );
+            }
+            plot.line(
+                Line::new(PlotPoints::from(lfo(0.0))).color(egui::Color32::from_rgb(90, 170, 220)),
+            );
+        });
+}
+
 /// One EQ band row in the Gain/Freq/Q grid. Shelves pass `None` for freq/q and
 /// get an em dash in those cells; the mid band passes its enum keys.
 #[allow(clippy::too_many_arguments)]
@@ -1607,6 +1658,10 @@ impl App {
                 self.show_loop_editor(ui, slot, &typed, actions);
                 return;
             }
+            if block == Block::Chorus {
+                self.show_chorus_editor(ui, slot, &typed, actions);
+                return;
+            }
             for &p in param::ALL {
                 if p.block() != block {
                     continue;
@@ -2095,6 +2150,68 @@ impl App {
     /// The Speaker Sim's custom UI: enable + cabinet model and mic setting, a
     /// generic cabinet response curve (the mic setting tilts the top end), then the
     /// mic (wet) / direct (dry) level mix.
+    /// The Chorus's custom UI: enable + mode, an LFO-waveform view (Rate / Depth /
+    /// Mod-wave shape, with an anti-phase trace in Stereo), then the rate/depth,
+    /// pre-delay, tone cuts, mod-wave and effect level controls.
+    fn show_chorus_editor(
+        &self,
+        ui: &mut egui::Ui,
+        slot: u16,
+        typed: &TypedPatch,
+        actions: &mut Vec<Action>,
+    ) {
+        let connected = self.editable();
+        let enabled = block_enabled(typed, Block::Chorus);
+        ui.add_enabled_ui(connected, |ui| {
+            let mut on = enabled;
+            if ui.checkbox(&mut on, "Chorus enabled").changed() {
+                actions.push(Action::SetParam(slot, "chorus-enable", Value::Bool(on)));
+            }
+            ui.horizontal(|ui| {
+                ui.label("Mode").on_hover_text(
+                    "Mono = same chorus to L+R; Stereo = different chorus on L and R.",
+                );
+                param_combo(ui, slot, "chorus-mode", typed, connected, actions);
+            });
+        });
+        show_chorus_curve(ui, typed);
+        ui.add_space(2.0);
+        ui.label(
+            egui::RichText::new("LFO — Rate is the speed, Depth the amount (0 = doubling).").weak(),
+        );
+        ui.add_space(4.0);
+        egui::Grid::new("gx700-chorus-grid")
+            .num_columns(4)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Rate").on_hover_text("LFO speed of the chorus.");
+                param_drag(ui, slot, "chorus-rate", typed, connected, actions);
+                ui.label("Depth")
+                    .on_hover_text("Modulation depth — set to 0 for a doubling effect.");
+                param_drag(ui, slot, "chorus-depth", typed, connected, actions);
+                ui.end_row();
+                ui.label("Pre-delay").on_hover_text(
+                    "Delay before the chorus voice (0–50 ms); larger = more doubling.",
+                );
+                param_drag(ui, slot, "chorus-pre-delay", typed, connected, actions);
+                ui.label("Mod wave")
+                    .on_hover_text("LFO shape: 0 = triangle … 10 = sine.");
+                param_drag(ui, slot, "chorus-mod-wave", typed, connected, actions);
+                ui.end_row();
+                ui.label("Low cut")
+                    .on_hover_text("Roll off the wet signal below this frequency.");
+                param_combo(ui, slot, "chorus-low-cut", typed, connected, actions);
+                ui.label("Hi cut")
+                    .on_hover_text("Roll off the wet signal above this frequency.");
+                param_combo(ui, slot, "chorus-hi-cut", typed, connected, actions);
+                ui.end_row();
+                ui.label("Effect level")
+                    .on_hover_text("Chorus (wet) level in the mix.");
+                param_drag(ui, slot, "chorus-effect-level", typed, connected, actions);
+                ui.end_row();
+            });
+    }
+
     /// The Loop's custom UI: enable + mode with a routing diagram (Series passes the
     /// whole signal through the external loop; Parallel mixes the return alongside
     /// the dry signal), then the Send / Return levels.
