@@ -472,6 +472,12 @@ impl App {
         self.rows.iter().filter(|r| r.dirty()).count()
     }
 
+    /// Whether interactive controls (edits, audition, writes) are usable: the
+    /// device is connected and no bank read is in flight.
+    fn editable(&self) -> bool {
+        self.connected && self.loader.is_none()
+    }
+
     /// Load a row's full patch if it isn't loaded yet (needed before storing,
     /// e.g. a name-only edit on a patch that was never auditioned).
     fn ensure_loaded(&mut self, slot: u16) {
@@ -854,7 +860,7 @@ impl App {
                     continue;
                 }
                 let value = typed.get(p.key()).unwrap_or(Value::Int(0));
-                param_widget(ui, slot, p, value, self.connected, actions);
+                param_widget(ui, slot, p, value, self.editable(), actions);
             }
         });
     }
@@ -869,7 +875,7 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        let connected = self.connected;
+        let connected = self.editable();
         let enabled = block_enabled(typed, Block::Equalizer);
         ui.add_enabled_ui(connected, |ui| {
             let mut on = enabled;
@@ -943,7 +949,7 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        let connected = self.connected;
+        let connected = self.editable();
         let enabled = block_enabled(typed, Block::Compressor);
         ui.add_enabled_ui(connected, |ui| {
             let mut on = enabled;
@@ -1003,7 +1009,7 @@ impl App {
                             egui::RichText::new(format!("U{:03}", row.slot))
                         };
                         let id = egui::SelectableLabel::new(playing, label);
-                        let resp = ui.add_enabled(self.connected, id);
+                        let resp = ui.add_enabled(self.editable(), id);
                         let resp = if row.failed {
                             resp.on_hover_text("read failed — value may be stale; Refresh to retry")
                         } else {
@@ -1024,7 +1030,7 @@ impl App {
                             .char_limit(NAME_LEN);
                         let name_size = [180.0, ui.spacing().interact_size.y];
                         let name_changed = ui
-                            .add_enabled_ui(self.connected, |ui| {
+                            .add_enabled_ui(self.editable(), |ui| {
                                 ui.add_sized(name_size, edit).changed()
                             })
                             .inner;
@@ -1039,7 +1045,7 @@ impl App {
                         let slider = egui::Slider::new(&mut level, 0..=100).suffix("%");
                         let size = [220.0, ui.spacing().interact_size.y];
                         let changed = ui
-                            .add_enabled_ui(self.connected, |ui| ui.add_sized(size, slider).changed())
+                            .add_enabled_ui(self.editable(), |ui| ui.add_sized(size, slider).changed())
                             .inner;
                         if changed {
                             let level = u8::try_from(level.clamp(0, 100)).unwrap_or(0);
@@ -1051,7 +1057,7 @@ impl App {
                         // "modified" indicator); Copy/Clear need a connection, Paste
                         // also needs something on the clipboard.
                         ui.horizontal(|ui| {
-                            ui.add_enabled_ui(self.connected && row.dirty(), |ui| {
+                            ui.add_enabled_ui(self.editable() && row.dirty(), |ui| {
                                 let save = action_button(ui, "Save", ActionKind::Commit)
                                     .on_hover_text(
                                         "store this patch (name + level) to the unit (needs BULK LOAD mode)",
@@ -1068,7 +1074,7 @@ impl App {
                                 }
                             });
                             ui.separator();
-                            ui.add_enabled_ui(self.connected, |ui| {
+                            ui.add_enabled_ui(self.editable(), |ui| {
                                 if action_button(ui, "Copy", ActionKind::Read)
                                     .on_hover_text("copy this patch to the clipboard")
                                     .clicked()
@@ -1076,7 +1082,7 @@ impl App {
                                     actions.push(Action::CopyRow(row.slot));
                                 }
                             });
-                            ui.add_enabled_ui(self.connected && self.clipboard.is_some(), |ui| {
+                            ui.add_enabled_ui(self.editable() && self.clipboard.is_some(), |ui| {
                                 let hover = match &self.clipboard {
                                     Some((from, p)) => {
                                         format!("paste U{from:03} {:?} here (then Save)", p.name)
@@ -1090,7 +1096,7 @@ impl App {
                                     actions.push(Action::PasteRow(row.slot));
                                 }
                             });
-                            ui.add_enabled_ui(self.connected, |ui| {
+                            ui.add_enabled_ui(self.editable(), |ui| {
                                 if action_button(ui, "Clear", ActionKind::Caution)
                                     .on_hover_text(
                                         "reset to an empty patch (name \"Empty\", level 0, effects off), then Save",
@@ -1220,7 +1226,7 @@ impl eframe::App for App {
                         actions.push(Action::Refresh);
                     }
                     let pending = self.dirty_count();
-                    ui.add_enabled_ui(pending > 0, |ui| {
+                    ui.add_enabled_ui(self.editable() && pending > 0, |ui| {
                         if action_button(
                             ui,
                             format!("Write changes to unit ({pending})"),
