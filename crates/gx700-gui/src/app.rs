@@ -256,6 +256,63 @@ fn show_comp_curve(ui: &mut egui::Ui, typed: &TypedPatch, limiter: bool) {
         });
 }
 
+/// Draw an *indicative* noise-gate response (input level -> output level, both the
+/// relative `0..100` the device uses). Below the threshold the gate closes and the
+/// signal is suppressed toward silence; at/above it the signal passes. The knee is
+/// approximate (the GX-700 publishes no dB), so this shows the *shape*, not numbers.
+fn show_ns_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
+    let raw = |k: &str| match typed.get(k) {
+        Some(Value::Int(v) | Value::Enum(v)) => v,
+        _ => 0,
+    };
+    let active = matches!(typed.get("ns-enable"), Some(Value::Bool(true)));
+    let threshold = f64::from(raw("ns-threshold")); // 0..100
+    let knee = 12.0;
+    let points: Vec<[f64; 2]> = (0..=100)
+        .map(|i| {
+            let input = f64::from(i);
+            let output = if active {
+                // Gain ramps 0 -> 1 across [threshold - knee, threshold] (smoothstep).
+                let g = ((input - (threshold - knee)) / knee).clamp(0.0, 1.0);
+                input * (g * g * (3.0 - 2.0 * g))
+            } else {
+                input
+            };
+            [input, output]
+        })
+        .collect();
+    Plot::new("gx700-ns")
+        .height(150.0)
+        .allow_drag(false)
+        .allow_zoom(false)
+        .allow_scroll(false)
+        .include_x(0.0)
+        .include_x(100.0)
+        .include_y(0.0)
+        .include_y(100.0)
+        .x_axis_formatter(|mark, _| format!("{:.0}", mark.value))
+        .y_axis_formatter(|mark, _| format!("{:.0}", mark.value))
+        .show(ui, |plot| {
+            plot.line(
+                Line::new(PlotPoints::from(points)).color(egui::Color32::from_rgb(90, 170, 220)),
+            );
+            // 1:1 reference (fully open) diagonal.
+            plot.line(
+                Line::new(PlotPoints::from(vec![[0.0, 0.0], [100.0, 100.0]]))
+                    .color(egui::Color32::from_gray(110))
+                    .style(LineStyle::dashed_loose()),
+            );
+            // Threshold marker.
+            if active {
+                plot.line(
+                    Line::new(PlotPoints::from(vec![[threshold, 0.0], [threshold, 100.0]]))
+                        .color(egui::Color32::from_rgb(170, 100, 100))
+                        .style(LineStyle::dashed_dense()),
+                );
+            }
+        });
+}
+
 /// One EQ band row in the Gain/Freq/Q grid. Shelves pass `None` for freq/q and
 /// get an em dash in those cells; the mid band passes its enum keys.
 #[allow(clippy::too_many_arguments)]
@@ -1094,6 +1151,10 @@ impl App {
                 self.show_comp_editor(ui, slot, &typed, actions);
                 return;
             }
+            if block == Block::NoiseSuppressor {
+                self.show_ns_editor(ui, slot, &typed, actions);
+                return;
+            }
             for &p in param::ALL {
                 if p.block() != block {
                     continue;
@@ -1227,6 +1288,58 @@ impl App {
                 ui.label("Level")
                     .on_hover_text("Compressor output level — acts as the make-up gain.");
                 param_drag(ui, slot, "comp-level", typed, connected, actions);
+                ui.end_row();
+            });
+    }
+
+    /// The Noise Suppressor's custom UI: enable + detection source, an indicative
+    /// gate-response curve (signals below the threshold are suppressed), then the
+    /// Threshold / Release / Level controls with explanatory tooltips.
+    fn show_ns_editor(
+        &self,
+        ui: &mut egui::Ui,
+        slot: u16,
+        typed: &TypedPatch,
+        actions: &mut Vec<Action>,
+    ) {
+        let connected = self.editable();
+        let enabled = block_enabled(typed, Block::NoiseSuppressor);
+        ui.add_enabled_ui(connected, |ui| {
+            let mut on = enabled;
+            if ui.checkbox(&mut on, "Noise Suppressor enabled").changed() {
+                actions.push(Action::SetParam(slot, "ns-enable", Value::Bool(on)));
+            }
+            ui.horizontal(|ui| {
+                ui.label("Detect").on_hover_text(
+                    "Which signal the gate listens to when deciding whether to open or close.",
+                );
+                param_combo(ui, slot, "ns-detect", typed, connected, actions);
+            });
+        });
+        show_ns_curve(ui, typed);
+        ui.add_space(2.0);
+        ui.label(
+            egui::RichText::new("Indicative — below the threshold the signal is suppressed.")
+                .weak(),
+        );
+        ui.add_space(4.0);
+        egui::Grid::new("gx700-ns-grid")
+            .num_columns(4)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Threshold").on_hover_text(
+                    "Signals below this level are suppressed — raise it to cut more noise \
+                     (too high also chokes quiet playing and sustain).",
+                );
+                param_drag(ui, slot, "ns-threshold", typed, connected, actions);
+                ui.label("Release").on_hover_text(
+                    "How fast the gate closes once the signal drops below the threshold.",
+                );
+                param_drag(ui, slot, "ns-release", typed, connected, actions);
+                ui.end_row();
+                ui.label("Level")
+                    .on_hover_text("Noise Suppressor output level.");
+                param_drag(ui, slot, "ns-level", typed, connected, actions);
                 ui.end_row();
             });
     }
