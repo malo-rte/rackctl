@@ -87,9 +87,14 @@ reach into `preamp-master` / `preamp-volume`, which belongs in the *effect edito
 
 == Other candidate features (from the Stage 4 plan)
 
-* *Effect-chain editor* -- per-block enable + parameter widgets for the 14 effect
-  blocks, and drag-to-reorder the signal chain (the library already has
-  `RawPatch::chain` / `set_chain` and the CLI `chain` command).
+* *Effect editor* -- **implemented**: a right-hand panel shows the now-playing
+  patch's effect blocks (collapsible), each parameter a live widget (checkbox /
+  slider / combo) driven by the catalog. Reading current values goes through the
+  typed model (`typed::Patch::get`) and edits stage through it (`set` →
+  `to_raw`), applied live via `Gx700::set` and saved/reverted with the rest of the
+  row's pending changes. Still to do here: drag-to-reorder the signal chain (the
+  library has `RawPatch::chain` / `set_chain` and the CLI `chain` command), and a
+  per-block enable toggle in the header.
 * *Patch librarian* -- save / load / `backup` / `scene` from the GUI, reusing the
   US-16x08 GUI's preset-tab patterns.
 * *Per-block response curves* -- reuse the US-16x08 GUI's `curves.rs` (EQ, etc.).

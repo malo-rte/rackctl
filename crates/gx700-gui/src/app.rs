@@ -11,7 +11,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use eframe::egui;
-use rackctl_gx700::{NAME_LEN, Param, RawPatch, Value};
+use rackctl_gx700::typed::Patch as TypedPatch;
+use rackctl_gx700::{Block, Kind, NAME_LEN, Param, RawPatch, Value, param, units};
 use rackctl_ui::{ActionKind, action_button};
 
 use crate::config::{self, CachedRow, GuiConfig};
@@ -56,6 +57,7 @@ impl PatchRow {
 enum Action {
     Audition(u16),
     SetLevel(u16, u8),
+    SetParam(u16, &'static str, Value),
     SetName(u16, String),
     SaveRow(u16),
     RevertRow(u16),
@@ -67,6 +69,57 @@ enum Action {
     OpenBulkPrompt,
     CloseBulkPrompt,
     WriteAll,
+}
+
+/// Render one parameter as a live widget (checkbox / slider / combo by kind),
+/// pushing a [`Action::SetParam`] when the user changes it.
+fn param_widget(
+    ui: &mut egui::Ui,
+    slot: u16,
+    p: Param,
+    value: Value,
+    enabled: bool,
+    actions: &mut Vec<Action>,
+) {
+    // Drop the block prefix for a shorter label (e.g. "preamp-volume" -> "volume").
+    let label = p.key().split_once('-').map_or(p.key(), |(_, rest)| rest);
+    ui.add_enabled_ui(enabled, |ui| {
+        ui.horizontal(|ui| match (p.kind(), value) {
+            (Kind::Bool, Value::Bool(b)) => {
+                let mut on = b;
+                if ui.checkbox(&mut on, label).changed() {
+                    actions.push(Action::SetParam(slot, p.key(), Value::Bool(on)));
+                }
+            }
+            (Kind::Int { min, max, .. }, Value::Int(v)) => {
+                ui.label(label);
+                let mut val = v;
+                if ui.add(egui::Slider::new(&mut val, min..=max)).changed() {
+                    actions.push(Action::SetParam(slot, p.key(), Value::Int(val)));
+                }
+                ui.label(units::display(p, Value::Int(val)));
+            }
+            (Kind::Enum { values, .. }, Value::Enum(idx)) => {
+                ui.label(label);
+                let cur = usize::try_from(idx)
+                    .ok()
+                    .and_then(|i| values.get(i))
+                    .copied()
+                    .unwrap_or("?");
+                egui::ComboBox::from_id_salt((slot, p.key()))
+                    .selected_text(cur)
+                    .show_ui(ui, |ui| {
+                        for (i, lbl) in values.iter().enumerate() {
+                            let this = i32::try_from(i).unwrap_or(-1);
+                            if ui.selectable_label(this == idx, *lbl).clicked() {
+                                actions.push(Action::SetParam(slot, p.key(), Value::Enum(this)));
+                            }
+                        }
+                    });
+            }
+            _ => {}
+        });
+    });
 }
 
 pub(crate) struct App {
@@ -262,6 +315,34 @@ impl App {
         }
     }
 
+    /// Set an effect parameter (by catalog key) on the now-playing patch: apply it
+    /// live for instant audio, and stage it into the row's pending patch (via the
+    /// typed model) so it saves/reverts with the rest.
+    fn set_param(&mut self, slot: u16, key: &str, value: Value) {
+        let Some(param) = Param::from_key(key) else {
+            return;
+        };
+        if self.now_playing == Some(slot)
+            && let Err(e) = device::lock(&self.device).set(param, value)
+        {
+            self.status = format!("set {key}: {e}");
+            return;
+        }
+        // Stage onto the row's raw base (no name/level overlay — those stay separate).
+        let base = self
+            .row(slot)
+            .and_then(|r| r.pending_patch.clone().or_else(|| r.full.clone()));
+        if let Some(base) = base {
+            let mut typed = TypedPatch::from_raw(&base);
+            if typed.set(key, value).is_ok()
+                && let Some(row) = self.row_mut(slot)
+            {
+                row.pending_patch = Some(typed.to_raw());
+            }
+        }
+        self.status = format!("U{slot:03}: {key} = {}", units::display(param, value));
+    }
+
     /// Write one patch (its edited name + level) to its memory slot and verify by
     /// read-back. `Ok` on success; `Err(message)` if the patch isn't loaded or the
     /// unit isn't in BULK LOAD mode (the write is silently ignored there).
@@ -442,6 +523,41 @@ impl App {
 
     /// Render the scrollable patch list (name, level slider, Save/Revert), pushing
     /// any interactions into `actions` to apply after the render pass.
+    /// The effect-parameter editor for the now-playing patch: every block's
+    /// parameters as live widgets. Reads current values through the typed model
+    /// and stages edits the same way as the level balancer.
+    fn show_editor(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        let Some(slot) = self.now_playing else {
+            ui.label("Click a patch's id to audition it, then edit its effects here.");
+            return;
+        };
+        let Some(eff) = self.effective_patch(slot) else {
+            return;
+        };
+        let typed = TypedPatch::from_raw(&eff);
+        ui.heading(format!("Effects — U{slot:03}"));
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            // One collapsible section per effect block (Level/Chain — output level,
+            // name, assigns — is edited on the main list).
+            for base in 1u8..=13 {
+                let Some(block) = Block::from_base(base) else {
+                    continue;
+                };
+                egui::CollapsingHeader::new(block.label())
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        for &p in param::ALL {
+                            if p.block() != block {
+                                continue;
+                            }
+                            let value = typed.get(p.key()).unwrap_or(Value::Int(0));
+                            param_widget(ui, slot, p, value, self.connected, actions);
+                        }
+                    });
+            }
+        });
+    }
+
     fn show_patch_list(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         egui::ScrollArea::vertical().show(ui, |ui| {
             egui::Grid::new("patches")
@@ -567,6 +683,7 @@ impl App {
         match action {
             Action::Audition(slot) => self.audition(slot),
             Action::SetLevel(slot, level) => self.set_level(slot, level),
+            Action::SetParam(slot, key, value) => self.set_param(slot, key, value),
             Action::SetName(slot, name) => self.set_name_edit(slot, name),
             Action::SaveRow(slot) => self.save_row(slot),
             Action::RevertRow(slot) => self.revert_row(slot),
@@ -686,6 +803,13 @@ impl eframe::App for App {
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             ui.label(&self.status);
         });
+
+        egui::SidePanel::right("editor")
+            .resizable(true)
+            .default_width(340.0)
+            .show(ctx, |ui| {
+                self.show_editor(ui, &mut actions);
+            });
 
         egui::CentralPanel::default().show(ctx, |ui| {
             self.show_patch_list(ui, &mut actions);
