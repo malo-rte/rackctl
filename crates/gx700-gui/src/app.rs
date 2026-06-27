@@ -1603,6 +1603,10 @@ impl App {
                 self.show_wah_editor(ui, slot, &typed, actions);
                 return;
             }
+            if block == Block::Loop {
+                self.show_loop_editor(ui, slot, &typed, actions);
+                return;
+            }
             for &p in param::ALL {
                 if p.block() != block {
                     continue;
@@ -2091,6 +2095,64 @@ impl App {
     /// The Speaker Sim's custom UI: enable + cabinet model and mic setting, a
     /// generic cabinet response curve (the mic setting tilts the top end), then the
     /// mic (wet) / direct (dry) level mix.
+    /// The Loop's custom UI: enable + mode with a routing diagram (Series passes the
+    /// whole signal through the external loop; Parallel mixes the return alongside
+    /// the dry signal), then the Send / Return levels.
+    fn show_loop_editor(
+        &self,
+        ui: &mut egui::Ui,
+        slot: u16,
+        typed: &TypedPatch,
+        actions: &mut Vec<Action>,
+    ) {
+        let connected = self.editable();
+        let enabled = block_enabled(typed, Block::Loop);
+        let parallel = matches!(typed.get("loop-mode"), Some(Value::Enum(1)));
+        ui.add_enabled_ui(connected, |ui| {
+            let mut on = enabled;
+            if ui.checkbox(&mut on, "Loop enabled").changed() {
+                actions.push(Action::SetParam(slot, "loop-enable", Value::Bool(on)));
+            }
+            ui.horizontal(|ui| {
+                ui.label("Mode").on_hover_text(
+                    "Series inserts the external loop in the chain; Parallel mixes its \
+                     return alongside the dry signal.",
+                );
+                param_combo(ui, slot, "loop-mode", typed, connected, actions);
+            });
+        });
+        ui.add_space(6.0);
+        let diagram = if parallel {
+            "in ─┬─────────── dry ───────────→ out\n    └→ SEND → [ external FX ] → RETURN ┘"
+        } else {
+            "in → SEND → [ external FX ] → RETURN → out"
+        };
+        ui.label(egui::RichText::new(diagram).monospace());
+        ui.add_space(2.0);
+        ui.label(
+            egui::RichText::new(if parallel {
+                "Parallel — the dry signal continues; the loop return is mixed back in."
+            } else {
+                "Series — the whole signal passes out through the external loop."
+            })
+            .weak(),
+        );
+        ui.add_space(6.0);
+        egui::Grid::new("gx700-loop-grid")
+            .num_columns(4)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Send level")
+                    .on_hover_text("Output level at the SEND jack.");
+                param_drag(ui, slot, "loop-send-level", typed, connected, actions);
+                ui.label("Return level").on_hover_text(
+                    "Input level at the RETURN jack (in Parallel, the wet-mix amount).",
+                );
+                param_drag(ui, slot, "loop-return-level", typed, connected, actions);
+                ui.end_row();
+            });
+    }
+
     /// The Wah's custom UI: enable + mode, a resonant-peak filter curve, then the
     /// mode-relevant controls — pedal sweep (Frequency / Peak / pedal source / min /
     /// max) for the pedal modes, or envelope+LFO controls for Auto Wah.
