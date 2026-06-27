@@ -157,6 +157,106 @@ fn show_eq_curve(ui: &mut egui::Ui, typed: &TypedPatch) {
         .show(ui, |plot| plot.line(Line::new(PlotPoints::from(points))));
 }
 
+/// One EQ band row in the Gain/Freq/Q grid. Shelves pass `None` for freq/q and
+/// get an em dash in those cells; the mid band passes its enum keys.
+#[allow(clippy::too_many_arguments)]
+fn eq_row(
+    ui: &mut egui::Ui,
+    slot: u16,
+    name: &str,
+    gain_key: &'static str,
+    freq_key: Option<&'static str>,
+    q_key: Option<&'static str>,
+    typed: &TypedPatch,
+    enabled: bool,
+    actions: &mut Vec<Action>,
+) {
+    ui.label(name);
+    eq_gain_drag(ui, slot, gain_key, typed, enabled, actions);
+    for key in [freq_key, q_key] {
+        match key {
+            Some(key) => eq_combo(ui, slot, key, typed, enabled, actions),
+            None => {
+                ui.weak("—");
+            }
+        }
+    }
+    ui.end_row();
+}
+
+/// An EQ gain as a compact drag-value shown in dB (US-16x08 style).
+fn eq_gain_drag(
+    ui: &mut egui::Ui,
+    slot: u16,
+    key: &'static str,
+    typed: &TypedPatch,
+    enabled: bool,
+    actions: &mut Vec<Action>,
+) {
+    let Some(p) = Param::from_key(key) else {
+        return;
+    };
+    let Kind::Int { min, max, .. } = p.kind() else {
+        return;
+    };
+    let mut val = match typed.get(key) {
+        Some(Value::Int(v)) => v,
+        _ => 0,
+    };
+    ui.add_enabled_ui(enabled, |ui| {
+        let widget = egui::DragValue::new(&mut val)
+            .range(min..=max)
+            .custom_formatter(move |n, _| display_raw(p, n));
+        if ui.add(widget).changed() {
+            actions.push(Action::SetParam(slot, key, Value::Int(val)));
+        }
+    });
+}
+
+/// An EQ enum (mid frequency or Q) as a dropdown of its labels.
+fn eq_combo(
+    ui: &mut egui::Ui,
+    slot: u16,
+    key: &'static str,
+    typed: &TypedPatch,
+    enabled: bool,
+    actions: &mut Vec<Action>,
+) {
+    let Some(p) = Param::from_key(key) else {
+        return;
+    };
+    let Kind::Enum { values, .. } = p.kind() else {
+        return;
+    };
+    let idx = match typed.get(key) {
+        Some(Value::Enum(v)) => v,
+        _ => 0,
+    };
+    let cur = usize::try_from(idx)
+        .ok()
+        .and_then(|i| values.get(i))
+        .copied()
+        .unwrap_or("?");
+    ui.add_enabled_ui(enabled, |ui| {
+        egui::ComboBox::from_id_salt((slot, key))
+            .selected_text(cur)
+            .show_ui(ui, |ui| {
+                for (i, lbl) in values.iter().enumerate() {
+                    let this = i32::try_from(i).unwrap_or(-1);
+                    if ui.selectable_label(this == idx, *lbl).clicked() {
+                        actions.push(Action::SetParam(slot, key, Value::Enum(this)));
+                    }
+                }
+            });
+    });
+}
+
+/// Format a raw drag-value in `p`'s display units (the dB string).
+#[allow(clippy::cast_possible_truncation)]
+fn display_raw(p: Param, n: f64) -> String {
+    units::display(p, Value::Int(n as i32))
+}
+
 /// Format a log10(Hz) axis value as a frequency label (`100`, `1k`, `10k`).
 fn hz_label(log_hz: f64) -> String {
     let hz = 10f64.powf(log_hz);
@@ -684,10 +784,11 @@ impl App {
         let block = self.selected_block;
         ui.heading(block.label());
         egui::ScrollArea::vertical().show(ui, |ui| {
-            // Custom per-block visualisations go above the generic controls.
+            // The Equalizer gets a custom band-table layout (curve + Gain/Freq/Q
+            // grid); every other block uses the generic per-parameter list.
             if block == Block::Equalizer {
-                show_eq_curve(ui, &typed);
-                ui.separator();
+                self.show_eq_editor(ui, slot, &typed, actions);
+                return;
             }
             for &p in param::ALL {
                 if p.block() != block {
@@ -697,6 +798,80 @@ impl App {
                 param_widget(ui, slot, p, value, self.connected, actions);
             }
         });
+    }
+
+    /// The Equalizer's custom UI: enable, the response curve, then a band table
+    /// (Gain / Freq / Q per band, high → low) in the US-16x08 style — drag-values
+    /// for gains, combos for the mid band's frequency and Q.
+    fn show_eq_editor(
+        &self,
+        ui: &mut egui::Ui,
+        slot: u16,
+        typed: &TypedPatch,
+        actions: &mut Vec<Action>,
+    ) {
+        let connected = self.connected;
+        let enabled = block_enabled(typed, Block::Equalizer);
+        ui.add_enabled_ui(connected, |ui| {
+            let mut on = enabled;
+            if ui.checkbox(&mut on, "EQ enabled").changed() {
+                actions.push(Action::SetParam(slot, "eq-enable", Value::Bool(on)));
+            }
+        });
+        show_eq_curve(ui, typed);
+        ui.add_space(6.0);
+        egui::Grid::new("gx700-eq-grid")
+            .num_columns(4)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("");
+                ui.strong("Gain");
+                ui.strong("Freq");
+                ui.strong("Q");
+                ui.end_row();
+
+                // Shelves (no frequency or Q control on the device); the mid band
+                // is a sweepable peak with a Q.
+                eq_row(
+                    ui,
+                    slot,
+                    "High",
+                    "eq-high-gain",
+                    None,
+                    None,
+                    typed,
+                    connected,
+                    actions,
+                );
+                eq_row(
+                    ui,
+                    slot,
+                    "Mid",
+                    "eq-mid-gain",
+                    Some("eq-mid-freq"),
+                    Some("eq-mid-q"),
+                    typed,
+                    connected,
+                    actions,
+                );
+                eq_row(
+                    ui,
+                    slot,
+                    "Low",
+                    "eq-low-gain",
+                    None,
+                    None,
+                    typed,
+                    connected,
+                    actions,
+                );
+
+                ui.separator();
+                ui.end_row();
+                ui.label("Level");
+                eq_gain_drag(ui, slot, "eq-level", typed, connected, actions);
+                ui.end_row();
+            });
     }
 
     fn show_patch_list(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
