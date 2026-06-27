@@ -791,7 +791,7 @@ The *Needs* column shows what a command requires: _device_ (a unit via `--port`,
 | `scene save <name>`              | Save all 100 user patches as one scene file. | device
 | `scene restore <name> --yes`     | Restore a scene to the device (overwrites all user patches). | device
 | `scene list`                     | List scenes saved on disk. | disk
-| `load <name> [--to-patch N]`     | Load a saved patch file to the current sound or slot `N`. | device
+| `load <name> [--to-patch N] [--json]` | Load a saved patch (or, with `--json`, a typed-JSON file path) to the current sound or slot `N`. | device
 | `copy <from> <to>`               | Copy a stored patch to another user slot on the device (overwrites). | device
 | `chain <name> [--set …]`         | Show or reorder the signal chain (block order) of a saved patch. | disk
 | `select <n>`                     | Recall a patch by Program Change `n` (0--127). | device

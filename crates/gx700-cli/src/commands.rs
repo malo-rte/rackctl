@@ -240,8 +240,17 @@ pub(crate) fn load<T: Transport>(
     dev: &mut Gx700<T>,
     name: &str,
     to_patch: Option<u16>,
+    json: bool,
 ) -> Result<()> {
-    let raw = read_saved(name)?;
+    let raw = if json {
+        // `name` is a path to a typed-JSON patch (as emitted by `dump --json`).
+        let text = fs::read_to_string(name).with_context(|| format!("reading {name}"))?;
+        let typed: rackctl_gx700::typed::Patch = serde_json::from_str(&text)
+            .with_context(|| format!("parsing {name} as a typed patch"))?;
+        typed.to_raw()
+    } else {
+        read_saved(name)?
+    };
     let blocks = match to_patch {
         Some(slot) => {
             let n = dev.write_patch(slot, &raw)?;

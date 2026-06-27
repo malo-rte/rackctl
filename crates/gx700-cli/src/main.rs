@@ -142,13 +142,18 @@ enum Command {
     },
     /// Load a saved whole-patch file onto the device.
     Load {
-        /// Saved patch name to load.
+        /// Saved patch name to load (or, with --json, a path to a typed-JSON file
+        /// as emitted by `dump --json`).
         name: String,
         /// Write to USER patch memory slot N (1-100) instead of the current
         /// sound. DESTRUCTIVE: overwrites that stored patch. Requires the unit in
         /// BULK LOAD mode (TUNER/UTILITY -> MIDI BULK LOAD).
         #[arg(long)]
         to_patch: Option<u16>,
+        /// Treat `name` as a path to a typed-JSON patch file instead of a saved
+        /// patch name.
+        #[arg(long)]
+        json: bool,
     },
     /// Copy a stored patch from one slot to another on the device.
     ///
@@ -327,7 +332,11 @@ fn run_command<T: Transport>(dev: &mut Gx700<T>, command: Command) -> Result<()>
             // `scene list` is disk-only and handled before a device is opened.
             SceneCommand::List => Ok(()),
         },
-        Command::Load { name, to_patch } => commands::load(dev, &name, to_patch),
+        Command::Load {
+            name,
+            to_patch,
+            json,
+        } => commands::load(dev, &name, to_patch, json),
         Command::Copy { from, to } => commands::copy(dev, from, to),
         Command::Select { n } => commands::select(dev, n),
         Command::Preview { slot } => commands::preview(dev, slot),
