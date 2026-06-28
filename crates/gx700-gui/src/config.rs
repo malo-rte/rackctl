@@ -119,7 +119,6 @@ pub(crate) fn blocks_dir() -> Option<PathBuf> {
 }
 
 /// Library directory for saved scenes — whole-bank snapshots (`<settings>/scenes`).
-#[allow(dead_code)] // used by the scene editor (next)
 pub(crate) fn scenes_dir() -> Option<PathBuf> {
     settings_dir().map(|d| d.join("scenes"))
 }

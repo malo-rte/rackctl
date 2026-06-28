@@ -102,8 +102,14 @@ enum Action {
     ClearRow(u16),
     SavePatchLib,
     LoadPatchLib(String),
+    CopyPatchLib(String),
+    SavePatchOver(String),
+    PastePatchLib,
     SaveScene,
     LoadScene(String),
+    CopyScene(String),
+    SaveSceneOver(String),
+    PasteScene,
     ToggleBlockLib,
     SaveBlockPreset(String),
     LoadBlockPreset(String),
@@ -172,10 +178,12 @@ fn lib_list(
     ui: &mut egui::Ui,
     names: &[String],
     empty_msg: &str,
-    can_load: bool,
+    can_use: bool,
     load_hover: &str,
     dir: Option<&std::path::Path>,
     make_load: impl Fn(String) -> Action,
+    make_save: impl Fn(String) -> Action,
+    make_copy: impl Fn(String) -> Action,
     actions: &mut Vec<Action>,
 ) {
     ui.add_space(4.0);
@@ -185,12 +193,24 @@ fn lib_list(
     }
     for name in names {
         ui.horizontal(|ui| {
-            ui.add_enabled_ui(can_load, |ui| {
+            ui.add_enabled_ui(can_use, |ui| {
                 if action_button(ui, "Load", ActionKind::Read)
                     .on_hover_text(load_hover)
                     .clicked()
                 {
                     actions.push(make_load(name.clone()));
+                }
+                if action_button(ui, "Save", ActionKind::Commit)
+                    .on_hover_text("overwrite this with the current one")
+                    .clicked()
+                {
+                    actions.push(make_save(name.clone()));
+                }
+                if action_button(ui, "Copy", ActionKind::Read)
+                    .on_hover_text("copy this to the clipboard")
+                    .clicked()
+                {
+                    actions.push(make_copy(name.clone()));
                 }
             });
             if action_button(ui, "Delete", ActionKind::Destructive).clicked()
@@ -1444,6 +1464,8 @@ pub(crate) struct App {
     /// from different patches into a new one.
     block_clip: TypedPatch,
     clip_blocks: Vec<Block>,
+    /// Scene clipboard (a whole bank), for copy/paste in the scene library.
+    scene_clip: Option<Vec<TypedPatch>>,
     /// Save-as name fields for the Library tab (patch / block / scene).
     lib_patch_name: String,
     lib_block_name: String,
@@ -1516,6 +1538,7 @@ impl App {
             clipboard: None,
             block_clip: TypedPatch::default(),
             clip_blocks: Vec::new(),
+            scene_clip: None,
             lib_patch_name: String::new(),
             lib_block_name: String::new(),
             lib_scene_name: String::new(),
@@ -1856,15 +1879,32 @@ impl App {
         self.status = format!("reverted {} block", block.label());
     }
 
-    // ---- On-disk library: save/load single patches and single blocks ----
+    // ---- On-disk library: single patches, single blocks, whole-bank scenes ----
 
-    /// Save the now-playing patch to the patch library under `lib_patch_name`.
-    fn save_patch_lib(&mut self) {
-        let name = self.lib_patch_name.trim().to_owned();
+    /// Write `typed` to the patch library under `name`. Returns whether it saved.
+    fn save_patch_named(&mut self, name: &str, typed: &TypedPatch) -> bool {
+        let name = name.trim();
         if name.is_empty() {
-            "enter a name to save the patch".clone_into(&mut self.status);
-            return;
+            "enter a name for the patch".clone_into(&mut self.status);
+            return false;
         }
+        let Some(path) = config::lib_path(config::patches_dir(), name) else {
+            return false;
+        };
+        match config::save_item(&path, typed) {
+            Ok(()) => {
+                self.status = format!("saved patch \u{201c}{name}\u{201d}");
+                true
+            }
+            Err(e) => {
+                self.status = format!("save failed: {e}");
+                false
+            }
+        }
+    }
+
+    /// Insert: save the now-playing patch as a new library patch (`lib_patch_name`).
+    fn save_patch_lib(&mut self) {
         let Some(slot) = self.now_playing else {
             "audition a patch first".clone_into(&mut self.status);
             return;
@@ -1872,15 +1912,47 @@ impl App {
         let Some(typed) = self.effective_patch(slot) else {
             return;
         };
-        let Some(path) = config::lib_path(config::patches_dir(), &name) else {
+        let name = self.lib_patch_name.clone();
+        if self.save_patch_named(&name, &typed) {
+            self.lib_patch_name.clear();
+        }
+    }
+
+    /// Overwrite an existing library patch `name` with the now-playing patch.
+    fn save_patch_over(&mut self, name: &str) {
+        let Some(slot) = self.now_playing else {
+            "audition a patch first".clone_into(&mut self.status);
             return;
         };
-        match config::save_item(&path, &typed) {
-            Ok(()) => {
-                self.status = format!("saved patch \u{201c}{name}\u{201d} to the library");
-                self.lib_patch_name.clear();
+        if let Some(typed) = self.effective_patch(slot) {
+            self.save_patch_named(name, &typed);
+        }
+    }
+
+    /// Copy a library patch `name` into the patch clipboard (paste onto a slot).
+    fn copy_patch_lib(&mut self, name: &str) {
+        let Some(path) = config::lib_path(config::patches_dir(), name) else {
+            return;
+        };
+        match config::read_text(&path).as_deref().map(parse_patch_text) {
+            Some(Ok(typed)) => {
+                self.status = format!("copied patch \u{201c}{name}\u{201d} to the clipboard");
+                self.clipboard = Some((0, typed));
             }
-            Err(e) => self.status = format!("save failed: {e}"),
+            Some(Err(e)) => self.status = format!("can't copy \u{201c}{name}\u{201d}: {e}"),
+            None => self.status = format!("could not read patch \u{201c}{name}\u{201d}"),
+        }
+    }
+
+    /// Paste: save the patch clipboard as a new library patch (`lib_patch_name`).
+    fn paste_patch_lib(&mut self) {
+        let Some((_, typed)) = self.clipboard.clone() else {
+            "clipboard is empty — Copy a patch first".clone_into(&mut self.status);
+            return;
+        };
+        let name = self.lib_patch_name.clone();
+        if self.save_patch_named(&name, &typed) {
+            self.lib_patch_name.clear();
         }
     }
 
@@ -1915,34 +1987,88 @@ impl App {
     }
 
     /// Save the whole user bank (all 100 slots, with staged edits) as a named scene.
-    fn save_scene(&mut self) {
-        let name = self.lib_scene_name.trim().to_owned();
-        if name.is_empty() {
-            "enter a name to save the scene".clone_into(&mut self.status);
-            return;
-        }
+    /// The whole user bank (all slots' effective patches), or `None` if any slot
+    /// isn't loaded yet (the deep bank read hasn't reached it).
+    fn current_bank(&mut self) -> Option<Vec<TypedPatch>> {
         let mut patches = Vec::with_capacity(usize::from(USER_SLOTS));
         for slot in 1..=USER_SLOTS {
             let Some(patch) = self.effective_patch(slot) else {
-                self.status = format!(
-                    "U{slot:03} not loaded yet — wait for the bank read to finish, then save"
-                );
-                return;
+                self.status =
+                    format!("U{slot:03} not loaded yet — wait for the bank read to finish");
+                return None;
             };
             patches.push(patch);
         }
-        let Some(path) = config::lib_path(config::scenes_dir(), &name) else {
-            return;
+        Some(patches)
+    }
+
+    /// Write `patches` to the scene library under `name`. Returns whether it saved.
+    fn save_scene_named(&mut self, name: &str, patches: &[TypedPatch]) -> bool {
+        let name = name.trim();
+        if name.is_empty() {
+            "enter a name for the scene".clone_into(&mut self.status);
+            return false;
+        }
+        let Some(path) = config::lib_path(config::scenes_dir(), name) else {
+            return false;
         };
-        match config::save_item(&path, &patches) {
+        match config::save_item(&path, &patches.to_vec()) {
             Ok(()) => {
                 self.status = format!(
                     "saved scene \u{201c}{name}\u{201d} ({} patches)",
                     patches.len()
                 );
-                self.lib_scene_name.clear();
+                true
             }
-            Err(e) => self.status = format!("save failed: {e}"),
+            Err(e) => {
+                self.status = format!("save failed: {e}");
+                false
+            }
+        }
+    }
+
+    /// Insert: save the current bank as a new scene (`lib_scene_name`).
+    fn save_scene(&mut self) {
+        let Some(bank) = self.current_bank() else {
+            return;
+        };
+        let name = self.lib_scene_name.clone();
+        if self.save_scene_named(&name, &bank) {
+            self.lib_scene_name.clear();
+        }
+    }
+
+    /// Overwrite an existing scene `name` with the current bank.
+    fn save_scene_over(&mut self, name: &str) {
+        if let Some(bank) = self.current_bank() {
+            self.save_scene_named(name, &bank);
+        }
+    }
+
+    /// Copy a library scene `name` into the scene clipboard.
+    fn copy_scene(&mut self, name: &str) {
+        let Some(path) = config::lib_path(config::scenes_dir(), name) else {
+            return;
+        };
+        match config::read_text(&path).map(|t| parse_scene_text(&t)) {
+            Some(Ok(patches)) => {
+                self.status = format!("copied scene \u{201c}{name}\u{201d}");
+                self.scene_clip = Some(patches);
+            }
+            Some(Err(e)) => self.status = format!("can't copy \u{201c}{name}\u{201d}: {e}"),
+            None => self.status = format!("could not read scene \u{201c}{name}\u{201d}"),
+        }
+    }
+
+    /// Paste: save the scene clipboard as a new scene (`lib_scene_name`).
+    fn paste_scene(&mut self) {
+        let Some(patches) = self.scene_clip.clone() else {
+            "clipboard is empty — Copy a scene first".clone_into(&mut self.status);
+            return;
+        };
+        let name = self.lib_scene_name.clone();
+        if self.save_scene_named(&name, &patches) {
+            self.lib_scene_name.clear();
         }
     }
 
@@ -3721,9 +3847,21 @@ impl App {
                         .hint_text("name")
                         .desired_width(160.0),
                 );
-                ui.add_enabled_ui(has_slot && !self.lib_patch_name.trim().is_empty(), |ui| {
-                    if action_button(ui, "Save", ActionKind::Commit).clicked() {
+                let named = !self.lib_patch_name.trim().is_empty();
+                ui.add_enabled_ui(has_slot && named, |ui| {
+                    if action_button(ui, "Insert", ActionKind::Commit)
+                        .on_hover_text("save the now-playing patch as a new library patch")
+                        .clicked()
+                    {
                         actions.push(Action::SavePatchLib);
+                    }
+                });
+                ui.add_enabled_ui(named && self.clipboard.is_some(), |ui| {
+                    if action_button(ui, "Paste", ActionKind::Neutral)
+                        .on_hover_text("save the clipboard patch as a new library patch")
+                        .clicked()
+                    {
+                        actions.push(Action::PastePatchLib);
                     }
                 });
             });
@@ -3735,6 +3873,8 @@ impl App {
                 "load into the now-playing slot (staged)",
                 config::patches_dir().as_deref(),
                 Action::LoadPatchLib,
+                Action::SavePatchOver,
+                Action::CopyPatchLib,
                 actions,
             );
 
@@ -3754,17 +3894,23 @@ impl App {
                         .hint_text("name")
                         .desired_width(160.0),
                 );
-                ui.add_enabled_ui(
-                    self.connected && !self.lib_scene_name.trim().is_empty(),
-                    |ui| {
-                        if action_button(ui, "Save", ActionKind::Commit)
-                            .on_hover_text("snapshot all 100 user patches to a scene file")
-                            .clicked()
-                        {
-                            actions.push(Action::SaveScene);
-                        }
-                    },
-                );
+                let named = !self.lib_scene_name.trim().is_empty();
+                ui.add_enabled_ui(self.connected && named, |ui| {
+                    if action_button(ui, "Insert", ActionKind::Commit)
+                        .on_hover_text("snapshot all 100 user patches to a new scene file")
+                        .clicked()
+                    {
+                        actions.push(Action::SaveScene);
+                    }
+                });
+                ui.add_enabled_ui(named && self.scene_clip.is_some(), |ui| {
+                    if action_button(ui, "Paste", ActionKind::Neutral)
+                        .on_hover_text("save the clipboard scene as a new scene file")
+                        .clicked()
+                    {
+                        actions.push(Action::PasteScene);
+                    }
+                });
             });
             lib_list(
                 ui,
@@ -3774,6 +3920,8 @@ impl App {
                 "stage this scene into the bank (then Write changes to the unit)",
                 config::scenes_dir().as_deref(),
                 Action::LoadScene,
+                Action::SaveSceneOver,
+                Action::CopyScene,
                 actions,
             );
 
@@ -3807,8 +3955,14 @@ impl App {
             Action::ClearRow(slot) => self.clear_row(slot),
             Action::SavePatchLib => self.save_patch_lib(),
             Action::LoadPatchLib(name) => self.load_patch_lib(&name),
+            Action::CopyPatchLib(name) => self.copy_patch_lib(&name),
+            Action::SavePatchOver(name) => self.save_patch_over(&name),
+            Action::PastePatchLib => self.paste_patch_lib(),
             Action::SaveScene => self.save_scene(),
             Action::LoadScene(name) => self.load_scene(&name),
+            Action::CopyScene(name) => self.copy_scene(&name),
+            Action::SaveSceneOver(name) => self.save_scene_over(&name),
+            Action::PasteScene => self.paste_scene(),
             Action::ToggleBlockLib => self.block_lib_open = !self.block_lib_open,
             Action::SaveBlockPreset(name) => self.save_block_preset(&name),
             Action::LoadBlockPreset(name) => self.load_block_preset(&name),
