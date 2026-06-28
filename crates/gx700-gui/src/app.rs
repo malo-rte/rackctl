@@ -134,15 +134,35 @@ enum Tab {
 }
 
 /// Parse a saved patch file: a typed `Patch` (the readable, grouped-by-block form
-/// the GUI writes) or, as a fallback, a raw `RawPatch` (the CLI's form). Returns
-/// the patch in the typed model.
-fn parse_patch_json(text: &str) -> Option<TypedPatch> {
+/// the GUI writes) — checked for device + version — or, as a fallback, a bare typed
+/// `Patch` or a raw `RawPatch` (the CLI's / older form). `Err` with a reason (e.g.
+/// from a different device) when the file is recognisable but unusable.
+fn parse_patch_text(text: &str) -> Result<TypedPatch, String> {
+    if let Some(res) = config::load_item::<TypedPatch>(text) {
+        return res;
+    }
     if let Ok(typed) = serde_json::from_str::<TypedPatch>(text) {
-        return Some(typed);
+        return Ok(typed);
     }
     serde_json::from_str::<RawPatch>(text)
-        .ok()
         .map(|raw| TypedPatch::from_raw(&raw))
+        .map_err(|_| "unrecognised patch file".to_owned())
+}
+
+/// Parse a saved block preset: our envelope or a bare `BlockData`.
+fn parse_block_text(text: &str) -> Result<rackctl_gx700::typed::BlockData, String> {
+    if let Some(res) = config::load_item(text) {
+        return res;
+    }
+    serde_json::from_str(text).map_err(|_| "unrecognised block file".to_owned())
+}
+
+/// Parse a saved scene (a whole bank): our envelope or a bare patch array.
+fn parse_scene_text(text: &str) -> Result<Vec<TypedPatch>, String> {
+    if let Some(res) = config::load_item(text) {
+        return res;
+    }
+    serde_json::from_str(text).map_err(|_| "unrecognised scene file".to_owned())
 }
 
 /// Render a library list: each saved `name` with a Load (gated on `can_load`) and
@@ -1855,7 +1875,7 @@ impl App {
         let Some(path) = config::lib_path(config::patches_dir(), &name) else {
             return;
         };
-        match config::save_json(&path, &typed) {
+        match config::save_item(&path, &typed) {
             Ok(()) => {
                 self.status = format!("saved patch \u{201c}{name}\u{201d} to the library");
                 self.lib_patch_name.clear();
@@ -1873,12 +1893,16 @@ impl App {
         let Some(path) = config::lib_path(config::patches_dir(), name) else {
             return;
         };
-        let Some(loaded) = config::read_text(&path)
-            .as_deref()
-            .and_then(parse_patch_json)
-        else {
-            self.status = format!("could not read patch \u{201c}{name}\u{201d}");
-            return;
+        let loaded = match config::read_text(&path).as_deref().map(parse_patch_text) {
+            Some(Ok(p)) => p,
+            Some(Err(e)) => {
+                self.status = format!("can't load \u{201c}{name}\u{201d}: {e}");
+                return;
+            }
+            None => {
+                self.status = format!("could not read patch \u{201c}{name}\u{201d}");
+                return;
+            }
         };
         if let Some(row) = self.row_mut(slot) {
             row.name_edit.clone_from(&loaded.name);
@@ -1910,7 +1934,7 @@ impl App {
         let Some(path) = config::lib_path(config::scenes_dir(), &name) else {
             return;
         };
-        match config::save_json(&path, &patches) {
+        match config::save_item(&path, &patches) {
             Ok(()) => {
                 self.status = format!(
                     "saved scene \u{201c}{name}\u{201d} ({} patches)",
@@ -1928,11 +1952,16 @@ impl App {
         let Some(path) = config::lib_path(config::scenes_dir(), name) else {
             return;
         };
-        let parsed =
-            config::read_text(&path).and_then(|t| serde_json::from_str::<Vec<TypedPatch>>(&t).ok());
-        let Some(patches) = parsed else {
-            self.status = format!("could not read scene \u{201c}{name}\u{201d}");
-            return;
+        let patches = match config::read_text(&path).map(|t| parse_scene_text(&t)) {
+            Some(Ok(p)) => p,
+            Some(Err(e)) => {
+                self.status = format!("can't load scene \u{201c}{name}\u{201d}: {e}");
+                return;
+            }
+            None => {
+                self.status = format!("could not read scene \u{201c}{name}\u{201d}");
+                return;
+            }
         };
         let mut staged = 0u16;
         for (i, patch) in patches.into_iter().enumerate() {
@@ -1976,7 +2005,7 @@ impl App {
         let Some(path) = config::lib_path(block_presets_dir(self.selected_block), name) else {
             return;
         };
-        match config::save_json(&path, data) {
+        match config::save_item(&path, data) {
             Ok(()) => {
                 self.status = format!(
                     "saved {} preset \u{201c}{name}\u{201d}",
@@ -2001,7 +2030,7 @@ impl App {
     fn read_block_preset(&self, name: &str) -> Option<rackctl_gx700::typed::BlockData> {
         let path = config::lib_path(block_presets_dir(self.selected_block), name)?;
         let text = config::read_text(&path)?;
-        serde_json::from_str(&text).ok()
+        parse_block_text(&text).ok()
     }
 
     /// Load a preset onto the now-playing patch's matching block (staged).

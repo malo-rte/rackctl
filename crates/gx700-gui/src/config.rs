@@ -4,6 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use directories::ProjectDirs;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 /// Default interface zoom factor (egui zoom), used when no config exists.
@@ -178,6 +179,64 @@ pub(crate) fn save_json<T: Serialize>(path: &Path, value: &T) -> Result<(), Stri
 /// Read a file to a string, or `None` if it can't be read.
 pub(crate) fn read_text(path: &Path) -> Option<String> {
     std::fs::read_to_string(path).ok()
+}
+
+/// This device's stable model id, stamped into every saved library item so a file
+/// can be matched to the device it belongs to (see `architecture.adoc`).
+pub(crate) const DEVICE_ID: &str = "gx700";
+/// Current on-disk library format version (bump when the envelope or payload shape
+/// changes; older versions are migrated forward, newer ones refused).
+pub(crate) const LIB_VERSION: u32 = 1;
+
+/// Save `payload` to `path` wrapped in the library envelope (format version +
+/// device id), so it is self-identifying and version-checked on load.
+pub(crate) fn save_item<T: Serialize>(path: &Path, payload: &T) -> Result<(), String> {
+    #[derive(Serialize)]
+    struct Envelope<'a, T> {
+        version: u32,
+        device: &'a str,
+        payload: &'a T,
+    }
+    save_json(
+        path,
+        &Envelope {
+            version: LIB_VERSION,
+            device: DEVICE_ID,
+            payload,
+        },
+    )
+}
+
+/// Read a library item from envelope `text`. Returns `None` if it is not one of our
+/// envelopes (the caller may then try a bare/legacy form); `Some(Err(reason))` if it
+/// is an envelope but from another device or a newer format; `Some(Ok(payload))` for
+/// a valid, compatible item.
+pub(crate) fn load_item<T: DeserializeOwned>(text: &str) -> Option<Result<T, String>> {
+    let value: serde_json::Value = serde_json::from_str(text).ok()?;
+    let obj = value.as_object()?;
+    if !(obj.contains_key("version") && obj.contains_key("device") && obj.contains_key("payload")) {
+        return None; // not our envelope — let the caller try a bare/legacy parse
+    }
+    let device = obj
+        .get("device")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if device != DEVICE_ID {
+        return Some(Err(format!("saved from a different device ({device})")));
+    }
+    let version = obj
+        .get("version")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|n| u32::try_from(n).ok())
+        .unwrap_or(u32::MAX);
+    if version > LIB_VERSION {
+        return Some(Err(format!("saved by a newer version (v{version})")));
+    }
+    let payload = obj
+        .get("payload")
+        .cloned()
+        .unwrap_or(serde_json::Value::Null);
+    Some(serde_json::from_value(payload).map_err(|e| e.to_string()))
 }
 
 /// Delete a file. `Err` on failure.
