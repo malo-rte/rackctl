@@ -1072,6 +1072,91 @@ impl Patch {
     }
 }
 
+/// One effect block's settings, self-describing (the variant names the block).
+/// A portable snapshot for an on-disk per-block library: serialize one of these
+/// to a file, then apply it onto any patch's matching block. `LevelChain` is not
+/// representable — it is the patch's identity (name / level / chain), not an
+/// effect.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BlockData {
+    Compressor(Compressor),
+    Wah(Wah),
+    Distortion(Distortion),
+    Preamp(Preamp),
+    Loop(Loop),
+    Equalizer(Equalizer),
+    SpeakerSim(SpeakerSim),
+    NoiseSuppressor(NoiseSuppressor),
+    Modulation(Modulation),
+    Delay(Delay),
+    Chorus(Chorus),
+    TremoloPan(TremoloPan),
+    Reverb(Reverb),
+}
+
+impl BlockData {
+    /// Snapshot `block` out of `patch`. `None` for [`Block::LevelChain`].
+    #[must_use]
+    pub fn from_patch(patch: &Patch, block: Block) -> Option<Self> {
+        Some(match block {
+            Block::Compressor => Self::Compressor(patch.compressor.clone()),
+            Block::Wah => Self::Wah(patch.wah.clone()),
+            Block::Distortion => Self::Distortion(patch.distortion.clone()),
+            Block::Preamp => Self::Preamp(patch.preamp.clone()),
+            Block::Loop => Self::Loop(patch.fx_loop.clone()),
+            Block::Equalizer => Self::Equalizer(patch.eq.clone()),
+            Block::SpeakerSim => Self::SpeakerSim(patch.speaker.clone()),
+            Block::NoiseSuppressor => Self::NoiseSuppressor(patch.noise_suppressor.clone()),
+            Block::Modulation => Self::Modulation(patch.modulation.clone()),
+            Block::Delay => Self::Delay(patch.delay.clone()),
+            Block::Chorus => Self::Chorus(patch.chorus.clone()),
+            Block::TremoloPan => Self::TremoloPan(patch.tremolo.clone()),
+            Block::Reverb => Self::Reverb(patch.reverb.clone()),
+            Block::LevelChain => return None,
+        })
+    }
+
+    /// Which effect block this data belongs to.
+    #[must_use]
+    pub fn block(&self) -> Block {
+        match self {
+            Self::Compressor(_) => Block::Compressor,
+            Self::Wah(_) => Block::Wah,
+            Self::Distortion(_) => Block::Distortion,
+            Self::Preamp(_) => Block::Preamp,
+            Self::Loop(_) => Block::Loop,
+            Self::Equalizer(_) => Block::Equalizer,
+            Self::SpeakerSim(_) => Block::SpeakerSim,
+            Self::NoiseSuppressor(_) => Block::NoiseSuppressor,
+            Self::Modulation(_) => Block::Modulation,
+            Self::Delay(_) => Block::Delay,
+            Self::Chorus(_) => Block::Chorus,
+            Self::TremoloPan(_) => Block::TremoloPan,
+            Self::Reverb(_) => Block::Reverb,
+        }
+    }
+
+    /// Apply this block onto `patch`'s matching block (the rest is untouched).
+    pub fn apply_to(&self, patch: &mut Patch) {
+        match self {
+            Self::Compressor(b) => patch.compressor = b.clone(),
+            Self::Wah(b) => patch.wah = b.clone(),
+            Self::Distortion(b) => patch.distortion = b.clone(),
+            Self::Preamp(b) => patch.preamp = b.clone(),
+            Self::Loop(b) => patch.fx_loop = b.clone(),
+            Self::Equalizer(b) => patch.eq = b.clone(),
+            Self::SpeakerSim(b) => patch.speaker = b.clone(),
+            Self::NoiseSuppressor(b) => patch.noise_suppressor = b.clone(),
+            Self::Modulation(b) => patch.modulation = b.clone(),
+            Self::Delay(b) => patch.delay = b.clone(),
+            Self::Chorus(b) => patch.chorus = b.clone(),
+            Self::TremoloPan(b) => patch.tremolo = b.clone(),
+            Self::Reverb(b) => patch.reverb = b.clone(),
+        }
+    }
+}
+
 /// Validate `value` against `param` and return the raw device value.
 fn validate(param: Param, value: Value) -> Result<i32> {
     let key = param.key();
@@ -1195,6 +1280,26 @@ mod tests {
         let mut same = a.clone();
         same.copy_block_from(&b, Block::LevelChain);
         assert_eq!(same, a);
+    }
+
+    #[test]
+    fn block_data_round_trips_and_applies() {
+        let a = Patch::from_raw(&bank()[0].1);
+        let b = Patch::from_raw(&bank()[1].1);
+        let bd = BlockData::from_patch(&b, Block::Reverb).expect("reverb is an effect block");
+        assert_eq!(bd.block(), Block::Reverb);
+        // Self-describing serde round-trip (the JSON is tagged "reverb").
+        let json = serde_json::to_string(&bd).unwrap();
+        assert!(json.contains("reverb"), "{json}");
+        let back: BlockData = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, bd);
+        // Applying transplants only that block.
+        let mut merged = a.clone();
+        back.apply_to(&mut merged);
+        assert_eq!(merged.reverb, b.reverb);
+        assert_eq!(merged.delay, a.delay);
+        // The Level/Chain "block" has no portable representation.
+        assert!(BlockData::from_patch(&a, Block::LevelChain).is_none());
     }
 
     #[test]
