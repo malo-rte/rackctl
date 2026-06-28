@@ -98,6 +98,13 @@ enum Action {
     CopyRow(u16),
     PasteRow(u16),
     ClearRow(u16),
+    SavePatchLib,
+    LoadPatchLib(String),
+    SaveBlockLib,
+    LoadBlockLib(String),
+    RequestDelete(std::path::PathBuf),
+    ConfirmDelete,
+    CancelDelete,
     Refresh,
     Retry,
     OpenBulkPrompt,
@@ -115,6 +122,58 @@ enum Tab {
     Edit,
     /// The factory-preset browser (load a preset into the active sound).
     Presets,
+    /// The on-disk library of saved patches and effect blocks.
+    Library,
+}
+
+/// Parse a saved patch file: a typed `Patch` (the readable, grouped-by-block form
+/// the GUI writes) or, as a fallback, a raw `RawPatch` (the CLI's form). Returns
+/// the patch as a `RawPatch`.
+fn parse_patch_json(text: &str) -> Option<RawPatch> {
+    if let Ok(typed) = serde_json::from_str::<TypedPatch>(text) {
+        return Some(typed.to_raw());
+    }
+    serde_json::from_str::<RawPatch>(text).ok()
+}
+
+/// Render a library list: each saved `name` with a Load (gated on `can_load`) and
+/// a Delete button. `make_load` builds the load action; Delete requests a confirm.
+#[allow(clippy::too_many_arguments)]
+fn lib_list(
+    ui: &mut egui::Ui,
+    names: &[String],
+    empty_msg: &str,
+    can_load: bool,
+    load_hover: &str,
+    dir: Option<&std::path::Path>,
+    make_load: impl Fn(String) -> Action,
+    actions: &mut Vec<Action>,
+) {
+    ui.add_space(4.0);
+    if names.is_empty() {
+        ui.label(egui::RichText::new(empty_msg).weak());
+        return;
+    }
+    for name in names {
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(can_load, |ui| {
+                if action_button(ui, "Load", ActionKind::Read)
+                    .on_hover_text(load_hover)
+                    .clicked()
+                {
+                    actions.push(make_load(name.clone()));
+                }
+            });
+            if action_button(ui, "Delete", ActionKind::Destructive).clicked()
+                && let Some(d) = dir
+            {
+                actions.push(Action::RequestDelete(
+                    d.join(format!("{}.json", config::sanitize(name))),
+                ));
+            }
+            ui.label(name);
+        });
+    }
 }
 
 /// Display label for a slot: `U001..U100` for user patches, `P001..P100` for the
@@ -1329,6 +1388,11 @@ pub(crate) struct App {
     /// from different patches into a new one.
     block_clip: TypedPatch,
     clip_blocks: Vec<Block>,
+    /// Save-as name fields for the Library tab (patch / block).
+    lib_patch_name: String,
+    lib_block_name: String,
+    /// A library file pending a delete confirmation.
+    pending_delete: Option<std::path::PathBuf>,
     /// Which screen is showing.
     tab: Tab,
     /// The effect block selected in the Edit tab.
@@ -1386,6 +1450,9 @@ impl App {
             clipboard: None,
             block_clip: TypedPatch::default(),
             clip_blocks: Vec::new(),
+            lib_patch_name: String::new(),
+            lib_block_name: String::new(),
+            pending_delete: None,
             tab: Tab::Patches,
             selected_block: Block::Compressor,
             bulk_prompt: false,
@@ -1718,6 +1785,128 @@ impl App {
         let stored = TypedPatch::from_raw(&full);
         self.apply_block(slot, block, &stored);
         self.status = format!("reverted {} block", block.label());
+    }
+
+    // ---- On-disk library: save/load single patches and single blocks ----
+
+    /// Save the now-playing patch to the patch library under `lib_patch_name`.
+    fn save_patch_lib(&mut self) {
+        let name = self.lib_patch_name.trim().to_owned();
+        if name.is_empty() {
+            "enter a name to save the patch".clone_into(&mut self.status);
+            return;
+        }
+        let Some(slot) = self.now_playing else {
+            "audition a patch first".clone_into(&mut self.status);
+            return;
+        };
+        let Some(eff) = self.effective_patch(slot) else {
+            return;
+        };
+        let typed = TypedPatch::from_raw(&eff);
+        let Some(path) = config::lib_path(config::patches_dir(), &name) else {
+            return;
+        };
+        match config::save_json(&path, &typed) {
+            Ok(()) => {
+                self.status = format!("saved patch \u{201c}{name}\u{201d} to the library");
+                self.lib_patch_name.clear();
+            }
+            Err(e) => self.status = format!("save failed: {e}"),
+        }
+    }
+
+    /// Load a library patch by `name` into the now-playing slot (staged).
+    fn load_patch_lib(&mut self, name: &str) {
+        let Some(slot) = self.now_playing else {
+            "audition a patch first to load into that slot".clone_into(&mut self.status);
+            return;
+        };
+        let Some(path) = config::lib_path(config::patches_dir(), name) else {
+            return;
+        };
+        let Some(raw) = config::read_text(&path)
+            .as_deref()
+            .and_then(parse_patch_json)
+        else {
+            self.status = format!("could not read patch \u{201c}{name}\u{201d}");
+            return;
+        };
+        if let Some(row) = self.row_mut(slot) {
+            row.name_edit.clone_from(&raw.name);
+            row.pending_level = Some(raw.output_level());
+            row.pending_patch = Some(raw);
+        }
+        self.audition(slot);
+        self.status =
+            format!("loaded patch \u{201c}{name}\u{201d} into U{slot:03} — Save to store");
+    }
+
+    /// Save the selected block of the now-playing patch to the block library.
+    fn save_block_lib(&mut self) {
+        let name = self.lib_block_name.trim().to_owned();
+        if name.is_empty() {
+            "enter a name to save the block".clone_into(&mut self.status);
+            return;
+        }
+        let Some(slot) = self.now_playing else {
+            "audition a patch first".clone_into(&mut self.status);
+            return;
+        };
+        let Some(eff) = self.effective_patch(slot) else {
+            return;
+        };
+        let typed = TypedPatch::from_raw(&eff);
+        let Some(data) = rackctl_gx700::typed::BlockData::from_patch(&typed, self.selected_block)
+        else {
+            return;
+        };
+        let Some(path) = config::lib_path(config::blocks_dir(), &name) else {
+            return;
+        };
+        match config::save_json(&path, &data) {
+            Ok(()) => {
+                self.status = format!(
+                    "saved {} block \u{201c}{name}\u{201d} to the library",
+                    self.selected_block.label()
+                );
+                self.lib_block_name.clear();
+            }
+            Err(e) => self.status = format!("save failed: {e}"),
+        }
+    }
+
+    /// Load a library block by `name` onto the now-playing patch's matching block.
+    fn load_block_lib(&mut self, name: &str) {
+        let Some(slot) = self.now_playing else {
+            "audition a patch first".clone_into(&mut self.status);
+            return;
+        };
+        let Some(path) = config::lib_path(config::blocks_dir(), name) else {
+            return;
+        };
+        let parsed = config::read_text(&path)
+            .and_then(|t| serde_json::from_str::<rackctl_gx700::typed::BlockData>(&t).ok());
+        let Some(data) = parsed else {
+            self.status = format!("could not read block \u{201c}{name}\u{201d}");
+            return;
+        };
+        let block = data.block();
+        let mut src = TypedPatch::default();
+        data.apply_to(&mut src);
+        self.apply_block(slot, block, &src);
+        self.status = format!("loaded {} block \u{201c}{name}\u{201d}", block.label());
+    }
+
+    /// Delete the library file pending confirmation.
+    fn confirm_delete(&mut self) {
+        let Some(path) = self.pending_delete.take() else {
+            return;
+        };
+        match config::delete_file(&path) {
+            Ok(()) => "deleted".clone_into(&mut self.status),
+            Err(e) => self.status = format!("delete failed: {e}"),
+        }
     }
 
     /// Write one patch (its edited name + level) to its memory slot and verify by
@@ -3222,6 +3411,97 @@ impl App {
         });
     }
 
+    /// The Library tab: save the current patch / effect block to disk, and load or
+    /// delete saved ones. Loading stages into the now-playing slot (Write in BULK
+    /// LOAD to persist), so files combine with the on-unit editing.
+    fn show_library(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        ui.heading("Library");
+        ui.label(egui::RichText::new("Saved patches and effect blocks on this computer.").weak());
+        // Pending-delete confirmation bar.
+        if let Some(path) = self.pending_delete.clone() {
+            let name = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            ui.horizontal(|ui| {
+                ui.colored_label(
+                    egui::Color32::from_rgb(220, 120, 60),
+                    format!("Delete \u{201c}{name}\u{201d}?"),
+                );
+                if action_button(ui, "Delete", ActionKind::Destructive).clicked() {
+                    actions.push(Action::ConfirmDelete);
+                }
+                if action_button(ui, "Cancel", ActionKind::Neutral).clicked() {
+                    actions.push(Action::CancelDelete);
+                }
+            });
+        }
+        ui.separator();
+        let has_slot = self.now_playing.is_some();
+        let block_label = self.selected_block.label();
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            ui.heading("Patches");
+            if !has_slot {
+                ui.label(
+                    egui::RichText::new("Audition a patch to save it or load into its slot.")
+                        .weak(),
+                );
+            }
+            ui.horizontal(|ui| {
+                ui.label("Save current as:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.lib_patch_name)
+                        .hint_text("name")
+                        .desired_width(160.0),
+                );
+                ui.add_enabled_ui(has_slot && !self.lib_patch_name.trim().is_empty(), |ui| {
+                    if action_button(ui, "Save", ActionKind::Commit).clicked() {
+                        actions.push(Action::SavePatchLib);
+                    }
+                });
+            });
+            lib_list(
+                ui,
+                &config::json_stems(config::patches_dir()),
+                "No saved patches yet.",
+                has_slot,
+                "load into the now-playing slot (staged)",
+                config::patches_dir().as_deref(),
+                Action::LoadPatchLib,
+                actions,
+            );
+
+            ui.separator();
+            ui.heading("Effect blocks");
+            ui.horizontal(|ui| {
+                ui.label("Save current block as:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.lib_block_name)
+                        .hint_text("name")
+                        .desired_width(160.0),
+                );
+                ui.add_enabled_ui(has_slot && !self.lib_block_name.trim().is_empty(), |ui| {
+                    if action_button(ui, "Save", ActionKind::Commit)
+                        .on_hover_text(format!("save the {block_label} block from the Edit tab"))
+                        .clicked()
+                    {
+                        actions.push(Action::SaveBlockLib);
+                    }
+                });
+            });
+            lib_list(
+                ui,
+                &config::json_stems(config::blocks_dir()),
+                "No saved blocks yet.",
+                has_slot,
+                "apply this block onto the now-playing patch",
+                config::blocks_dir().as_deref(),
+                Action::LoadBlockLib,
+                actions,
+            );
+        });
+    }
+
     fn apply(&mut self, action: Action) {
         match action {
             Action::Audition(slot) => self.audition(slot),
@@ -3240,6 +3520,13 @@ impl App {
             Action::CopyRow(slot) => self.copy_row(slot),
             Action::PasteRow(slot) => self.paste_row(slot),
             Action::ClearRow(slot) => self.clear_row(slot),
+            Action::SavePatchLib => self.save_patch_lib(),
+            Action::LoadPatchLib(name) => self.load_patch_lib(&name),
+            Action::SaveBlockLib => self.save_block_lib(),
+            Action::LoadBlockLib(name) => self.load_block_lib(&name),
+            Action::RequestDelete(path) => self.pending_delete = Some(path),
+            Action::ConfirmDelete => self.confirm_delete(),
+            Action::CancelDelete => self.pending_delete = None,
             Action::Refresh => self.start_load(),
             Action::Retry => self.retry(),
             Action::OpenBulkPrompt => self.bulk_prompt = true,
@@ -3403,6 +3690,12 @@ impl eframe::App for App {
                 {
                     actions.push(Action::SelectTab(Tab::Presets));
                 }
+                if ui
+                    .selectable_label(self.tab == Tab::Library, "Library")
+                    .clicked()
+                {
+                    actions.push(Action::SelectTab(Tab::Library));
+                }
                 ui.separator();
                 if self.connected {
                     if self.loader.is_some() {
@@ -3469,6 +3762,11 @@ impl eframe::App for App {
             Tab::Presets => {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     self.show_preset_list(ui, &mut actions);
+                });
+            }
+            Tab::Library => {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    self.show_library(ui, &mut actions);
                 });
             }
         }
