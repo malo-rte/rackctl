@@ -100,8 +100,11 @@ enum Action {
     ClearRow(u16),
     SavePatchLib,
     LoadPatchLib(String),
-    SaveBlockLib,
-    LoadBlockLib(String),
+    ToggleBlockLib,
+    SaveBlockPreset(String),
+    LoadBlockPreset(String),
+    CopyBlockPreset(String),
+    PasteBlockPreset(String),
     RequestDelete(std::path::PathBuf),
     ConfirmDelete,
     CancelDelete,
@@ -174,6 +177,33 @@ fn lib_list(
             ui.label(name);
         });
     }
+}
+
+/// Stable on-disk subdirectory name for a block's preset library.
+fn block_dir_name(block: Block) -> &'static str {
+    match block {
+        Block::Compressor => "compressor",
+        Block::Wah => "wah",
+        Block::Distortion => "distortion",
+        Block::Preamp => "preamp",
+        Block::Loop => "loop",
+        Block::Equalizer => "equalizer",
+        Block::SpeakerSim => "speaker_sim",
+        Block::NoiseSuppressor => "noise_suppressor",
+        Block::Modulation => "modulation",
+        Block::Delay => "delay",
+        Block::Chorus => "chorus",
+        Block::TremoloPan => "tremolo_pan",
+        Block::Reverb => "reverb",
+        Block::LevelChain => "level_chain",
+        _ => "other",
+    }
+}
+
+/// The preset-library directory for `block` (`<settings>/blocks/<type>`), so each
+/// effect type's presets live in their own folder.
+fn block_presets_dir(block: Block) -> Option<std::path::PathBuf> {
+    config::blocks_dir().map(|d| d.join(block_dir_name(block)))
 }
 
 /// Display label for a slot: `U001..U100` for user patches, `P001..P100` for the
@@ -1393,6 +1423,9 @@ pub(crate) struct App {
     lib_block_name: String,
     /// A library file pending a delete confirmation.
     pending_delete: Option<std::path::PathBuf>,
+    /// Whether the Edit tab's right panel shows the selected block's preset library
+    /// (toggled by the per-block "Library" button) instead of its parameters.
+    block_lib_open: bool,
     /// Which screen is showing.
     tab: Tab,
     /// The effect block selected in the Edit tab.
@@ -1453,6 +1486,7 @@ impl App {
             lib_patch_name: String::new(),
             lib_block_name: String::new(),
             pending_delete: None,
+            block_lib_open: false,
             tab: Tab::Patches,
             selected_block: Block::Compressor,
             bulk_prompt: false,
@@ -1842,32 +1876,27 @@ impl App {
             format!("loaded patch \u{201c}{name}\u{201d} into U{slot:03} — Save to store");
     }
 
-    /// Save the selected block of the now-playing patch to the block library.
-    fn save_block_lib(&mut self) {
-        let name = self.lib_block_name.trim().to_owned();
+    /// The selected block's current data (from the now-playing patch), if any.
+    fn current_block_data(&self) -> Option<rackctl_gx700::typed::BlockData> {
+        let eff = self.effective_patch(self.now_playing?)?;
+        let typed = TypedPatch::from_raw(&eff);
+        rackctl_gx700::typed::BlockData::from_patch(&typed, self.selected_block)
+    }
+
+    /// Write `data` to the selected block's preset library as `name`.
+    fn write_block_preset(&mut self, name: &str, data: &rackctl_gx700::typed::BlockData) {
+        let name = name.trim();
         if name.is_empty() {
-            "enter a name to save the block".clone_into(&mut self.status);
+            "enter a name for the preset".clone_into(&mut self.status);
             return;
         }
-        let Some(slot) = self.now_playing else {
-            "audition a patch first".clone_into(&mut self.status);
+        let Some(path) = config::lib_path(block_presets_dir(self.selected_block), name) else {
             return;
         };
-        let Some(eff) = self.effective_patch(slot) else {
-            return;
-        };
-        let typed = TypedPatch::from_raw(&eff);
-        let Some(data) = rackctl_gx700::typed::BlockData::from_patch(&typed, self.selected_block)
-        else {
-            return;
-        };
-        let Some(path) = config::lib_path(config::blocks_dir(), &name) else {
-            return;
-        };
-        match config::save_json(&path, &data) {
+        match config::save_json(&path, data) {
             Ok(()) => {
                 self.status = format!(
-                    "saved {} block \u{201c}{name}\u{201d} to the library",
+                    "saved {} preset \u{201c}{name}\u{201d}",
                     self.selected_block.label()
                 );
                 self.lib_block_name.clear();
@@ -1876,26 +1905,65 @@ impl App {
         }
     }
 
-    /// Load a library block by `name` onto the now-playing patch's matching block.
-    fn load_block_lib(&mut self, name: &str) {
+    /// Save the selected block (live) to its preset library as `name`.
+    fn save_block_preset(&mut self, name: &str) {
+        let Some(data) = self.current_block_data() else {
+            "audition a patch first".clone_into(&mut self.status);
+            return;
+        };
+        self.write_block_preset(name, &data);
+    }
+
+    /// Read a preset `name` for the selected block from its library.
+    fn read_block_preset(&self, name: &str) -> Option<rackctl_gx700::typed::BlockData> {
+        let path = config::lib_path(block_presets_dir(self.selected_block), name)?;
+        let text = config::read_text(&path)?;
+        serde_json::from_str(&text).ok()
+    }
+
+    /// Load a preset onto the now-playing patch's matching block (staged).
+    fn load_block_preset(&mut self, name: &str) {
         let Some(slot) = self.now_playing else {
             "audition a patch first".clone_into(&mut self.status);
             return;
         };
-        let Some(path) = config::lib_path(config::blocks_dir(), name) else {
-            return;
-        };
-        let parsed = config::read_text(&path)
-            .and_then(|t| serde_json::from_str::<rackctl_gx700::typed::BlockData>(&t).ok());
-        let Some(data) = parsed else {
-            self.status = format!("could not read block \u{201c}{name}\u{201d}");
+        let Some(data) = self.read_block_preset(name) else {
+            self.status = format!("could not read preset \u{201c}{name}\u{201d}");
             return;
         };
         let block = data.block();
         let mut src = TypedPatch::default();
         data.apply_to(&mut src);
         self.apply_block(slot, block, &src);
-        self.status = format!("loaded {} block \u{201c}{name}\u{201d}", block.label());
+        self.status = format!("loaded {} preset \u{201c}{name}\u{201d}", block.label());
+    }
+
+    /// Copy a preset into the block clipboard (so it can be pasted onto a block, or
+    /// saved as another preset).
+    fn copy_block_preset(&mut self, name: &str) {
+        let Some(data) = self.read_block_preset(name) else {
+            return;
+        };
+        let block = data.block();
+        data.apply_to(&mut self.block_clip);
+        if !self.clip_blocks.contains(&block) {
+            self.clip_blocks.push(block);
+        }
+        self.status = format!("copied {} preset \u{201c}{name}\u{201d}", block.label());
+    }
+
+    /// Save the block clipboard's current-block data as a new preset `name`.
+    fn paste_block_preset(&mut self, name: &str) {
+        let block = self.selected_block;
+        if !self.has_block_clip(block) {
+            "clipboard is empty for this block".clone_into(&mut self.status);
+            return;
+        }
+        let Some(data) = rackctl_gx700::typed::BlockData::from_patch(&self.block_clip, block)
+        else {
+            return;
+        };
+        self.write_block_preset(name, &data);
     }
 
     /// Delete the library file pending confirmation.
@@ -2219,7 +2287,7 @@ impl App {
 
     /// The Edit tab's main area: the selected block's parameters as live widgets.
     /// Values are read through the typed model; edits stage like the balancer.
-    fn show_block_params(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+    fn show_block_params(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         let Some(slot) = self.now_playing else {
             ui.label("Audition a patch to edit its effects.");
             return;
@@ -2230,13 +2298,19 @@ impl App {
         let typed = TypedPatch::from_raw(&eff);
         let block = self.selected_block;
         // Title row: the block name, with right-aligned Copy / Paste / Revert (the
-        // additive block clipboard — copy blocks from several patches and paste them
-        // here to combine them into a new patch).
+        // additive block clipboard) and Library (this block type's preset library).
         ui.horizontal(|ui| {
             ui.heading(block.label());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let edit = self.editable();
-                // Added right-to-left, so they read Copy · Paste · Revert.
+                // Added right-to-left, so they read Copy · Paste · Revert · Library.
+                if ui
+                    .selectable_label(self.block_lib_open, "Library")
+                    .on_hover_text("this effect's saved presets")
+                    .clicked()
+                {
+                    actions.push(Action::ToggleBlockLib);
+                }
                 ui.add_enabled_ui(edit && self.block_changed(slot, block), |ui| {
                     if action_button(ui, "Revert", ActionKind::Caution)
                         .on_hover_text("discard this block's edits, back to the stored values")
@@ -2264,6 +2338,10 @@ impl App {
             });
         });
         ui.separator();
+        if self.block_lib_open {
+            self.show_block_library(ui, slot, block, actions);
+            return;
+        }
         egui::ScrollArea::vertical().show(ui, |ui| {
             // The Equalizer gets a custom band-table layout (curve + Gain/Freq/Q
             // grid); every other block uses the generic per-parameter list.
@@ -2325,6 +2403,90 @@ impl App {
                 }
                 let value = typed.get(p.key()).unwrap_or(Value::Int(0));
                 param_widget(ui, slot, p, value, self.editable(), actions);
+            }
+        });
+    }
+
+    /// The selected block's preset library (shown when its "Library" is open):
+    /// insert a new preset from the live block, paste one from the clipboard, and
+    /// load / overwrite / copy / delete the saved presets for this effect type.
+    fn show_block_library(
+        &mut self,
+        ui: &mut egui::Ui,
+        _slot: u16,
+        block: Block,
+        actions: &mut Vec<Action>,
+    ) {
+        ui.label(
+            egui::RichText::new(format!(
+                "{} presets — saved on this computer, one library per effect type.",
+                block.label()
+            ))
+            .weak(),
+        );
+        let has_clip = self.has_block_clip(block);
+        ui.horizontal(|ui| {
+            ui.label("New preset:");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.lib_block_name)
+                    .hint_text("name")
+                    .desired_width(150.0),
+            );
+            let name = self.lib_block_name.trim().to_owned();
+            let named = !name.is_empty();
+            ui.add_enabled_ui(named, |ui| {
+                if action_button(ui, "Insert", ActionKind::Commit)
+                    .on_hover_text("save the current block as a new preset")
+                    .clicked()
+                {
+                    actions.push(Action::SaveBlockPreset(name.clone()));
+                }
+            });
+            ui.add_enabled_ui(named && has_clip, |ui| {
+                if action_button(ui, "Paste", ActionKind::Neutral)
+                    .on_hover_text("save the copied block as a new preset")
+                    .clicked()
+                {
+                    actions.push(Action::PasteBlockPreset(name.clone()));
+                }
+            });
+        });
+        ui.separator();
+        let names = config::json_stems(block_presets_dir(block));
+        if names.is_empty() {
+            ui.label(egui::RichText::new("No presets for this effect yet.").weak());
+            return;
+        }
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for name in &names {
+                ui.horizontal(|ui| {
+                    if action_button(ui, "Load", ActionKind::Read)
+                        .on_hover_text("apply this preset to the block")
+                        .clicked()
+                    {
+                        actions.push(Action::LoadBlockPreset(name.clone()));
+                    }
+                    if action_button(ui, "Save", ActionKind::Commit)
+                        .on_hover_text("overwrite this preset with the current block")
+                        .clicked()
+                    {
+                        actions.push(Action::SaveBlockPreset(name.clone()));
+                    }
+                    if action_button(ui, "Copy", ActionKind::Read)
+                        .on_hover_text("copy this preset to the clipboard")
+                        .clicked()
+                    {
+                        actions.push(Action::CopyBlockPreset(name.clone()));
+                    }
+                    if action_button(ui, "Delete", ActionKind::Destructive).clicked()
+                        && let Some(dir) = block_presets_dir(block)
+                    {
+                        actions.push(Action::RequestDelete(
+                            dir.join(format!("{}.json", config::sanitize(name))),
+                        ));
+                    }
+                    ui.label(name);
+                });
             }
         });
     }
@@ -3438,7 +3600,6 @@ impl App {
         }
         ui.separator();
         let has_slot = self.now_playing.is_some();
-        let block_label = self.selected_block.label();
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.heading("Patches");
             if !has_slot {
@@ -3470,34 +3631,12 @@ impl App {
                 Action::LoadPatchLib,
                 actions,
             );
-
-            ui.separator();
-            ui.heading("Effect blocks");
-            ui.horizontal(|ui| {
-                ui.label("Save current block as:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.lib_block_name)
-                        .hint_text("name")
-                        .desired_width(160.0),
-                );
-                ui.add_enabled_ui(has_slot && !self.lib_block_name.trim().is_empty(), |ui| {
-                    if action_button(ui, "Save", ActionKind::Commit)
-                        .on_hover_text(format!("save the {block_label} block from the Edit tab"))
-                        .clicked()
-                    {
-                        actions.push(Action::SaveBlockLib);
-                    }
-                });
-            });
-            lib_list(
-                ui,
-                &config::json_stems(config::blocks_dir()),
-                "No saved blocks yet.",
-                has_slot,
-                "apply this block onto the now-playing patch",
-                config::blocks_dir().as_deref(),
-                Action::LoadBlockLib,
-                actions,
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new(
+                    "Per-effect-block presets live in the Edit tab — open a block's “Library”.",
+                )
+                .weak(),
             );
         });
     }
@@ -3522,8 +3661,11 @@ impl App {
             Action::ClearRow(slot) => self.clear_row(slot),
             Action::SavePatchLib => self.save_patch_lib(),
             Action::LoadPatchLib(name) => self.load_patch_lib(&name),
-            Action::SaveBlockLib => self.save_block_lib(),
-            Action::LoadBlockLib(name) => self.load_block_lib(&name),
+            Action::ToggleBlockLib => self.block_lib_open = !self.block_lib_open,
+            Action::SaveBlockPreset(name) => self.save_block_preset(&name),
+            Action::LoadBlockPreset(name) => self.load_block_preset(&name),
+            Action::CopyBlockPreset(name) => self.copy_block_preset(&name),
+            Action::PasteBlockPreset(name) => self.paste_block_preset(&name),
             Action::RequestDelete(path) => self.pending_delete = Some(path),
             Action::ConfirmDelete => self.confirm_delete(),
             Action::CancelDelete => self.pending_delete = None,
