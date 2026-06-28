@@ -99,8 +99,10 @@ enum OfflineSource {
 /// payload type so a single `dnd_drop_zone` per row handles both.
 #[derive(Clone)]
 enum SceneDrag {
-    /// A patch-library name dragged from the palette onto a slot.
+    /// A patch-library file name dragged from the palette onto a slot.
     Lib(String),
+    /// A live device-bank slot dragged from the palette onto a scene slot.
+    Bank(u16),
     /// A composer slot index dragged onto another slot to re-order.
     Slot(usize),
 }
@@ -140,6 +142,7 @@ enum Action {
     ComposeAssign(usize, String),
     ComposeClear(usize),
     ComposeReorder(usize, usize),
+    ComposeAssignBank(usize, u16),
     ComposeCopy(usize),
     ComposePaste(usize),
     ComposeSave,
@@ -2320,6 +2323,19 @@ impl App {
         self.status = format!("placed \u{201c}{name}\u{201d} into U{:03}", idx + 1);
     }
 
+    /// Place the live device-bank patch at `slot` into composer slot `idx`.
+    fn compose_assign_bank(&mut self, idx: usize, slot: u16) {
+        let Some(patch) = self.effective_patch(slot) else {
+            self.status = format!("{} isn't loaded yet", slot_label(slot));
+            return;
+        };
+        match self.compose.get_mut(idx) {
+            Some(s) => *s = patch,
+            None => return,
+        }
+        self.status = format!("placed {} into U{:03}", slot_label(slot), idx + 1);
+    }
+
     /// Reset composer slot `idx` to an INIT (default) patch.
     fn compose_clear(&mut self, idx: usize) {
         if let Some(slot) = self.compose.get_mut(idx) {
@@ -4396,6 +4412,7 @@ impl App {
             Action::ComposeAssign(idx, name) => self.compose_assign(idx, &name),
             Action::ComposeClear(idx) => self.compose_clear(idx),
             Action::ComposeReorder(from, to) => self.compose_reorder(from, to),
+            Action::ComposeAssignBank(idx, slot) => self.compose_assign_bank(idx, slot),
             Action::ComposeCopy(idx) => self.compose_copy(idx),
             Action::ComposePaste(idx) => self.compose_paste(idx),
             Action::ComposeSave => self.compose_save(),
@@ -4698,19 +4715,44 @@ impl App {
     /// The central panel (and the Edit tab's side panel) for the active tab.
     /// The Scene tab's left panel: the patch library as drag sources. Drag a name
     /// onto a composer slot to place that patch there.
-    fn show_scene_palette(ui: &mut egui::Ui) {
+    fn show_scene_palette(&self, ui: &mut egui::Ui) {
         ui.heading("Patch library");
         ui.label(egui::RichText::new("Drag a patch onto a slot to place it.").weak());
         ui.separator();
-        let names = config::json_stems(config::patches_dir());
-        if names.is_empty() {
-            ui.label(
-                egui::RichText::new("No saved patches yet — save some in the Library tab first.")
-                    .weak(),
-            );
-            return;
-        }
         egui::ScrollArea::vertical().show(ui, |ui| {
+            // The live device bank: drag a current unit patch straight into a slot.
+            ui.label(egui::RichText::new("Device bank").strong());
+            let mut any_bank = false;
+            for row in &self.rows {
+                // Only loaded rows have content to place.
+                if row.full.is_none() {
+                    continue;
+                }
+                any_bank = true;
+                let name = if row.name.trim().is_empty() {
+                    "(empty)"
+                } else {
+                    row.name.as_str()
+                };
+                let text = format!("{}  {name}", slot_label(row.slot));
+                let id = egui::Id::new(("scene-bank", row.slot));
+                ui.dnd_drag_source(id, SceneDrag::Bank(row.slot), |ui| {
+                    ui.add(egui::Label::new(text).truncate().sense(egui::Sense::drag()));
+                });
+            }
+            if !any_bank {
+                ui.label(egui::RichText::new("bank not read yet").weak());
+            }
+
+            ui.add_space(6.0);
+            // Saved-to-disk patch files (the Library tab's patches).
+            ui.label(egui::RichText::new("Saved patches").strong());
+            let names = config::json_stems(config::patches_dir());
+            if names.is_empty() {
+                ui.label(
+                    egui::RichText::new("none saved — use the Library tab to save some").weak(),
+                );
+            }
             for name in &names {
                 let id = egui::Id::new(("scene-palette", name));
                 ui.dnd_drag_source(id, SceneDrag::Lib(name.clone()), |ui| {
@@ -4853,6 +4895,9 @@ impl App {
                         SceneDrag::Lib(name) => {
                             actions.push(Action::ComposeAssign(idx, name.clone()));
                         }
+                        SceneDrag::Bank(slot) => {
+                            actions.push(Action::ComposeAssignBank(idx, *slot));
+                        }
                         SceneDrag::Slot(from) => {
                             actions.push(Action::ComposeReorder(*from, idx));
                         }
@@ -4895,7 +4940,7 @@ impl App {
                     .resizable(true)
                     .default_width(200.0)
                     .show(ctx, |ui| {
-                        Self::show_scene_palette(ui);
+                        self.show_scene_palette(ui);
                     });
                 egui::CentralPanel::default().show(ctx, |ui| {
                     self.show_scene(ui, actions);
@@ -5174,5 +5219,15 @@ mod tests {
         app.edit_device_patch(1);
         assert_eq!(app.edit_slot, Some(1));
         assert!(app.tab == Tab::Edit);
+    }
+
+    #[test]
+    fn compose_assign_bank_copies_the_loaded_patch_into_the_slot() {
+        let dev = crate::device::open(true, None).expect("mock device");
+        let mut app = App::new(dev, true, Box::new(|| crate::device::open(true, None)));
+        app.ensure_loaded(1); // deep-read bank slot 1 from the mock
+        let bank = app.effective_patch(1).expect("loaded");
+        app.compose_assign_bank(4, 1);
+        assert_eq!(app.compose.get(4), Some(&bank));
     }
 }
