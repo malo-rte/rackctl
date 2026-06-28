@@ -960,6 +960,29 @@ impl Patch {
         self.reverb.enable = false;
     }
 
+    /// Overwrite `self`'s effect `block` with the same block from `other`,
+    /// transplanting one whole effect block (every parameter it holds) between
+    /// patches. [`Block::LevelChain`] (name / level / chain / assigns) is left
+    /// untouched, so this never disturbs the patch's identity or routing.
+    pub fn copy_block_from(&mut self, other: &Self, block: Block) {
+        match block {
+            Block::Compressor => self.compressor = other.compressor.clone(),
+            Block::Wah => self.wah = other.wah.clone(),
+            Block::Distortion => self.distortion = other.distortion.clone(),
+            Block::Preamp => self.preamp = other.preamp.clone(),
+            Block::Loop => self.fx_loop = other.fx_loop.clone(),
+            Block::Equalizer => self.eq = other.eq.clone(),
+            Block::SpeakerSim => self.speaker = other.speaker.clone(),
+            Block::NoiseSuppressor => self.noise_suppressor = other.noise_suppressor.clone(),
+            Block::Modulation => self.modulation = other.modulation.clone(),
+            Block::Delay => self.delay = other.delay.clone(),
+            Block::Chorus => self.chorus = other.chorus.clone(),
+            Block::TremoloPan => self.tremolo = other.tremolo.clone(),
+            Block::Reverb => self.reverb = other.reverb.clone(),
+            Block::LevelChain => {}
+        }
+    }
+
     /// Read any parameter by its catalog key (the same string the CLI uses), e.g.
     /// `patch.get("preamp-gain")`. `None` for an unknown key.
     #[must_use]
@@ -1155,6 +1178,23 @@ mod tests {
         assert!(!p.preamp.enable && !p.delay.enable && !p.reverb.enable);
         // Still a valid, byte-exact round-tripping patch.
         assert_eq!(Patch::from_raw(&p.to_raw()), p);
+    }
+
+    #[test]
+    fn copy_block_from_transplants_one_block() {
+        let a = Patch::from_raw(&bank()[0].1);
+        let b = Patch::from_raw(&bank()[1].1);
+        let mut merged = a.clone();
+        merged.copy_block_from(&b, Block::Delay);
+        // The Delay block now matches b; everything else still matches a.
+        assert_eq!(merged.delay, b.delay);
+        assert_eq!(merged.reverb, a.reverb);
+        assert_eq!(merged.name, a.name);
+        assert_eq!(merged.chain, a.chain);
+        // LevelChain is never touched, even if asked.
+        let mut same = a.clone();
+        same.copy_block_from(&b, Block::LevelChain);
+        assert_eq!(same, a);
     }
 
     #[test]

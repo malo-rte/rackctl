@@ -87,6 +87,9 @@ enum Action {
     SetParam(u16, &'static str, Value),
     SelectTab(Tab),
     SelectBlock(Block),
+    CopyBlock(Block),
+    PasteBlock(u16, Block),
+    RevertBlock(u16, Block),
     ReorderChain(u16, usize, usize),
     ReorderPatch(u16, u16),
     SetName(u16, String),
@@ -1320,6 +1323,12 @@ pub(crate) struct App {
     now_playing: Option<u16>,
     /// The copied patch and its source slot, set by Copy and stamped by Paste.
     clipboard: Option<(u16, RawPatch)>,
+    /// Additive per-block clipboard: a scratch patch holding the blocks copied in
+    /// the Edit tab, plus the list of which blocks are actually held (so Paste
+    /// greys out until that block has been copied). Lets the user combine blocks
+    /// from different patches into a new one.
+    block_clip: TypedPatch,
+    clip_blocks: Vec<Block>,
     /// Which screen is showing.
     tab: Tab,
     /// The effect block selected in the Edit tab.
@@ -1375,6 +1384,8 @@ impl App {
             presets_loaded,
             now_playing: None,
             clipboard: None,
+            block_clip: TypedPatch::default(),
+            clip_blocks: Vec::new(),
             tab: Tab::Patches,
             selected_block: Block::Compressor,
             bulk_prompt: false,
@@ -1631,6 +1642,82 @@ impl App {
         }
         // Re-audition so the re-ordered chain is applied to the current sound.
         self.audition(slot);
+    }
+
+    /// Copy the now-playing patch's `block` into the additive block clipboard.
+    fn copy_block(&mut self, block: Block) {
+        let Some(slot) = self.now_playing else {
+            return;
+        };
+        let Some(eff) = self.effective_patch(slot) else {
+            return;
+        };
+        let src = TypedPatch::from_raw(&eff);
+        self.block_clip.copy_block_from(&src, block);
+        if !self.clip_blocks.contains(&block) {
+            self.clip_blocks.push(block);
+        }
+        self.status = format!("copied {} block", block.label());
+    }
+
+    /// Whether the block clipboard holds `block` (enables Paste).
+    fn has_block_clip(&self, block: Block) -> bool {
+        self.clip_blocks.contains(&block)
+    }
+
+    /// Whether `slot`'s `block` differs from its stored value (enables Revert).
+    fn block_changed(&self, slot: u16, block: Block) -> bool {
+        let Some(row) = self.row(slot) else {
+            return false;
+        };
+        let Some(full) = &row.full else {
+            return false;
+        };
+        let cur = row.pending_patch.as_ref().unwrap_or(full);
+        let base = block.base();
+        cur.blocks.get(&base) != full.blocks.get(&base)
+    }
+
+    /// Replace `slot`'s `block` with the same block from `source`, stage it, and
+    /// apply it live. Clears the staged patch if it returns to the stored state.
+    fn apply_block(&mut self, slot: u16, block: Block, source: &TypedPatch) {
+        let base = self
+            .row(slot)
+            .and_then(|r| r.pending_patch.clone().or_else(|| r.full.clone()));
+        let Some(base) = base else {
+            return;
+        };
+        let mut typed = TypedPatch::from_raw(&base);
+        typed.copy_block_from(source, block);
+        let raw = typed.to_raw();
+        if let Some(row) = self.row_mut(slot) {
+            row.pending_patch = if row.full.as_ref() == Some(&raw) {
+                None
+            } else {
+                Some(raw)
+            };
+        }
+        self.audition(slot);
+    }
+
+    /// Paste the clipboard's `block` onto `slot`'s same block.
+    fn paste_block(&mut self, slot: u16, block: Block) {
+        if !self.has_block_clip(block) {
+            return;
+        }
+        let source = self.block_clip.clone();
+        self.apply_block(slot, block, &source);
+        self.status = format!("pasted {} block", block.label());
+    }
+
+    /// Revert `slot`'s `block` to its stored (on-unit) value.
+    fn revert_block(&mut self, slot: u16, block: Block) {
+        let Some(full) = self.row(slot).and_then(|r| r.full.clone()) else {
+            return;
+        };
+        let stored = TypedPatch::from_raw(&full);
+        self.apply_block(slot, block, &stored);
+        self.status = format!("reverted {} block", block.label());
     }
 
     /// Write one patch (its edited name + level) to its memory slot and verify by
@@ -1954,6 +2041,48 @@ impl App {
         let typed = TypedPatch::from_raw(&eff);
         let block = self.selected_block;
         ui.heading(block.label());
+        // Per-block Copy / Paste / Revert. The clipboard is additive (one slot per
+        // block type), so you can copy blocks from several patches and paste them
+        // here to combine them into a new patch.
+        ui.horizontal(|ui| {
+            let edit = self.editable();
+            ui.add_enabled_ui(edit, |ui| {
+                if action_button(ui, "Copy", ActionKind::Read)
+                    .on_hover_text("copy this block to the clipboard")
+                    .clicked()
+                {
+                    actions.push(Action::CopyBlock(block));
+                }
+            });
+            ui.add_enabled_ui(edit && self.has_block_clip(block), |ui| {
+                let hover = if self.has_block_clip(block) {
+                    format!("paste the copied {} block here", block.label())
+                } else {
+                    format!("copy a {} block first", block.label())
+                };
+                if action_button(ui, "Paste", ActionKind::Neutral)
+                    .on_hover_text(hover)
+                    .clicked()
+                {
+                    actions.push(Action::PasteBlock(slot, block));
+                }
+            });
+            ui.add_enabled_ui(edit && self.block_changed(slot, block), |ui| {
+                if action_button(ui, "Revert", ActionKind::Caution)
+                    .on_hover_text("discard this block's edits, back to the stored values")
+                    .clicked()
+                {
+                    actions.push(Action::RevertBlock(slot, block));
+                }
+            });
+        });
+        ui.label(
+            egui::RichText::new(
+                "Copy blocks from different patches, then Paste to combine them here.",
+            )
+            .weak(),
+        );
+        ui.separator();
         egui::ScrollArea::vertical().show(ui, |ui| {
             // The Equalizer gets a custom band-table layout (curve + Gain/Freq/Q
             // grid); every other block uses the generic per-parameter list.
@@ -3108,6 +3237,9 @@ impl App {
             Action::SetParam(slot, key, value) => self.set_param(slot, key, value),
             Action::SelectTab(tab) => self.tab = tab,
             Action::SelectBlock(block) => self.selected_block = block,
+            Action::CopyBlock(block) => self.copy_block(block),
+            Action::PasteBlock(slot, block) => self.paste_block(slot, block),
+            Action::RevertBlock(slot, block) => self.revert_block(slot, block),
             Action::ReorderChain(slot, from, to) => self.reorder_chain(slot, from, to),
             Action::ReorderPatch(from, to) => self.reorder_patches(from, to),
             Action::SetName(slot, name) => self.set_name_edit(slot, name),
