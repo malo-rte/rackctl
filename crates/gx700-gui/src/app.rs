@@ -146,6 +146,7 @@ enum Action {
     ComposeApply,
     EditComposerSlot(usize),
     EditLibraryPatch(String),
+    EditDevicePatch(u16),
     SaveOfflineEdit,
     CloseOfflineEdit,
     ToggleBlockLib,
@@ -2427,8 +2428,30 @@ impl App {
         }
     }
 
-    /// Close the offline editor (discarding any unsaved scratch edits).
+    /// Open device bank `slot` in the editor: audition it (so edits preview live),
+    /// then switch to the editor screen. Needs the patch loaded (a connected bank
+    /// read); offline there is no data to edit.
+    fn edit_device_patch(&mut self, slot: u16) {
+        self.ensure_loaded(slot);
+        if self.effective_patch(slot).is_none() {
+            "read the bank first to edit this patch".clone_into(&mut self.status);
+            return;
+        }
+        // Best-effort live audition (sets edit_slot when it works); ensure the edit
+        // target regardless so a loaded-but-not-auditioning patch is still editable.
+        self.audition(slot);
+        self.edit_slot = Some(slot);
+        self.block_lib_open = false;
+        self.tab = Tab::Edit;
+    }
+
+    /// Close the offline editor (discarding any unsaved scratch edits), returning to
+    /// whichever tab the edit was opened from.
     fn close_offline_edit(&mut self) {
+        self.tab = match self.edit_source {
+            Some(OfflineSource::Composer(_)) => Tab::Scene,
+            _ => Tab::Library,
+        };
         self.edit_slot = None;
         self.edit_source = None;
         self.edit_scratch = TypedPatch::default();
@@ -2910,6 +2933,28 @@ impl App {
         ui.separator();
     }
 
+    /// The banner above the block editor identifying what's being edited and the way
+    /// back (the editor is no longer a tab): offline edits get Save + Close, a live
+    /// device-bank slot gets Done.
+    fn show_edit_banner(&self, ui: &mut egui::Ui, slot: u16, actions: &mut Vec<Action>) {
+        if slot == SCRATCH {
+            self.show_offline_banner(ui, actions);
+            return;
+        }
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new(format!("Editing {} (live)", slot_label(slot))).weak());
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if action_button(ui, "Done", ActionKind::Neutral)
+                    .on_hover_text("back to the patch list")
+                    .clicked()
+                {
+                    actions.push(Action::SelectTab(Tab::Patches));
+                }
+            });
+        });
+        ui.separator();
+    }
+
     fn show_block_params(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         let Some(slot) = self.edit_slot else {
             ui.label(
@@ -2921,10 +2966,7 @@ impl App {
         let Some(typed) = self.effective_patch(slot) else {
             return;
         };
-        // Offline edits get a banner with Save (back to the source) and Close.
-        if slot == SCRATCH {
-            self.show_offline_banner(ui, actions);
-        }
+        self.show_edit_banner(ui, slot, actions);
         let block = self.selected_block;
         // Title row: the block name, with right-aligned Copy / Paste / Revert (the
         // additive block clipboard) and Library (this block type's preset library).
@@ -4081,6 +4123,15 @@ impl App {
     /// Copy/Paste/Clear (Paste also needs something on the clipboard).
     fn patch_row_buttons(&self, ui: &mut egui::Ui, row: &PatchRow, actions: &mut Vec<Action>) {
         ui.horizontal(|ui| {
+            ui.add_enabled_ui(self.editable(), |ui| {
+                if action_button(ui, "Edit", ActionKind::Read)
+                    .on_hover_text("edit this patch's effects (auditions it live)")
+                    .clicked()
+                {
+                    actions.push(Action::EditDevicePatch(row.slot));
+                }
+            });
+            ui.separator();
             ui.add_enabled_ui(self.editable() && row.dirty(), |ui| {
                 let save = action_button(ui, "Save", ActionKind::Commit).on_hover_text(
                     "store this patch (name + level) to the unit (needs BULK LOAD mode)",
@@ -4355,6 +4406,7 @@ impl App {
             Action::ComposeApply => self.compose_apply(),
             Action::EditComposerSlot(idx) => self.edit_composer_slot(idx),
             Action::EditLibraryPatch(name) => self.edit_library_patch(&name),
+            Action::EditDevicePatch(slot) => self.edit_device_patch(slot),
             Action::SaveOfflineEdit => self.save_offline_edit(),
             Action::CloseOfflineEdit => self.close_offline_edit(),
             Action::ToggleBlockLib => self.block_lib_open = !self.block_lib_open,
@@ -4550,13 +4602,10 @@ impl eframe::App for App {
                 ui.heading("GX-700");
                 ui.separator();
                 if ui
-                    .selectable_label(self.tab == Tab::Patches, "Patches")
+                    .selectable_label(self.tab == Tab::Patches, "Device Patches")
                     .clicked()
                 {
                     actions.push(Action::SelectTab(Tab::Patches));
-                }
-                if ui.selectable_label(self.tab == Tab::Edit, "Edit").clicked() {
-                    actions.push(Action::SelectTab(Tab::Edit));
                 }
                 if ui
                     .selectable_label(self.tab == Tab::Presets, "Presets")
@@ -5120,5 +5169,14 @@ mod tests {
         app.set_param(SCRATCH, "comp-level", Value::Int(13));
         // The scratch is separate from the (empty) bank rows.
         assert!(app.rows.iter().all(|r| r.pending_patch.is_none()));
+    }
+
+    #[test]
+    fn edit_device_patch_targets_the_slot_and_opens_the_editor() {
+        let dev = crate::device::open(true, None).expect("mock device");
+        let mut app = App::new(dev, true, Box::new(|| crate::device::open(true, None)));
+        app.edit_device_patch(1);
+        assert_eq!(app.edit_slot, Some(1));
+        assert!(app.tab == Tab::Edit);
     }
 }
