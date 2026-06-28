@@ -4881,6 +4881,9 @@ impl App {
                     {
                         actions.push(Action::ComposeClear(idx));
                     }
+                    // Keep the last button clear of the vertical scrollbar, which
+                    // otherwise overlays and clips it.
+                    ui.add_space(18.0);
                 });
                 // Re-interact the whole row rect as a hover-sensing drop target, so a
                 // released drag registers anywhere on the row (including over its
