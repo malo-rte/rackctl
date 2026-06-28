@@ -131,10 +131,7 @@ enum Action {
     CopyPatchLib(String),
     SavePatchOver(String),
     PastePatchLib,
-    SaveScene,
-    LoadScene(String),
     CopyScene(String),
-    SaveSceneOver(String),
     PasteScene,
     ComposeNew,
     ComposeCapture,
@@ -146,6 +143,7 @@ enum Action {
     ComposeCopy(usize),
     ComposePaste(usize),
     ComposeSave,
+    ComposeSaveOver(String),
     ComposeApply,
     EditComposerSlot(usize),
     EditLibraryPatch(String),
@@ -1534,7 +1532,6 @@ pub(crate) struct App {
     /// Save-as name fields for the Library tab (patch / block / scene).
     lib_patch_name: String,
     lib_block_name: String,
-    lib_scene_name: String,
     /// A library file pending a delete confirmation.
     pending_delete: Option<std::path::PathBuf>,
     /// Whether the Edit tab's right panel shows the selected block's preset library
@@ -1624,7 +1621,6 @@ impl App {
             scene_clip: None,
             lib_patch_name: String::new(),
             lib_block_name: String::new(),
-            lib_scene_name: String::new(),
             pending_delete: None,
             block_lib_open: false,
             confirm_refresh: false,
@@ -2164,24 +2160,6 @@ impl App {
         }
     }
 
-    /// Insert: save the current bank as a new scene (`lib_scene_name`).
-    fn save_scene(&mut self) {
-        let Some(bank) = self.current_bank() else {
-            return;
-        };
-        let name = self.lib_scene_name.clone();
-        if self.save_scene_named(&name, &bank) {
-            self.lib_scene_name.clear();
-        }
-    }
-
-    /// Overwrite an existing scene `name` with the current bank.
-    fn save_scene_over(&mut self, name: &str) {
-        if let Some(bank) = self.current_bank() {
-            self.save_scene_named(name, &bank);
-        }
-    }
-
     /// Copy a library scene `name` into the scene clipboard.
     fn copy_scene(&mut self, name: &str) {
         let Some(path) = config::lib_path(config::scenes_dir(), name) else {
@@ -2197,45 +2175,16 @@ impl App {
         }
     }
 
-    /// Paste: save the scene clipboard as a new scene (`lib_scene_name`).
+    /// Paste: save the scene clipboard as a new scene file (named `compose_name`).
     fn paste_scene(&mut self) {
         let Some(patches) = self.scene_clip.clone() else {
             "clipboard is empty — Copy a scene first".clone_into(&mut self.status);
             return;
         };
-        let name = self.lib_scene_name.clone();
+        let name = self.compose_name.clone();
         if self.save_scene_named(&name, &patches) {
-            self.lib_scene_name.clear();
+            self.compose_name.clear();
         }
-    }
-
-    /// Load a scene: stage its patches into every user slot. The bank isn't changed
-    /// on the unit until the user runs "Write changes" in BULK LOAD.
-    fn load_scene(&mut self, name: &str) {
-        let Some(path) = config::lib_path(config::scenes_dir(), name) else {
-            return;
-        };
-        let patches = match config::read_text(&path).map(|t| parse_scene_text(&t)) {
-            Some(Ok(p)) => p,
-            Some(Err(e)) => {
-                self.status = format!("can't load scene \u{201c}{name}\u{201d}: {e}");
-                return;
-            }
-            None => {
-                self.status = format!("could not read scene \u{201c}{name}\u{201d}");
-                return;
-            }
-        };
-        let staged = self.stage_scene(patches);
-        // Reflect the now-playing slot's new content in the active sound.
-        if let Some(playing) = self.now_playing
-            && playing <= USER_SLOTS
-        {
-            self.audition(playing);
-        }
-        self.status = format!(
-            "loaded scene \u{201c}{name}\u{201d} — {staged} patches staged; Write changes to store"
-        );
     }
 
     /// Stage `patches` into the user-bank rows, one per slot (capped at `USER_SLOTS`),
@@ -2373,6 +2322,12 @@ impl App {
         let name = self.compose_name.clone();
         let scene = self.compose.clone();
         self.save_scene_named(&name, &scene);
+    }
+
+    /// Overwrite an existing scene file `name` with the current composer.
+    fn compose_save_over(&mut self, name: &str) {
+        let scene = self.compose.clone();
+        self.save_scene_named(name, &scene);
     }
 
     // ---- Offline patch editing (the Edit tab on a non-bank patch) ----
@@ -4270,7 +4225,7 @@ impl App {
     /// LOAD to persist), so files combine with the on-unit editing.
     fn show_library(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         ui.heading("Library");
-        ui.label(egui::RichText::new("Saved patches and effect blocks on this computer.").weak());
+        ui.label(egui::RichText::new("Patches you've saved on this computer.").weak());
         ui.separator();
         let has_slot = self.now_playing.is_some();
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -4320,58 +4275,11 @@ impl App {
                 actions,
             );
 
-            ui.separator();
-            ui.heading("Scenes");
-            ui.label(
-                egui::RichText::new(
-                    "A scene is the whole 100-slot user bank. Load stages it into every \
-                     slot; then “Write changes to unit” stores it (in BULK LOAD).",
-                )
-                .weak(),
-            );
-            ui.horizontal(|ui| {
-                ui.label("Save current bank as:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.lib_scene_name)
-                        .hint_text("name")
-                        .desired_width(160.0),
-                );
-                let named = !self.lib_scene_name.trim().is_empty();
-                ui.add_enabled_ui(self.connected && named, |ui| {
-                    if action_button(ui, "Insert", ActionKind::Commit)
-                        .on_hover_text("snapshot all 100 user patches to a new scene file")
-                        .clicked()
-                    {
-                        actions.push(Action::SaveScene);
-                    }
-                });
-                ui.add_enabled_ui(named && self.scene_clip.is_some(), |ui| {
-                    if action_button(ui, "Paste", ActionKind::Neutral)
-                        .on_hover_text("save the clipboard scene as a new scene file")
-                        .clicked()
-                    {
-                        actions.push(Action::PasteScene);
-                    }
-                });
-            });
-            lib_list(
-                ui,
-                &config::json_stems(config::scenes_dir()),
-                "No saved scenes yet.",
-                self.connected,
-                "stage this scene into the bank (then Write changes to the unit)",
-                config::scenes_dir().as_deref(),
-                Action::LoadScene,
-                Action::SaveSceneOver,
-                Action::CopyScene,
-                None,
-                actions,
-            );
-
             ui.add_space(6.0);
             ui.label(
                 egui::RichText::new(
-                    "Per-effect-block presets live in the Edit tab — open a block's “Library”.",
+                    "Scenes (whole-bank snapshots) live in the Scene tab. Per-effect-block \
+                     presets live in the Edit tab — open a block's “Library”.",
                 )
                 .weak(),
             );
@@ -4401,10 +4309,7 @@ impl App {
             Action::CopyPatchLib(name) => self.copy_patch_lib(&name),
             Action::SavePatchOver(name) => self.save_patch_over(&name),
             Action::PastePatchLib => self.paste_patch_lib(),
-            Action::SaveScene => self.save_scene(),
-            Action::LoadScene(name) => self.load_scene(&name),
             Action::CopyScene(name) => self.copy_scene(&name),
-            Action::SaveSceneOver(name) => self.save_scene_over(&name),
             Action::PasteScene => self.paste_scene(),
             Action::ComposeNew => self.compose_new(),
             Action::ComposeCapture => self.compose_capture(),
@@ -4416,6 +4321,7 @@ impl App {
             Action::ComposeCopy(idx) => self.compose_copy(idx),
             Action::ComposePaste(idx) => self.compose_paste(idx),
             Action::ComposeSave => self.compose_save(),
+            Action::ComposeSaveOver(name) => self.compose_save_over(&name),
             Action::ComposeApply => self.compose_apply(),
             Action::EditComposerSlot(idx) => self.edit_composer_slot(idx),
             Action::EditLibraryPatch(name) => self.edit_library_patch(&name),
@@ -4794,12 +4700,21 @@ impl App {
                     actions.push(Action::ComposeCapture);
                 }
             });
-            ui.add_enabled_ui(!self.compose_name.trim().is_empty(), |ui| {
-                if action_button(ui, "Save", ActionKind::Commit)
-                    .on_hover_text("save this scene to the scene library")
+            let named = !self.compose_name.trim().is_empty();
+            ui.add_enabled_ui(named, |ui| {
+                if action_button(ui, "Save as new", ActionKind::Commit)
+                    .on_hover_text("save the composer as a new scene file")
                     .clicked()
                 {
                     actions.push(Action::ComposeSave);
+                }
+            });
+            ui.add_enabled_ui(named && self.scene_clip.is_some(), |ui| {
+                if action_button(ui, "Paste", ActionKind::Neutral)
+                    .on_hover_text("save the copied scene under this name (duplicate)")
+                    .clicked()
+                {
+                    actions.push(Action::PasteScene);
                 }
             });
             ui.add_enabled_ui(self.editable(), |ui| {
@@ -4811,18 +4726,26 @@ impl App {
                 }
             });
         });
-        ui.horizontal(|ui| {
-            ui.label("Load scene:");
-            egui::ComboBox::from_id_salt("scene-load")
-                .selected_text("choose…")
-                .show_ui(ui, |ui| {
-                    for name in config::json_stems(config::scenes_dir()) {
-                        if ui.selectable_label(false, &name).clicked() {
-                            actions.push(Action::ComposeLoad(name));
-                        }
-                    }
-                });
-        });
+        ui.separator();
+        ui.label(egui::RichText::new("Saved scenes").strong());
+        egui::ScrollArea::vertical()
+            .id_salt("scenes-lib")
+            .max_height(130.0)
+            .show(ui, |ui| {
+                lib_list(
+                    ui,
+                    &config::json_stems(config::scenes_dir()),
+                    "No saved scenes yet.",
+                    true,
+                    "load this scene into the composer",
+                    config::scenes_dir().as_deref(),
+                    Action::ComposeLoad,
+                    Action::ComposeSaveOver,
+                    Action::CopyScene,
+                    None,
+                    actions,
+                );
+            });
         ui.separator();
         ui.label(
             egui::RichText::new(
