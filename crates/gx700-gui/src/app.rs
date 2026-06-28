@@ -81,6 +81,19 @@ impl PatchRow {
     }
 }
 
+/// Sentinel `edit_slot` value meaning "the Edit tab is editing the offline scratch
+/// patch", not a real bank slot. Real slots are `1..=200`, so `0` is free.
+const SCRATCH: u16 = 0;
+
+/// Where an offline edit (the Edit tab's scratch patch) is saved back to.
+#[derive(Clone)]
+enum OfflineSource {
+    /// A slot in the scene composer.
+    Composer(usize),
+    /// A named patch in the on-disk patch library.
+    Library(String),
+}
+
 /// Drag-and-drop payload: a patch-library name being dragged from the Scene tab's
 /// library panel onto a slot. A newtype so it can't be confused with the slot-index
 /// payload below (egui resolves drops by payload type).
@@ -129,6 +142,10 @@ enum Action {
     ComposeReorder(usize, usize),
     ComposeSave,
     ComposeApply,
+    EditComposerSlot(usize),
+    EditLibraryPatch(String),
+    SaveOfflineEdit,
+    CloseOfflineEdit,
     ToggleBlockLib,
     SaveBlockPreset(String),
     LoadBlockPreset(String),
@@ -217,6 +234,7 @@ fn lib_list(
     make_load: impl Fn(String) -> Action,
     make_save: impl Fn(String) -> Action,
     make_copy: impl Fn(String) -> Action,
+    make_edit: Option<fn(String) -> Action>,
     actions: &mut Vec<Action>,
 ) {
     ui.add_space(4.0);
@@ -246,6 +264,14 @@ fn lib_list(
                     actions.push(make_copy(name.clone()));
                 }
             });
+            // Edit is offline (no device), so it stays enabled regardless of `can_use`.
+            if let Some(make_edit) = make_edit
+                && action_button(ui, "Edit", ActionKind::Read)
+                    .on_hover_text("edit this patch offline (no device)")
+                    .clicked()
+            {
+                actions.push(make_edit(name.clone()));
+            }
             if action_button(ui, "Delete", ActionKind::Destructive).clicked()
                 && let Some(d) = dir
             {
@@ -1516,6 +1542,16 @@ pub(crate) struct App {
     compose: Vec<TypedPatch>,
     /// Save-as / loaded-scene name for the composer.
     compose_name: String,
+    /// What the Edit tab is editing: a bank slot (live, preview when in BULK LOAD),
+    /// or [`SCRATCH`] for the offline patch in `edit_scratch`. `None` until selected.
+    edit_slot: Option<u16>,
+    /// The offline patch being edited (when `edit_slot == Some(SCRATCH)`): no device,
+    /// no preview. Saved back to `edit_source` on demand.
+    edit_scratch: TypedPatch,
+    /// The offline patch as it was opened — the baseline for "block changed" / Revert.
+    edit_base: TypedPatch,
+    /// Where an offline edit is saved back to (a composer slot or a library patch).
+    edit_source: Option<OfflineSource>,
     /// Which screen is showing.
     tab: Tab,
     /// The effect block selected in the Edit tab.
@@ -1588,6 +1624,10 @@ impl App {
             confirm_refresh: false,
             compose: vec![TypedPatch::default(); usize::from(USER_SLOTS)],
             compose_name: String::new(),
+            edit_slot: None,
+            edit_scratch: TypedPatch::default(),
+            edit_base: TypedPatch::default(),
+            edit_source: None,
             tab: Tab::Patches,
             selected_block: Block::Compressor,
             bulk_prompt: false,
@@ -1700,6 +1740,9 @@ impl App {
     /// Paste or Clear) or the loaded patch, with the row's edited name and level
     /// overlaid. `None` if nothing is loaded for the row yet.
     fn effective_patch(&self, slot: u16) -> Option<TypedPatch> {
+        if slot == SCRATCH {
+            return Some(self.edit_scratch.clone());
+        }
         let row = self.row(slot)?;
         let mut patch = row.pending_patch.clone().or_else(|| row.full.clone())?;
         patch.output_level = row.pending_level.unwrap_or(row.stored_level);
@@ -1755,6 +1798,7 @@ impl App {
                 self.device = Arc::new(Mutex::new(dev));
                 self.connected = true;
                 self.now_playing = None;
+                self.edit_slot = None;
                 // Re-run the BULK LOAD probe (which then starts the bank read).
                 self.bulk_ok = None;
                 "checking BULK LOAD mode…".clone_into(&mut self.status);
@@ -1777,6 +1821,8 @@ impl App {
         match written {
             Ok(_) => {
                 self.now_playing = Some(slot);
+                // Auditioning a bank slot also makes it the Edit tab's target.
+                self.edit_slot = Some(slot);
                 self.status = format!("auditioning {} {:?}", slot_label(slot), patch.name);
             }
             Err(e) => self.status = format!("audition {}: {e}", slot_label(slot)),
@@ -1812,7 +1858,17 @@ impl App {
         let Some(param) = Param::from_key(key) else {
             return;
         };
+        // Offline scratch: a pure typed-model edit, no device, no preview.
+        if slot == SCRATCH {
+            if self.edit_scratch.set(key, value).is_ok() {
+                self.status = format!("offline: {key} = {}", units::display(param, value));
+            }
+            return;
+        }
+        // Preview live only while this slot is the sound on the unit and we can write
+        // (in BULK LOAD); otherwise just stage — so editing works offline.
         if self.now_playing == Some(slot)
+            && self.editable()
             && let Err(e) = device::lock(&self.device).set(param, value)
         {
             self.status = format!("set {key}: {e}");
@@ -1838,9 +1894,13 @@ impl App {
         if from == to {
             return;
         }
-        let base = self
-            .row(slot)
-            .and_then(|r| r.pending_patch.clone().or_else(|| r.full.clone()));
+        // Resolve the patch to re-order: the offline scratch, or the bank row's.
+        let base = if slot == SCRATCH {
+            Some(self.edit_scratch.clone())
+        } else {
+            self.row(slot)
+                .and_then(|r| r.pending_patch.clone().or_else(|| r.full.clone()))
+        };
         let Some(mut base) = base else {
             return;
         };
@@ -1854,6 +1914,10 @@ impl App {
             return;
         }
         base.chain.copy_from_slice(&chain);
+        if slot == SCRATCH {
+            self.edit_scratch = base;
+            return;
+        }
         if let Some(row) = self.row_mut(slot) {
             row.pending_patch = Some(base);
         }
@@ -1863,7 +1927,7 @@ impl App {
 
     /// Copy the now-playing patch's `block` into the additive block clipboard.
     fn copy_block(&mut self, block: Block) {
-        let Some(slot) = self.now_playing else {
+        let Some(slot) = self.edit_slot else {
             return;
         };
         let Some(src) = self.effective_patch(slot) else {
@@ -1883,6 +1947,10 @@ impl App {
 
     /// Whether `slot`'s `block` differs from its stored value (enables Revert).
     fn block_changed(&self, slot: u16, block: Block) -> bool {
+        if slot == SCRATCH {
+            return rackctl_gx700::typed::BlockData::from_patch(&self.edit_scratch, block)
+                != rackctl_gx700::typed::BlockData::from_patch(&self.edit_base, block);
+        }
         let Some(row) = self.row(slot) else {
             return false;
         };
@@ -1897,6 +1965,10 @@ impl App {
     /// Replace `slot`'s `block` with the same block from `source`, stage it, and
     /// apply it live. Clears the staged patch if it returns to the stored state.
     fn apply_block(&mut self, slot: u16, block: Block, source: &TypedPatch) {
+        if slot == SCRATCH {
+            self.edit_scratch.copy_block_from(source, block);
+            return;
+        }
         let base = self
             .row(slot)
             .and_then(|r| r.pending_patch.clone().or_else(|| r.full.clone()));
@@ -1926,8 +1998,13 @@ impl App {
 
     /// Revert `slot`'s `block` to its stored (on-unit) value.
     fn revert_block(&mut self, slot: u16, block: Block) {
-        let Some(stored) = self.row(slot).and_then(|r| r.full.clone()) else {
-            return;
+        let stored = if slot == SCRATCH {
+            self.edit_base.clone()
+        } else {
+            let Some(s) = self.row(slot).and_then(|r| r.full.clone()) else {
+                return;
+            };
+            s
         };
         self.apply_block(slot, block, &stored);
         self.status = format!("reverted {} block", block.label());
@@ -2259,6 +2336,83 @@ impl App {
         self.save_scene_named(&name, &scene);
     }
 
+    // ---- Offline patch editing (the Edit tab on a non-bank patch) ----
+
+    /// Whether the Edit tab's controls should be enabled: a live bank slot needs the
+    /// device editable (connected + BULK LOAD), but the offline scratch is always on.
+    fn edit_enabled(&self) -> bool {
+        self.edit_slot == Some(SCRATCH) || self.editable()
+    }
+
+    /// Open `patch` in the Edit tab as an offline edit saved back to `source`.
+    fn open_offline(&mut self, patch: TypedPatch, source: OfflineSource) {
+        self.edit_base = patch.clone();
+        self.edit_scratch = patch;
+        self.edit_source = Some(source);
+        self.edit_slot = Some(SCRATCH);
+        self.block_lib_open = false;
+        self.tab = Tab::Edit;
+    }
+
+    /// Edit composer slot `idx` offline (Save writes back to that slot).
+    fn edit_composer_slot(&mut self, idx: usize) {
+        let Some(patch) = self.compose.get(idx).cloned() else {
+            return;
+        };
+        self.open_offline(patch, OfflineSource::Composer(idx));
+        self.status = format!("editing composer U{:03} offline", idx + 1);
+    }
+
+    /// Edit library patch `name` offline (Save writes back to the library file).
+    fn edit_library_patch(&mut self, name: &str) {
+        let Some(path) = config::lib_path(config::patches_dir(), name) else {
+            return;
+        };
+        let loaded = match config::read_text(&path).as_deref().map(parse_patch_text) {
+            Some(Ok(p)) => p,
+            Some(Err(e)) => {
+                self.status = format!("can't edit \u{201c}{name}\u{201d}: {e}");
+                return;
+            }
+            None => {
+                self.status = format!("could not read patch \u{201c}{name}\u{201d}");
+                return;
+            }
+        };
+        self.open_offline(loaded, OfflineSource::Library(name.to_owned()));
+        self.status = format!("editing patch \u{201c}{name}\u{201d} offline");
+    }
+
+    /// Save the offline scratch back to its source (composer slot or library file).
+    fn save_offline_edit(&mut self) {
+        let Some(source) = self.edit_source.clone() else {
+            return;
+        };
+        let patch = self.edit_scratch.clone();
+        match source {
+            OfflineSource::Composer(idx) => {
+                if let Some(slot) = self.compose.get_mut(idx) {
+                    *slot = patch;
+                    self.edit_base = self.edit_scratch.clone();
+                    self.status = format!("saved into composer U{:03}", idx + 1);
+                }
+            }
+            OfflineSource::Library(name) => {
+                if self.save_patch_named(&name, &patch) {
+                    self.edit_base = self.edit_scratch.clone();
+                }
+            }
+        }
+    }
+
+    /// Close the offline editor (discarding any unsaved scratch edits).
+    fn close_offline_edit(&mut self) {
+        self.edit_slot = None;
+        self.edit_source = None;
+        self.edit_scratch = TypedPatch::default();
+        self.edit_base = TypedPatch::default();
+    }
+
     /// Apply the composed scene to the unit: stage every slot, then batch-write
     /// (verified per slot, behind the progress bar) — replacing the whole bank.
     fn compose_apply(&mut self) {
@@ -2273,7 +2427,7 @@ impl App {
 
     /// The selected block's current data (from the now-playing patch), if any.
     fn current_block_data(&self) -> Option<rackctl_gx700::typed::BlockData> {
-        let typed = self.effective_patch(self.now_playing?)?;
+        let typed = self.effective_patch(self.edit_slot?)?;
         rackctl_gx700::typed::BlockData::from_patch(&typed, self.selected_block)
     }
 
@@ -2317,8 +2471,8 @@ impl App {
 
     /// Load a preset onto the now-playing patch's matching block (staged).
     fn load_block_preset(&mut self, name: &str) {
-        let Some(slot) = self.now_playing else {
-            "audition a patch first".clone_into(&mut self.status);
+        let Some(slot) = self.edit_slot else {
+            "audition or open a patch first".clone_into(&mut self.status);
             return;
         };
         let Some(data) = self.read_block_preset(name) else {
@@ -2635,14 +2789,19 @@ impl App {
     /// (signal) order, selectable, each marked with its enable state.
     fn show_block_list(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         ui.heading("Effect blocks");
-        let Some(slot) = self.now_playing else {
-            ui.label("Audition a patch on the Patches tab to edit it here.");
+        let Some(slot) = self.edit_slot else {
+            ui.label("Audition a patch, or open one offline, to edit it here.");
             return;
         };
         let Some(typed) = self.effective_patch(slot) else {
             return;
         };
-        ui.label(format!("U{slot:03}  {:?}", typed.name));
+        let where_label = if slot == SCRATCH {
+            "offline".to_owned()
+        } else {
+            format!("U{slot:03}")
+        };
+        ui.label(format!("{where_label}  {:?}", typed.name));
         ui.label(egui::RichText::new("Drag the ↕ handle to re-order the chain.").weak());
         ui.separator();
         // Drag-to-reorder: a separate ↕ handle per row is the drag source carrying
@@ -2657,7 +2816,7 @@ impl App {
             let selected = self.selected_block == block;
             let cell = ui.horizontal(|ui| {
                 let drag_id = egui::Id::new(("chain-drag", idx));
-                ui.add_enabled_ui(self.editable(), |ui| {
+                ui.add_enabled_ui(self.edit_enabled(), |ui| {
                     ui.dnd_drag_source(drag_id, idx, |ui| {
                         ui.label(egui::RichText::new("↕").weak());
                     })
@@ -2666,7 +2825,7 @@ impl App {
                 });
                 // A checkbox toggles the block's bypass directly; the name selects it.
                 if let Some(p) = block_enable_param(block) {
-                    ui.add_enabled_ui(self.editable(), |ui| {
+                    ui.add_enabled_ui(self.edit_enabled(), |ui| {
                         let mut on = enabled;
                         if ui.checkbox(&mut on, "").changed() {
                             actions.push(Action::SetParam(slot, p.key(), Value::Bool(on)));
@@ -2682,7 +2841,7 @@ impl App {
                     actions.push(Action::SelectBlock(block));
                 }
             });
-            if self.editable()
+            if self.edit_enabled()
                 && let Some(from) = cell.response.dnd_release_payload::<usize>()
             {
                 reorder = Some((*from, idx));
@@ -2695,21 +2854,62 @@ impl App {
 
     /// The Edit tab's main area: the selected block's parameters as live widgets.
     /// Values are read through the typed model; edits stage like the balancer.
+    /// The offline-edit banner shown above the block editor: where it saves back to,
+    /// plus Save and Close. Save is disabled until the scratch differs from the base.
+    fn show_offline_banner(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        let where_to = match &self.edit_source {
+            Some(OfflineSource::Composer(idx)) => format!("composer U{:03}", idx + 1),
+            Some(OfflineSource::Library(name)) => format!("library \u{201c}{name}\u{201d}"),
+            None => "nowhere".to_owned(),
+        };
+        let dirty = self.edit_scratch != self.edit_base;
+        ui.horizontal(|ui| {
+            ui.label(
+                egui::RichText::new(format!("Offline edit \u{2192} {where_to} (no preview)"))
+                    .weak(),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if action_button(ui, "Close", ActionKind::Neutral)
+                    .on_hover_text("close the offline editor (unsaved edits are discarded)")
+                    .clicked()
+                {
+                    actions.push(Action::CloseOfflineEdit);
+                }
+                ui.add_enabled_ui(dirty, |ui| {
+                    if action_button(ui, "Save", ActionKind::Commit)
+                        .on_hover_text("write the edited patch back to its source")
+                        .clicked()
+                    {
+                        actions.push(Action::SaveOfflineEdit);
+                    }
+                });
+            });
+        });
+        ui.separator();
+    }
+
     fn show_block_params(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
-        let Some(slot) = self.now_playing else {
-            ui.label("Audition a patch to edit its effects.");
+        let Some(slot) = self.edit_slot else {
+            ui.label(
+                "Audition a patch to edit it live, or open one offline from the Scene tab \
+                 or the Library tab.",
+            );
             return;
         };
         let Some(typed) = self.effective_patch(slot) else {
             return;
         };
+        // Offline edits get a banner with Save (back to the source) and Close.
+        if slot == SCRATCH {
+            self.show_offline_banner(ui, actions);
+        }
         let block = self.selected_block;
         // Title row: the block name, with right-aligned Copy / Paste / Revert (the
         // additive block clipboard) and Library (this block type's preset library).
         ui.horizontal(|ui| {
             ui.heading(block.label());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let edit = self.editable();
+                let edit = self.edit_enabled();
                 // Added right-to-left, so they read Copy · Paste · Revert · Library.
                 if ui
                     .selectable_label(self.block_lib_open, "Library")
@@ -2809,7 +3009,7 @@ impl App {
                     continue;
                 }
                 let value = typed.get(p.key()).unwrap_or(Value::Int(0));
-                param_widget(ui, slot, p, value, self.editable(), actions);
+                param_widget(ui, slot, p, value, self.edit_enabled(), actions);
             }
         });
     }
@@ -2908,7 +3108,7 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        let connected = self.editable();
+        let connected = self.edit_enabled();
         let enabled = block_enabled(typed, Block::Equalizer);
         ui.add_enabled_ui(connected, |ui| {
             let mut on = enabled;
@@ -2982,7 +3182,7 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        let connected = self.editable();
+        let connected = self.edit_enabled();
         let enabled = block_enabled(typed, Block::Compressor);
         ui.add_enabled_ui(connected, |ui| {
             let mut on = enabled;
@@ -3035,7 +3235,7 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        let connected = self.editable();
+        let connected = self.edit_enabled();
         let enabled = block_enabled(typed, Block::NoiseSuppressor);
         ui.add_enabled_ui(connected, |ui| {
             let mut on = enabled;
@@ -3091,7 +3291,7 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        let connected = self.editable();
+        let connected = self.edit_enabled();
         let enabled = block_enabled(typed, Block::Reverb);
         ui.add_enabled_ui(connected, |ui| {
             let mut on = enabled;
@@ -3156,7 +3356,7 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        let connected = self.editable();
+        let connected = self.edit_enabled();
         let enabled = block_enabled(typed, Block::Distortion);
         ui.add_enabled_ui(connected, |ui| {
             let mut on = enabled;
@@ -3212,7 +3412,7 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        let connected = self.editable();
+        let connected = self.edit_enabled();
         let enabled = block_enabled(typed, Block::Preamp);
         ui.add_enabled_ui(connected, |ui| {
             let mut on = enabled;
@@ -3287,7 +3487,7 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        let connected = self.editable();
+        let connected = self.edit_enabled();
         let enabled = block_enabled(typed, Block::Delay);
         let tempo = matches!(typed.get("delay-mode"), Some(Value::Enum(1)));
         ui.add_enabled_ui(connected, |ui| {
@@ -3386,7 +3586,7 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        let connected = self.editable();
+        let connected = self.edit_enabled();
         let enabled = block_enabled(typed, Block::Modulation);
         ui.add_enabled_ui(connected, |ui| {
             let mut on = enabled;
@@ -3424,7 +3624,7 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        let connected = self.editable();
+        let connected = self.edit_enabled();
         let enabled = block_enabled(typed, Block::TremoloPan);
         ui.add_enabled_ui(connected, |ui| {
             let mut on = enabled;
@@ -3471,7 +3671,7 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        let connected = self.editable();
+        let connected = self.edit_enabled();
         let enabled = block_enabled(typed, Block::Chorus);
         ui.add_enabled_ui(connected, |ui| {
             let mut on = enabled;
@@ -3556,7 +3756,7 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        let connected = self.editable();
+        let connected = self.edit_enabled();
         let enabled = block_enabled(typed, Block::Loop);
         let parallel = matches!(typed.get("loop-mode"), Some(Value::Enum(1)));
         ui.add_enabled_ui(connected, |ui| {
@@ -3614,7 +3814,7 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        let connected = self.editable();
+        let connected = self.edit_enabled();
         let enabled = block_enabled(typed, Block::Wah);
         let auto = matches!(typed.get("wah-mode"), Some(Value::Enum(2)));
         ui.add_enabled_ui(connected, |ui| {
@@ -3701,7 +3901,7 @@ impl App {
         typed: &TypedPatch,
         actions: &mut Vec<Action>,
     ) {
-        let connected = self.editable();
+        let connected = self.edit_enabled();
         let enabled = block_enabled(typed, Block::SpeakerSim);
         ui.add_enabled_ui(connected, |ui| {
             let mut on = enabled;
@@ -4031,6 +4231,7 @@ impl App {
                 Action::LoadPatchLib,
                 Action::SavePatchOver,
                 Action::CopyPatchLib,
+                Some(Action::EditLibraryPatch),
                 actions,
             );
 
@@ -4078,6 +4279,7 @@ impl App {
                 Action::LoadScene,
                 Action::SaveSceneOver,
                 Action::CopyScene,
+                None,
                 actions,
             );
 
@@ -4127,6 +4329,10 @@ impl App {
             Action::ComposeReorder(from, to) => self.compose_reorder(from, to),
             Action::ComposeSave => self.compose_save(),
             Action::ComposeApply => self.compose_apply(),
+            Action::EditComposerSlot(idx) => self.edit_composer_slot(idx),
+            Action::EditLibraryPatch(name) => self.edit_library_patch(&name),
+            Action::SaveOfflineEdit => self.save_offline_edit(),
+            Action::CloseOfflineEdit => self.close_offline_edit(),
             Action::ToggleBlockLib => self.block_lib_open = !self.block_lib_open,
             Action::SaveBlockPreset(name) => self.save_block_preset(&name),
             Action::LoadBlockPreset(name) => self.load_block_preset(&name),
@@ -4524,6 +4730,12 @@ impl App {
                     .on_hover_text("drag onto another slot to re-order");
                     ui.label(egui::RichText::new(format!("U{slot:03}")).monospace());
                     ui.add_sized([240.0, 18.0], egui::Label::new(label).truncate());
+                    if action_button(ui, "Edit", ActionKind::Read)
+                        .on_hover_text("edit this slot's patch offline (no device)")
+                        .clicked()
+                    {
+                        actions.push(Action::EditComposerSlot(idx));
+                    }
                     if action_button(ui, "Clear", ActionKind::Caution)
                         .on_hover_text("reset this slot to INIT")
                         .clicked()
@@ -4802,5 +5014,49 @@ mod tests {
         assert_eq!(v, vec![0, 1, 2]);
         move_within(&mut v, 9, 0);
         assert_eq!(v, vec![0, 1, 2]);
+    }
+
+    fn test_app() -> App {
+        App::new(
+            crate::device::placeholder(),
+            false,
+            Box::new(|| crate::device::open(true, None)),
+        )
+    }
+
+    #[test]
+    fn offline_edit_of_a_composer_slot_saves_back() {
+        let mut app = test_app();
+        app.edit_composer_slot(2);
+        assert_eq!(app.edit_slot, Some(SCRATCH));
+
+        // A pure offline param edit changes only the scratch, not the composer.
+        app.set_param(SCRATCH, "comp-level", Value::Int(77));
+        assert_eq!(app.edit_scratch.get("comp-level"), Some(Value::Int(77)));
+        assert_ne!(
+            app.compose.get(2).and_then(|p| p.get("comp-level")),
+            Some(Value::Int(77))
+        );
+        assert!(app.edit_scratch != app.edit_base, "edit should be dirty");
+
+        // Save writes the scratch back to the slot and re-syncs the baseline.
+        app.save_offline_edit();
+        assert_eq!(
+            app.compose.get(2).and_then(|p| p.get("comp-level")),
+            Some(Value::Int(77))
+        );
+        assert_eq!(app.edit_base, app.edit_scratch, "baseline should re-sync");
+
+        app.close_offline_edit();
+        assert_eq!(app.edit_slot, None);
+    }
+
+    #[test]
+    fn offline_param_edit_does_not_touch_the_bank_rows() {
+        let mut app = test_app();
+        app.edit_composer_slot(0);
+        app.set_param(SCRATCH, "comp-level", Value::Int(13));
+        // The scratch is separate from the (empty) bank rows.
+        assert!(app.rows.iter().all(|r| r.pending_patch.is_none()));
     }
 }
