@@ -4833,7 +4833,7 @@ impl App {
                             actions.push(Action::ComposeRevert(idx));
                         }
                     });
-                    if action_button(ui, "Clear", ActionKind::Caution)
+                    if action_button(ui, "Clear", ActionKind::Destructive)
                         .on_hover_text("reset this slot to INIT")
                         .clicked()
                     {
