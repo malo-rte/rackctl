@@ -81,6 +81,17 @@ impl PatchRow {
     }
 }
 
+/// Drag-and-drop payload: a patch-library name being dragged from the Scene tab's
+/// library panel onto a slot. A newtype so it can't be confused with the slot-index
+/// payload below (egui resolves drops by payload type).
+#[derive(Clone)]
+struct LibPatchDrag(String);
+
+/// Drag-and-drop payload: a composer slot index being dragged onto another slot to
+/// re-order the scene.
+#[derive(Clone, Copy)]
+struct SceneSlotDrag(usize);
+
 /// A UI interaction to apply after the render pass (avoids borrowing `self`
 /// mutably while iterating the rows).
 enum Action {
@@ -110,6 +121,14 @@ enum Action {
     CopyScene(String),
     SaveSceneOver(String),
     PasteScene,
+    ComposeNew,
+    ComposeCapture,
+    ComposeLoad(String),
+    ComposeAssign(usize, String),
+    ComposeClear(usize),
+    ComposeReorder(usize, usize),
+    ComposeSave,
+    ComposeApply,
     ToggleBlockLib,
     SaveBlockPreset(String),
     LoadBlockPreset(String),
@@ -139,6 +158,8 @@ enum Tab {
     Presets,
     /// The on-disk library of saved patches and effect blocks.
     Library,
+    /// The offline scene composer — build a whole-bank scene from the patch library.
+    Scene,
 }
 
 /// Parse a saved patch file: a typed `Patch` (the readable, grouped-by-block form
@@ -163,6 +184,16 @@ fn parse_block_text(text: &str) -> Result<rackctl_gx700::typed::BlockData, Strin
         return res;
     }
     serde_json::from_str(text).map_err(|_| "unrecognised block file".to_owned())
+}
+
+/// Move the item at index `from` to index `to`, shifting the items in between (the
+/// drag-to-reorder operation). Out-of-range or no-op moves leave the vec untouched.
+fn move_within<T>(items: &mut Vec<T>, from: usize, to: usize) {
+    if from == to || from >= items.len() || to >= items.len() {
+        return;
+    }
+    let item = items.remove(from);
+    items.insert(to, item);
 }
 
 /// Parse a saved scene (a whole bank): our envelope or a bare patch array.
@@ -1479,6 +1510,12 @@ pub(crate) struct App {
     block_lib_open: bool,
     /// A Refresh is awaiting confirmation because it would discard staged edits.
     confirm_refresh: bool,
+    /// The scene being composed in the Scene tab: one patch per user slot, edited
+    /// offline (independent of the live bank) until applied to the unit or saved.
+    /// Always `USER_SLOTS` long; an untouched slot holds an INIT (default) patch.
+    compose: Vec<TypedPatch>,
+    /// Save-as / loaded-scene name for the composer.
+    compose_name: String,
     /// Which screen is showing.
     tab: Tab,
     /// The effect block selected in the Edit tab.
@@ -1549,6 +1586,8 @@ impl App {
             pending_delete: None,
             block_lib_open: false,
             confirm_refresh: false,
+            compose: vec![TypedPatch::default(); usize::from(USER_SLOTS)],
+            compose_name: String::new(),
             tab: Tab::Patches,
             selected_block: Block::Compressor,
             bulk_prompt: false,
@@ -2104,6 +2143,21 @@ impl App {
                 return;
             }
         };
+        let staged = self.stage_scene(patches);
+        // Reflect the now-playing slot's new content in the active sound.
+        if let Some(playing) = self.now_playing
+            && playing <= USER_SLOTS
+        {
+            self.audition(playing);
+        }
+        self.status = format!(
+            "loaded scene \u{201c}{name}\u{201d} — {staged} patches staged; Write changes to store"
+        );
+    }
+
+    /// Stage `patches` into the user-bank rows, one per slot (capped at `USER_SLOTS`),
+    /// marking each slot dirty so a subsequent Write stores it. Returns the count.
+    fn stage_scene(&mut self, patches: Vec<TypedPatch>) -> u16 {
         let mut staged = 0u16;
         for (i, patch) in patches.into_iter().enumerate() {
             let Ok(slot) = u16::try_from(i + 1) else {
@@ -2119,15 +2173,102 @@ impl App {
                 staged += 1;
             }
         }
-        // Reflect the now-playing slot's new content in the active sound.
-        if let Some(playing) = self.now_playing
-            && playing <= USER_SLOTS
-        {
-            self.audition(playing);
+        staged
+    }
+
+    // ---- The offline scene composer (Scene tab) ----
+
+    /// Start a fresh scene: every slot reset to an INIT (default) patch.
+    fn compose_new(&mut self) {
+        self.compose = vec![TypedPatch::default(); usize::from(USER_SLOTS)];
+        self.compose_name.clear();
+        "started a new scene (all slots INIT)".clone_into(&mut self.status);
+    }
+
+    /// Copy the current device bank into the composer (needs the bank fully read).
+    fn compose_capture(&mut self) {
+        if let Some(bank) = self.current_bank() {
+            self.compose = bank;
+            "captured the current bank into the composer".clone_into(&mut self.status);
         }
-        self.status = format!(
-            "loaded scene \u{201c}{name}\u{201d} — {staged} patches staged; Write changes to store"
-        );
+    }
+
+    /// Load a saved scene from the library into the composer for editing.
+    fn compose_load(&mut self, name: &str) {
+        let Some(path) = config::lib_path(config::scenes_dir(), name) else {
+            return;
+        };
+        let patches = match config::read_text(&path).map(|t| parse_scene_text(&t)) {
+            Some(Ok(p)) => p,
+            Some(Err(e)) => {
+                self.status = format!("can't load scene \u{201c}{name}\u{201d}: {e}");
+                return;
+            }
+            None => {
+                self.status = format!("could not read scene \u{201c}{name}\u{201d}");
+                return;
+            }
+        };
+        let mut slots = patches;
+        // A scene file may be short or long; normalise to exactly one patch per slot.
+        slots.resize(usize::from(USER_SLOTS), TypedPatch::default());
+        self.compose = slots;
+        name.clone_into(&mut self.compose_name);
+        self.status = format!("loaded scene \u{201c}{name}\u{201d} into the composer");
+    }
+
+    /// Place patch-library patch `name` into composer slot `idx` (0-based).
+    fn compose_assign(&mut self, idx: usize, name: &str) {
+        let Some(path) = config::lib_path(config::patches_dir(), name) else {
+            return;
+        };
+        let loaded = match config::read_text(&path).as_deref().map(parse_patch_text) {
+            Some(Ok(p)) => p,
+            Some(Err(e)) => {
+                self.status = format!("can't place \u{201c}{name}\u{201d}: {e}");
+                return;
+            }
+            None => {
+                self.status = format!("could not read patch \u{201c}{name}\u{201d}");
+                return;
+            }
+        };
+        match self.compose.get_mut(idx) {
+            Some(slot) => *slot = loaded,
+            None => return,
+        }
+        self.status = format!("placed \u{201c}{name}\u{201d} into U{:03}", idx + 1);
+    }
+
+    /// Reset composer slot `idx` to an INIT (default) patch.
+    fn compose_clear(&mut self, idx: usize) {
+        if let Some(slot) = self.compose.get_mut(idx) {
+            *slot = TypedPatch::default();
+        }
+    }
+
+    /// Move a composer slot from one position to another (drag re-order).
+    fn compose_reorder(&mut self, from: usize, to: usize) {
+        move_within(&mut self.compose, from, to);
+    }
+
+    /// Save the composed scene to the scene library under its current name.
+    fn compose_save(&mut self) {
+        let name = self.compose_name.clone();
+        let scene = self.compose.clone();
+        self.save_scene_named(&name, &scene);
+    }
+
+    /// Apply the composed scene to the unit: stage every slot, then batch-write
+    /// (verified per slot, behind the progress bar) — replacing the whole bank.
+    fn compose_apply(&mut self) {
+        if !self.editable() {
+            "connect and enter BULK LOAD mode before applying".clone_into(&mut self.status);
+            return;
+        }
+        let scene = self.compose.clone();
+        self.stage_scene(scene);
+        self.start_write();
     }
 
     /// The selected block's current data (from the now-playing patch), if any.
@@ -3978,6 +4119,14 @@ impl App {
             Action::CopyScene(name) => self.copy_scene(&name),
             Action::SaveSceneOver(name) => self.save_scene_over(&name),
             Action::PasteScene => self.paste_scene(),
+            Action::ComposeNew => self.compose_new(),
+            Action::ComposeCapture => self.compose_capture(),
+            Action::ComposeLoad(name) => self.compose_load(&name),
+            Action::ComposeAssign(idx, name) => self.compose_assign(idx, &name),
+            Action::ComposeClear(idx) => self.compose_clear(idx),
+            Action::ComposeReorder(from, to) => self.compose_reorder(from, to),
+            Action::ComposeSave => self.compose_save(),
+            Action::ComposeApply => self.compose_apply(),
             Action::ToggleBlockLib => self.block_lib_open = !self.block_lib_open,
             Action::SaveBlockPreset(name) => self.save_block_preset(&name),
             Action::LoadBlockPreset(name) => self.load_block_preset(&name),
@@ -4191,6 +4340,12 @@ impl eframe::App for App {
                 {
                     actions.push(Action::SelectTab(Tab::Library));
                 }
+                if ui
+                    .selectable_label(self.tab == Tab::Scene, "Scene")
+                    .clicked()
+                {
+                    actions.push(Action::SelectTab(Tab::Scene));
+                }
                 ui.separator();
                 if self.connected {
                     if let Some(writer) = &self.writer {
@@ -4266,6 +4421,128 @@ impl App {
     /// The BULK-LOAD modals: the blocking "enter BULK LOAD" gate shown until the
     /// unit is in the mode (the session stays in it, so no switching), and the
     /// The central panel (and the Edit tab's side panel) for the active tab.
+    /// The Scene tab's left panel: the patch library as drag sources. Drag a name
+    /// onto a composer slot to place that patch there.
+    fn show_scene_palette(ui: &mut egui::Ui) {
+        ui.heading("Patch library");
+        ui.label(egui::RichText::new("Drag a patch onto a slot to place it.").weak());
+        ui.separator();
+        let names = config::json_stems(config::patches_dir());
+        if names.is_empty() {
+            ui.label(
+                egui::RichText::new("No saved patches yet — save some in the Library tab first.")
+                    .weak(),
+            );
+            return;
+        }
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for name in &names {
+                let id = egui::Id::new(("scene-palette", name));
+                ui.dnd_drag_source(id, LibPatchDrag(name.clone()), |ui| {
+                    ui.add(egui::Label::new(name).truncate());
+                });
+            }
+        });
+    }
+
+    /// The Scene tab's main panel: scene controls and the 100-slot grid. Each slot is
+    /// a drop target for a library patch (assign) or another slot (re-order).
+    fn show_scene(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        ui.heading("Scene composer");
+        ui.label(
+            egui::RichText::new(
+                "Build a whole-bank scene offline from the patch library, then Apply it \
+                 to the unit (in BULK LOAD) or Save it to the scene library.",
+            )
+            .weak(),
+        );
+        ui.horizontal(|ui| {
+            ui.label("Name:");
+            ui.add(
+                egui::TextEdit::singleline(&mut self.compose_name)
+                    .hint_text("scene name")
+                    .desired_width(160.0),
+            );
+            if action_button(ui, "New", ActionKind::Caution)
+                .on_hover_text("reset every slot to INIT")
+                .clicked()
+            {
+                actions.push(Action::ComposeNew);
+            }
+            ui.add_enabled_ui(self.connected, |ui| {
+                if action_button(ui, "Capture bank", ActionKind::Read)
+                    .on_hover_text("copy the current device bank into the composer")
+                    .clicked()
+                {
+                    actions.push(Action::ComposeCapture);
+                }
+            });
+            ui.add_enabled_ui(!self.compose_name.trim().is_empty(), |ui| {
+                if action_button(ui, "Save", ActionKind::Commit)
+                    .on_hover_text("save this scene to the scene library")
+                    .clicked()
+                {
+                    actions.push(Action::ComposeSave);
+                }
+            });
+            ui.add_enabled_ui(self.editable(), |ui| {
+                if action_button(ui, "Apply to unit", ActionKind::Commit)
+                    .on_hover_text("write the whole scene to the unit (replaces the bank)")
+                    .clicked()
+                {
+                    actions.push(Action::ComposeApply);
+                }
+            });
+        });
+        ui.horizontal(|ui| {
+            ui.label("Load scene:");
+            egui::ComboBox::from_id_salt("scene-load")
+                .selected_text("choose…")
+                .show_ui(ui, |ui| {
+                    for name in config::json_stems(config::scenes_dir()) {
+                        if ui.selectable_label(false, &name).clicked() {
+                            actions.push(Action::ComposeLoad(name));
+                        }
+                    }
+                });
+        });
+        ui.separator();
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for (idx, patch) in self.compose.iter().enumerate() {
+                let slot = idx + 1;
+                let label = if patch.name.trim().is_empty() {
+                    "(INIT)".to_owned()
+                } else {
+                    patch.name.clone()
+                };
+                let row = ui.horizontal(|ui| {
+                    let drag_id = egui::Id::new(("scene-slot", slot));
+                    ui.dnd_drag_source(drag_id, SceneSlotDrag(idx), |ui| {
+                        ui.label(egui::RichText::new("↕").weak());
+                    })
+                    .response
+                    .on_hover_text("drag onto another slot to re-order");
+                    ui.label(egui::RichText::new(format!("U{slot:03}")).monospace());
+                    ui.add_sized([240.0, 18.0], egui::Label::new(label).truncate());
+                    if action_button(ui, "Clear", ActionKind::Caution)
+                        .on_hover_text("reset this slot to INIT")
+                        .clicked()
+                    {
+                        actions.push(Action::ComposeClear(idx));
+                    }
+                });
+                // The whole row is a drop target: a library patch assigns, a dragged
+                // slot re-orders. egui picks the branch by payload type.
+                let resp = row.response;
+                if let Some(p) = resp.dnd_release_payload::<LibPatchDrag>() {
+                    actions.push(Action::ComposeAssign(idx, p.0.clone()));
+                } else if let Some(p) = resp.dnd_release_payload::<SceneSlotDrag>() {
+                    actions.push(Action::ComposeReorder(p.0, idx));
+                }
+            }
+        });
+    }
+
     fn show_central(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         match self.tab {
             Tab::Patches => {
@@ -4292,6 +4569,17 @@ impl App {
             Tab::Library => {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     self.show_library(ui, actions);
+                });
+            }
+            Tab::Scene => {
+                egui::SidePanel::left("scene-library")
+                    .resizable(true)
+                    .default_width(200.0)
+                    .show(ctx, |ui| {
+                        Self::show_scene_palette(ui);
+                    });
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    self.show_scene(ui, actions);
                 });
             }
         }
@@ -4489,5 +4777,30 @@ mod tests {
     #[test]
     fn parse_scene_rejects_garbage() {
         assert!(parse_scene_text("not a scene file").is_err());
+    }
+
+    #[test]
+    fn move_within_drags_an_item_down() {
+        let mut v = vec![0, 1, 2, 3, 4];
+        move_within(&mut v, 1, 3);
+        assert_eq!(v, vec![0, 2, 3, 1, 4]);
+    }
+
+    #[test]
+    fn move_within_drags_an_item_up() {
+        let mut v = vec![0, 1, 2, 3, 4];
+        move_within(&mut v, 3, 1);
+        assert_eq!(v, vec![0, 3, 1, 2, 4]);
+    }
+
+    #[test]
+    fn move_within_ignores_noop_and_out_of_range() {
+        let mut v = vec![0, 1, 2];
+        move_within(&mut v, 1, 1);
+        assert_eq!(v, vec![0, 1, 2]);
+        move_within(&mut v, 0, 9);
+        assert_eq!(v, vec![0, 1, 2]);
+        move_within(&mut v, 9, 0);
+        assert_eq!(v, vec![0, 1, 2]);
     }
 }
