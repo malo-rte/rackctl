@@ -3579,25 +3579,6 @@ impl App {
     fn show_library(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         ui.heading("Library");
         ui.label(egui::RichText::new("Saved patches and effect blocks on this computer.").weak());
-        // Pending-delete confirmation bar.
-        if let Some(path) = self.pending_delete.clone() {
-            let name = path
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            ui.horizontal(|ui| {
-                ui.colored_label(
-                    egui::Color32::from_rgb(220, 120, 60),
-                    format!("Delete \u{201c}{name}\u{201d}?"),
-                );
-                if action_button(ui, "Delete", ActionKind::Destructive).clicked() {
-                    actions.push(Action::ConfirmDelete);
-                }
-                if action_button(ui, "Cancel", ActionKind::Neutral).clicked() {
-                    actions.push(Action::CancelDelete);
-                }
-            });
-        }
         ui.separator();
         let has_slot = self.now_playing.is_some();
         egui::ScrollArea::vertical().show(ui, |ui| {
@@ -3914,6 +3895,7 @@ impl eframe::App for App {
         }
 
         self.show_bulk_modals(ctx, &mut actions);
+        self.show_delete_modal(ctx, &mut actions);
 
         for action in actions {
             self.apply(action);
@@ -3924,6 +3906,35 @@ impl eframe::App for App {
 impl App {
     /// The BULK-LOAD modals: the blocking "enter BULK LOAD" gate shown until the
     /// unit is in the mode (the session stays in it, so no switching), and the
+    /// The library delete-confirmation modal, shown whenever a delete is pending
+    /// (from any tab — the global Library or a per-block library).
+    fn show_delete_modal(&self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        let Some(path) = self.pending_delete.as_ref() else {
+            return;
+        };
+        let name = path
+            .file_stem()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        egui::Window::new("Delete from library")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "Delete \u{201c}{name}\u{201d} from the library? This can't be undone."
+                ));
+                ui.horizontal(|ui| {
+                    if action_button(ui, "Delete", ActionKind::Destructive).clicked() {
+                        actions.push(Action::ConfirmDelete);
+                    }
+                    if action_button(ui, "Cancel", ActionKind::Neutral).clicked() {
+                        actions.push(Action::CancelDelete);
+                    }
+                });
+            });
+    }
+
     /// pre-write confirm for the batch store.
     fn show_bulk_modals(&self, ctx: &egui::Context, actions: &mut Vec<Action>) {
         if self.bulk_ok == Some(false) {
