@@ -22,6 +22,7 @@ use rackctl_ui::{ActionKind, action_button};
 use crate::config::{self, CachedRow, GuiConfig};
 use crate::device::{self, Device, SharedDevice};
 use crate::loader::{Loaded, Loader, PRESET_END, PRESET_SLOTS, PRESET_START, USER_SLOTS};
+use crate::writer::{Writer, Written};
 
 /// Reopen the device on demand (the Retry button), e.g. after the port appears.
 pub(crate) type Reopen = Box<dyn Fn() -> anyhow::Result<Device>>;
@@ -1437,6 +1438,12 @@ pub(crate) struct App {
     /// The effect block selected in the Edit tab.
     selected_block: Block,
     bulk_prompt: bool,
+    /// The background batch write (scene / "Write changes"), while it runs, plus its
+    /// running tally for the progress bar and final report.
+    writer: Option<Writer>,
+    write_progress: usize,
+    write_stored: usize,
+    write_failed: Vec<u16>,
     /// Whether the unit is in BULK LOAD mode: `None` until first probed, then
     /// `Some(true/false)`. While `Some(false)` a blocking dialog asks the user to
     /// enter BULK LOAD; the whole session then stays in it, so no mode switching.
@@ -1497,6 +1504,10 @@ impl App {
             tab: Tab::Patches,
             selected_block: Block::Compressor,
             bulk_prompt: false,
+            writer: None,
+            write_progress: 0,
+            write_stored: 0,
+            write_failed: Vec::new(),
             bulk_ok: None,
             last_probe: 0.0,
             status: if connected {
@@ -1541,7 +1552,10 @@ impl App {
     /// device is connected, no bank read is in flight, and we are not blocked
     /// waiting for the unit to enter BULK LOAD mode.
     fn editable(&self) -> bool {
-        self.connected && self.loader.is_none() && self.bulk_ok != Some(false)
+        self.connected
+            && self.loader.is_none()
+            && self.writer.is_none()
+            && self.bulk_ok != Some(false)
     }
 
     /// Probe the unit's BULK LOAD mode and react: start the bank read once it's in
@@ -2224,48 +2238,65 @@ impl App {
     /// "Write changes to unit" button). Attempts every dirty row even if some fail,
     /// committing each success so its row clears, and reports any failures. Returns
     /// the number of patches successfully stored.
-    fn write_all(&mut self) -> usize {
-        let dirty: Vec<u16> = self
-            .rows
-            .iter()
-            .filter(|r| r.dirty())
-            .map(|r| r.slot)
+    fn start_write(&mut self) {
+        // Capture the effective bytes of every dirty slot now, and hand them to the
+        // background writer (so the UI stays responsive and shows progress).
+        let writes: Vec<(u16, RawPatch)> = (1..=USER_SLOTS)
+            .filter(|&slot| self.row(slot).is_some_and(PatchRow::dirty))
+            .filter_map(|slot| self.effective_patch(slot).map(|t| (slot, t.to_raw())))
             .collect();
-        if dirty.is_empty() {
+        if writes.is_empty() {
             "no pending changes to store".clone_into(&mut self.status);
-            return 0;
+            return;
         }
-        let mut stored = 0usize;
-        let mut failed: Vec<u16> = Vec::new();
-        let mut last_err = String::new();
-        for slot in &dirty {
-            self.ensure_loaded(*slot);
-            match self.store_one(*slot) {
-                Ok(()) => {
-                    self.commit_row(*slot);
-                    stored = stored.saturating_add(1);
+        let total = writes.len();
+        self.write_progress = 0;
+        self.write_stored = 0;
+        self.write_failed.clear();
+        self.writer = Some(Writer::spawn(Arc::clone(&self.device), writes));
+        self.status = format!("writing {total} patch(es) to the unit…");
+    }
+
+    /// Drain the background writer, committing each stored slot and reporting when
+    /// the batch finishes.
+    fn drain_write(&mut self) {
+        let results = match &self.writer {
+            Some(w) => w.drain(),
+            None => return,
+        };
+        let mut done = false;
+        for ev in results {
+            match ev {
+                Written::Ok(slot) => {
+                    self.commit_row(slot);
+                    self.write_stored += 1;
+                    self.write_progress += 1;
                 }
-                Err(msg) => {
-                    failed.push(*slot);
-                    last_err = msg;
+                Written::Failed(slot) => {
+                    self.write_failed.push(slot);
+                    self.write_progress += 1;
                 }
+                Written::Done => done = true,
             }
         }
-        self.save_cache();
-        if failed.is_empty() {
-            self.status = format!("stored {stored} patch change(s)");
-        } else {
-            // A failed store almost always means the unit dropped out of BULK LOAD
-            // mode: re-block on the probe so the dialog guides the user back in.
-            self.bulk_ok = Some(false);
-            let slots: Vec<String> = failed.iter().map(|s| slot_label(*s)).collect();
-            self.status = format!(
-                "stored {stored}, {} failed ({}) — {last_err}",
-                failed.len(),
-                slots.join(", ")
-            );
+        if done {
+            self.writer = None;
+            self.save_cache();
+            if self.write_failed.is_empty() {
+                self.status = format!("stored {} patch change(s)", self.write_stored);
+            } else {
+                // A failed store almost always means the unit dropped out of BULK
+                // LOAD mode: re-block on the probe so the dialog guides the user back.
+                self.bulk_ok = Some(false);
+                let slots: Vec<String> = self.write_failed.iter().map(|s| slot_label(*s)).collect();
+                self.status = format!(
+                    "stored {}, {} failed ({}) — put the GX-700 in BULK LOAD mode",
+                    self.write_stored,
+                    self.write_failed.len(),
+                    slots.join(", ")
+                );
+            }
         }
-        stored
     }
 
     fn save_cache(&self) {
@@ -3763,7 +3794,7 @@ impl App {
             Action::CloseBulkPrompt => self.bulk_prompt = false,
             Action::WriteAll => {
                 self.bulk_prompt = false;
-                self.write_all();
+                self.start_write();
             }
             Action::ProbeBulk => self.probe_now(),
         }
@@ -3907,7 +3938,8 @@ impl eframe::App for App {
         self.drain_loader();
         self.maybe_load_presets();
         self.drain_preset_loader();
-        if self.loader.is_some() || self.preset_loader.is_some() {
+        self.drain_write();
+        if self.loader.is_some() || self.preset_loader.is_some() || self.writer.is_some() {
             ctx.request_repaint_after(Duration::from_millis(150));
         }
         // Keep re-probing while waiting for the unit to enter BULK LOAD mode.
@@ -3949,28 +3981,41 @@ impl eframe::App for App {
                 }
                 ui.separator();
                 if self.connected {
-                    if self.loader.is_some() {
-                        let frac = f32::from(self.progress) / f32::from(USER_SLOTS);
+                    if let Some(writer) = &self.writer {
+                        // A batch write (scene / Write changes) is running.
+                        let total = writer.total().max(1);
+                        let progress = self.write_progress.min(writer.total());
+                        let frac = f32::from(u16::try_from(progress).unwrap_or(0))
+                            / f32::from(u16::try_from(total).unwrap_or(1));
                         ui.add(
                             egui::ProgressBar::new(frac)
-                                .desired_width(160.0)
-                                .text(format!("reading {}/{USER_SLOTS}", self.progress)),
+                                .desired_width(220.0)
+                                .text(format!("writing {progress}/{}", writer.total())),
                         );
-                    } else if action_button(ui, "Refresh", ActionKind::Read).clicked() {
-                        actions.push(Action::Refresh);
-                    }
-                    let pending = self.dirty_count();
-                    ui.add_enabled_ui(self.editable() && pending > 0, |ui| {
-                        if action_button(
-                            ui,
-                            format!("Write changes to unit ({pending})"),
-                            ActionKind::Commit,
-                        )
-                        .clicked()
-                        {
-                            actions.push(Action::OpenBulkPrompt);
+                    } else {
+                        if self.loader.is_some() {
+                            let frac = f32::from(self.progress) / f32::from(USER_SLOTS);
+                            ui.add(
+                                egui::ProgressBar::new(frac)
+                                    .desired_width(160.0)
+                                    .text(format!("reading {}/{USER_SLOTS}", self.progress)),
+                            );
+                        } else if action_button(ui, "Refresh", ActionKind::Read).clicked() {
+                            actions.push(Action::Refresh);
                         }
-                    });
+                        let pending = self.dirty_count();
+                        ui.add_enabled_ui(self.editable() && pending > 0, |ui| {
+                            if action_button(
+                                ui,
+                                format!("Write changes to unit ({pending})"),
+                                ActionKind::Commit,
+                            )
+                            .clicked()
+                            {
+                                actions.push(Action::OpenBulkPrompt);
+                            }
+                        });
+                    }
                 } else {
                     ui.colored_label(egui::Color32::YELLOW, "not connected");
                     if action_button(ui, "Retry", ActionKind::Read).clicked() {
@@ -3993,34 +4038,7 @@ impl eframe::App for App {
             ui.label(&self.status);
         });
 
-        match self.tab {
-            Tab::Patches => {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    self.show_patch_list(ui, &mut actions);
-                });
-            }
-            Tab::Edit => {
-                egui::SidePanel::left("blocks")
-                    .resizable(true)
-                    .default_width(180.0)
-                    .show(ctx, |ui| {
-                        self.show_block_list(ui, &mut actions);
-                    });
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    self.show_block_params(ui, &mut actions);
-                });
-            }
-            Tab::Presets => {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    self.show_preset_list(ui, &mut actions);
-                });
-            }
-            Tab::Library => {
-                egui::CentralPanel::default().show(ctx, |ui| {
-                    self.show_library(ui, &mut actions);
-                });
-            }
-        }
+        self.show_central(ctx, &mut actions);
 
         self.show_bulk_modals(ctx, &mut actions);
         self.show_delete_modal(ctx, &mut actions);
@@ -4034,6 +4052,38 @@ impl eframe::App for App {
 impl App {
     /// The BULK-LOAD modals: the blocking "enter BULK LOAD" gate shown until the
     /// unit is in the mode (the session stays in it, so no switching), and the
+    /// The central panel (and the Edit tab's side panel) for the active tab.
+    fn show_central(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
+        match self.tab {
+            Tab::Patches => {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    self.show_patch_list(ui, actions);
+                });
+            }
+            Tab::Edit => {
+                egui::SidePanel::left("blocks")
+                    .resizable(true)
+                    .default_width(180.0)
+                    .show(ctx, |ui| {
+                        self.show_block_list(ui, actions);
+                    });
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    self.show_block_params(ui, actions);
+                });
+            }
+            Tab::Presets => {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    self.show_preset_list(ui, actions);
+                });
+            }
+            Tab::Library => {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    self.show_library(ui, actions);
+                });
+            }
+        }
+    }
+
     /// The library delete-confirmation modal, shown whenever a delete is pending
     /// (from any tab — the global Library or a per-block library).
     fn show_delete_modal(&self, ctx: &egui::Context, actions: &mut Vec<Action>) {

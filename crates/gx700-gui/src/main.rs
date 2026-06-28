@@ -5,6 +5,7 @@ mod app;
 mod config;
 mod device;
 mod loader;
+mod writer;
 
 use anyhow::Result;
 use clap::Parser;
