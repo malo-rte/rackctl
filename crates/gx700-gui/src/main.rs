@@ -49,10 +49,11 @@ fn install_fonts(ctx: &eframe::egui::Context) {
     if let Some(mono) = fonts.families.get_mut(&FontFamily::Monospace) {
         mono.insert(0, MONO.to_owned());
     }
-    // Proportional: keep the default UI face first, append the Propo variant as a
-    // fallback so icon code points render at full width in proportional text.
+    // Proportional: JetBrains Mono (Propo) as the primary UI face — it also carries
+    // the full-width icon glyphs. The default faces stay after it as fallback for
+    // any code points it lacks.
     if let Some(prop) = fonts.families.get_mut(&FontFamily::Proportional) {
-        prop.push(PROPO.to_owned());
+        prop.insert(0, PROPO.to_owned());
     }
     ctx.set_fonts(fonts);
 }
