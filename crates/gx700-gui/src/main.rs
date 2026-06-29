@@ -22,27 +22,37 @@ struct Cli {
     port: Option<String>,
 }
 
-/// Install the `JetBrains Mono Nerd Font`: as the monospace text face, and as a fallback
-/// on the proportional face so the Nerd Font icon glyphs (used on list buttons)
-/// resolve everywhere. The font is vendored under `assets/fonts/` (SIL OFL 1.1).
+/// Install the `JetBrains Mono Nerd Font` (vendored under `assets/fonts/`, SIL OFL
+/// 1.1). Two variants are used: the monospace face for monospace text (the slot
+/// labels and the Loop diagram, which need cell alignment), and the *proportional*
+/// (Propo) face as a fallback on the UI face — its icon glyphs carry their natural
+/// advance width, so the list-button icons aren't clipped (the mono variant crams
+/// wide icons into one cell and cuts them off on the right).
 fn install_fonts(ctx: &eframe::egui::Context) {
     use eframe::egui::{FontData, FontDefinitions, FontFamily};
-    const NERD: &str = "jetbrains-mono-nerd";
+    const MONO: &str = "jetbrains-mono-nerd";
+    const PROPO: &str = "jetbrains-mono-nerd-propo";
     let mut fonts = FontDefinitions::default();
     fonts.font_data.insert(
-        NERD.to_owned(),
+        MONO.to_owned(),
         FontData::from_static(include_bytes!(
             "../assets/fonts/JetBrainsMonoNerdFont-Regular.ttf"
         )),
     );
+    fonts.font_data.insert(
+        PROPO.to_owned(),
+        FontData::from_static(include_bytes!(
+            "../assets/fonts/JetBrainsMonoNerdFontPropo-Regular.ttf"
+        )),
+    );
     // Monospace: JetBrains Mono first (the visible monospace face).
     if let Some(mono) = fonts.families.get_mut(&FontFamily::Monospace) {
-        mono.insert(0, NERD.to_owned());
+        mono.insert(0, MONO.to_owned());
     }
-    // Proportional: keep the default UI face first, append the Nerd Font as a
-    // fallback so icon code points still render in proportional text (buttons).
+    // Proportional: keep the default UI face first, append the Propo variant as a
+    // fallback so icon code points render at full width in proportional text.
     if let Some(prop) = fonts.families.get_mut(&FontFamily::Proportional) {
-        prop.push(NERD.to_owned());
+        prop.push(PROPO.to_owned());
     }
     ctx.set_fonts(fonts);
 }
