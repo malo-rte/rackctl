@@ -3076,69 +3076,71 @@ impl App {
             self.show_block_library(ui, slot, block, actions);
             return;
         }
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            // The Equalizer gets a custom band-table layout (curve + Gain/Freq/Q
-            // grid); every other block uses the generic per-parameter list.
-            if block == Block::Equalizer {
-                self.show_eq_editor(ui, slot, &typed, actions);
-                return;
-            }
-            if block == Block::Compressor {
-                self.show_comp_editor(ui, slot, &typed, actions);
-                return;
-            }
-            if block == Block::NoiseSuppressor {
-                self.show_ns_editor(ui, slot, &typed, actions);
-                return;
-            }
-            if block == Block::Reverb {
-                self.show_reverb_editor(ui, slot, &typed, actions);
-                return;
-            }
-            if block == Block::Distortion {
-                self.show_dist_editor(ui, slot, &typed, actions);
-                return;
-            }
-            if block == Block::Preamp {
-                self.show_preamp_editor(ui, slot, &typed, actions);
-                return;
-            }
-            if block == Block::Delay {
-                self.show_delay_editor(ui, slot, &typed, actions);
-                return;
-            }
-            if block == Block::SpeakerSim {
-                self.show_speaker_editor(ui, slot, &typed, actions);
-                return;
-            }
-            if block == Block::Wah {
-                self.show_wah_editor(ui, slot, &typed, actions);
-                return;
-            }
-            if block == Block::Loop {
-                self.show_loop_editor(ui, slot, &typed, actions);
-                return;
-            }
-            if block == Block::Chorus {
-                self.show_chorus_editor(ui, slot, &typed, actions);
-                return;
-            }
-            if block == Block::TremoloPan {
-                self.show_trem_editor(ui, slot, &typed, actions);
-                return;
-            }
-            if block == Block::Modulation {
-                self.show_mod_editor(ui, slot, &typed, actions);
-                return;
-            }
-            for &p in param::ALL {
-                if p.block() != block {
-                    continue;
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                // The Equalizer gets a custom band-table layout (curve + Gain/Freq/Q
+                // grid); every other block uses the generic per-parameter list.
+                if block == Block::Equalizer {
+                    self.show_eq_editor(ui, slot, &typed, actions);
+                    return;
                 }
-                let value = typed.get(p.key()).unwrap_or(Value::Int(0));
-                param_widget(ui, slot, p, value, self.edit_enabled(), actions);
-            }
-        });
+                if block == Block::Compressor {
+                    self.show_comp_editor(ui, slot, &typed, actions);
+                    return;
+                }
+                if block == Block::NoiseSuppressor {
+                    self.show_ns_editor(ui, slot, &typed, actions);
+                    return;
+                }
+                if block == Block::Reverb {
+                    self.show_reverb_editor(ui, slot, &typed, actions);
+                    return;
+                }
+                if block == Block::Distortion {
+                    self.show_dist_editor(ui, slot, &typed, actions);
+                    return;
+                }
+                if block == Block::Preamp {
+                    self.show_preamp_editor(ui, slot, &typed, actions);
+                    return;
+                }
+                if block == Block::Delay {
+                    self.show_delay_editor(ui, slot, &typed, actions);
+                    return;
+                }
+                if block == Block::SpeakerSim {
+                    self.show_speaker_editor(ui, slot, &typed, actions);
+                    return;
+                }
+                if block == Block::Wah {
+                    self.show_wah_editor(ui, slot, &typed, actions);
+                    return;
+                }
+                if block == Block::Loop {
+                    self.show_loop_editor(ui, slot, &typed, actions);
+                    return;
+                }
+                if block == Block::Chorus {
+                    self.show_chorus_editor(ui, slot, &typed, actions);
+                    return;
+                }
+                if block == Block::TremoloPan {
+                    self.show_trem_editor(ui, slot, &typed, actions);
+                    return;
+                }
+                if block == Block::Modulation {
+                    self.show_mod_editor(ui, slot, &typed, actions);
+                    return;
+                }
+                for &p in param::ALL {
+                    if p.block() != block {
+                        continue;
+                    }
+                    let value = typed.get(p.key()).unwrap_or(Value::Int(0));
+                    param_widget(ui, slot, p, value, self.edit_enabled(), actions);
+                }
+            });
     }
 
     /// The selected block's preset library (shown when its "Library" is open):
@@ -3191,40 +3193,42 @@ impl App {
             ui.label(egui::RichText::new("No presets for this effect yet.").weak());
             return;
         }
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for name in &names {
-                ui.horizontal(|ui| {
-                    if action_button(ui, icon::LOAD, ActionKind::Read)
-                        .on_hover_text("apply this preset to the block")
-                        .clicked()
-                    {
-                        actions.push(Action::LoadBlockPreset(name.clone()));
-                    }
-                    if action_button(ui, icon::SAVE, ActionKind::Commit)
-                        .on_hover_text("overwrite this preset with the current block")
-                        .clicked()
-                    {
-                        actions.push(Action::SaveBlockPreset(name.clone()));
-                    }
-                    if action_button(ui, icon::COPY, ActionKind::Read)
-                        .on_hover_text("copy this preset to the clipboard")
-                        .clicked()
-                    {
-                        actions.push(Action::CopyBlockPreset(name.clone()));
-                    }
-                    if action_button(ui, icon::DELETE, ActionKind::Destructive)
-                        .on_hover_text("delete this preset")
-                        .clicked()
-                        && let Some(dir) = block_presets_dir(block)
-                    {
-                        actions.push(Action::RequestDelete(
-                            dir.join(format!("{}.json", config::sanitize(name))),
-                        ));
-                    }
-                    ui.label(name);
-                });
-            }
-        });
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for name in &names {
+                    ui.horizontal(|ui| {
+                        if action_button(ui, icon::LOAD, ActionKind::Read)
+                            .on_hover_text("apply this preset to the block")
+                            .clicked()
+                        {
+                            actions.push(Action::LoadBlockPreset(name.clone()));
+                        }
+                        if action_button(ui, icon::SAVE, ActionKind::Commit)
+                            .on_hover_text("overwrite this preset with the current block")
+                            .clicked()
+                        {
+                            actions.push(Action::SaveBlockPreset(name.clone()));
+                        }
+                        if action_button(ui, icon::COPY, ActionKind::Read)
+                            .on_hover_text("copy this preset to the clipboard")
+                            .clicked()
+                        {
+                            actions.push(Action::CopyBlockPreset(name.clone()));
+                        }
+                        if action_button(ui, icon::DELETE, ActionKind::Destructive)
+                            .on_hover_text("delete this preset")
+                            .clicked()
+                            && let Some(dir) = block_presets_dir(block)
+                        {
+                            actions.push(Action::RequestDelete(
+                                dir.join(format!("{}.json", config::sanitize(name))),
+                            ));
+                        }
+                        ui.label(name);
+                    });
+                }
+            });
     }
 
     /// The Equalizer's custom UI: enable, the response curve, then a band table
@@ -4089,105 +4093,108 @@ impl App {
             )
             .weak(),
         );
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            egui::Grid::new("patches")
-                .striped(true)
-                .num_columns(4)
-                .show(ui, |ui| {
-                    for row in &self.rows {
-                        let playing = self.now_playing == Some(row.slot);
-                        // Column 1: per-row action buttons (left-aligned, like the
-                        // library lists).
-                        self.patch_row_buttons(ui, row, actions);
-                        // Column 2: the slot id, click to audition. A slot whose read
-                        // was skipped is marked with a warning glyph + tint.
-                        let label = if row.failed {
-                            egui::RichText::new(format!("⚠ U{:03}", row.slot))
-                                .color(egui::Color32::from_rgb(0xE0, 0xA0, 0x30))
-                        } else {
-                            egui::RichText::new(format!("U{:03}", row.slot))
-                        };
-                        // A separate drag handle (↕) is the re-order grip; the slot
-                        // id stays a plain click-to-audition label. They occupy
-                        // different rects, so the drag-sense interaction can't steal
-                        // the label's click (which it does if they share a rect).
-                        let cell = ui.horizontal(|ui| {
-                            let drag_id = egui::Id::new(("patch-drag", row.slot));
-                            ui.add_enabled_ui(self.editable(), |ui| {
-                                ui.dnd_drag_source(drag_id, row.slot, |ui| {
-                                    ui.label(egui::RichText::new("↕").weak());
-                                })
-                                .response
-                                .on_hover_text("drag onto another slot to re-order the bank");
-                            });
-                            let r = ui.add_enabled(
-                                self.editable(),
-                                egui::SelectableLabel::new(playing, label),
-                            );
-                            let r = if row.failed {
-                                r.on_hover_text(
-                                    "read failed — value may be stale; Refresh to retry",
-                                )
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                egui::Grid::new("patches")
+                    .striped(true)
+                    .num_columns(4)
+                    .show(ui, |ui| {
+                        for row in &self.rows {
+                            let playing = self.now_playing == Some(row.slot);
+                            // Column 1: per-row action buttons (left-aligned, like the
+                            // library lists).
+                            self.patch_row_buttons(ui, row, actions);
+                            // Column 2: the slot id, click to audition. A slot whose read
+                            // was skipped is marked with a warning glyph + tint.
+                            let label = if row.failed {
+                                egui::RichText::new(format!("⚠ U{:03}", row.slot))
+                                    .color(egui::Color32::from_rgb(0xE0, 0xA0, 0x30))
                             } else {
-                                r
+                                egui::RichText::new(format!("U{:03}", row.slot))
                             };
-                            if r.clicked() {
-                                actions.push(Action::Audition(row.slot));
+                            // A separate drag handle (↕) is the re-order grip; the slot
+                            // id stays a plain click-to-audition label. They occupy
+                            // different rects, so the drag-sense interaction can't steal
+                            // the label's click (which it does if they share a rect).
+                            let cell = ui.horizontal(|ui| {
+                                let drag_id = egui::Id::new(("patch-drag", row.slot));
+                                ui.add_enabled_ui(self.editable(), |ui| {
+                                    ui.dnd_drag_source(drag_id, row.slot, |ui| {
+                                        ui.label(egui::RichText::new("↕").weak());
+                                    })
+                                    .response
+                                    .on_hover_text("drag onto another slot to re-order the bank");
+                                });
+                                let r = ui.add_enabled(
+                                    self.editable(),
+                                    egui::SelectableLabel::new(playing, label),
+                                );
+                                let r = if row.failed {
+                                    r.on_hover_text(
+                                        "read failed — value may be stale; Refresh to retry",
+                                    )
+                                } else {
+                                    r
+                                };
+                                if r.clicked() {
+                                    actions.push(Action::Audition(row.slot));
+                                }
+                            });
+                            // Re-interact the cell rect as a hover-sensing drop target, so
+                            // a drop released over its SelectableLabel still registers (a
+                            // bare layout response misses drops over interactive children).
+                            let drop = ui.interact(
+                                cell.response.rect,
+                                egui::Id::new(("patch-drop", row.slot)),
+                                egui::Sense::hover(),
+                            );
+                            if self.editable()
+                                && let Some(from) = drop.dnd_release_payload::<u16>()
+                            {
+                                actions.push(Action::ReorderPatch(*from, row.slot));
                             }
-                        });
-                        // Re-interact the cell rect as a hover-sensing drop target, so
-                        // a drop released over its SelectableLabel still registers (a
-                        // bare layout response misses drops over interactive children).
-                        let drop = ui.interact(
-                            cell.response.rect,
-                            egui::Id::new(("patch-drop", row.slot)),
-                            egui::Sense::hover(),
-                        );
-                        if self.editable()
-                            && let Some(from) = drop.dnd_release_payload::<u16>()
-                        {
-                            actions.push(Action::ReorderPatch(*from, row.slot));
-                        }
 
-                        // Column 3: editable patch name (egui keeps the cursor by
-                        // widget id, so a per-frame clone of the buffer is fine). Use
-                        // a fixed allocation: inside a Grid, TextEdit::desired_width
-                        // gets clamped to the (initially tiny) available width and
-                        // the column sticks at a sliver, so add_sized it instead.
-                        let mut name = row.name_edit.clone();
-                        let edit = egui::TextEdit::singleline(&mut name)
-                            .hint_text("—")
-                            .char_limit(NAME_LEN);
-                        let name_size = [180.0, ui.spacing().interact_size.y];
-                        let name_changed = ui
-                            .add_enabled_ui(self.editable(), |ui| {
-                                ui.add_sized(name_size, edit).changed()
-                            })
-                            .inner;
-                        if name_changed {
-                            actions.push(Action::SetName(row.slot, name));
-                        }
+                            // Column 3: editable patch name (egui keeps the cursor by
+                            // widget id, so a per-frame clone of the buffer is fine). Use
+                            // a fixed allocation: inside a Grid, TextEdit::desired_width
+                            // gets clamped to the (initially tiny) available width and
+                            // the column sticks at a sliver, so add_sized it instead.
+                            let mut name = row.name_edit.clone();
+                            let edit = egui::TextEdit::singleline(&mut name)
+                                .hint_text("—")
+                                .char_limit(NAME_LEN);
+                            let name_size = [180.0, ui.spacing().interact_size.y];
+                            let name_changed = ui
+                                .add_enabled_ui(self.editable(), |ui| {
+                                    ui.add_sized(name_size, edit).changed()
+                                })
+                                .inner;
+                            if name_changed {
+                                actions.push(Action::SetName(row.slot, name));
+                            }
 
-                        // Column 4: output level as a compact drag-value (a slider
-                        // here grows to fill the row and bloats the list).
-                        let mut level = i32::from(row.pending_level.unwrap_or(row.stored_level));
-                        let drag = egui::DragValue::new(&mut level).range(0..=100).suffix("%");
-                        let changed = ui
-                            .add_enabled_ui(self.editable(), |ui| {
-                                let r = ui.add(drag).changed();
-                                // Keep the value clear of the vertical scrollbar.
-                                ui.add_space(18.0);
-                                r
-                            })
-                            .inner;
-                        if changed {
-                            let level = u8::try_from(level.clamp(0, 100)).unwrap_or(0);
-                            actions.push(Action::SetLevel(row.slot, level));
+                            // Column 4: output level as a compact drag-value (a slider
+                            // here grows to fill the row and bloats the list).
+                            let mut level =
+                                i32::from(row.pending_level.unwrap_or(row.stored_level));
+                            let drag = egui::DragValue::new(&mut level).range(0..=100).suffix("%");
+                            let changed = ui
+                                .add_enabled_ui(self.editable(), |ui| {
+                                    let r = ui.add(drag).changed();
+                                    // Keep the value clear of the vertical scrollbar.
+                                    ui.add_space(18.0);
+                                    r
+                                })
+                                .inner;
+                            if changed {
+                                let level = u8::try_from(level.clamp(0, 100)).unwrap_or(0);
+                                actions.push(Action::SetLevel(row.slot, level));
+                            }
+                            ui.end_row();
                         }
-                        ui.end_row();
-                    }
-                });
-        });
+                    });
+            });
     }
 
     /// A patch row's action buttons (the leftmost column): Edit, Save/Revert (enabled
@@ -4275,53 +4282,55 @@ impl App {
             );
         }
         ui.separator();
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            egui::Grid::new("presets")
-                .striped(true)
-                .num_columns(4)
-                .show(ui, |ui| {
-                    for row in &self.presets {
-                        let playing = self.now_playing == Some(row.slot);
-                        // Action button first (left-aligned, like every other list).
-                        ui.add_enabled_ui(self.editable(), |ui| {
-                            if action_button(ui, icon::COPY, ActionKind::Read)
-                                .on_hover_text(
-                                    "copy this preset to the clipboard, then Paste it onto a \
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                egui::Grid::new("presets")
+                    .striped(true)
+                    .num_columns(4)
+                    .show(ui, |ui| {
+                        for row in &self.presets {
+                            let playing = self.now_playing == Some(row.slot);
+                            // Action button first (left-aligned, like every other list).
+                            ui.add_enabled_ui(self.editable(), |ui| {
+                                if action_button(ui, icon::COPY, ActionKind::Read)
+                                    .on_hover_text(
+                                        "copy this preset to the clipboard, then Paste it onto a \
                                      user slot on the Patches tab",
-                                )
-                                .clicked()
-                            {
-                                actions.push(Action::CopyRow(row.slot));
+                                    )
+                                    .clicked()
+                                {
+                                    actions.push(Action::CopyRow(row.slot));
+                                }
+                            });
+                            let label = if row.failed {
+                                egui::RichText::new(format!("⚠ {}", slot_label(row.slot)))
+                                    .color(egui::Color32::from_rgb(0xE0, 0xA0, 0x30))
+                            } else {
+                                egui::RichText::new(slot_label(row.slot))
+                            };
+                            let resp = ui.add_enabled(
+                                self.editable(),
+                                egui::SelectableLabel::new(playing, label),
+                            );
+                            if resp.clicked() {
+                                actions.push(Action::Audition(row.slot));
                             }
-                        });
-                        let label = if row.failed {
-                            egui::RichText::new(format!("⚠ {}", slot_label(row.slot)))
-                                .color(egui::Color32::from_rgb(0xE0, 0xA0, 0x30))
-                        } else {
-                            egui::RichText::new(slot_label(row.slot))
-                        };
-                        let resp = ui.add_enabled(
-                            self.editable(),
-                            egui::SelectableLabel::new(playing, label),
-                        );
-                        if resp.clicked() {
-                            actions.push(Action::Audition(row.slot));
+                            let name = if row.name.is_empty() {
+                                "—".to_owned()
+                            } else {
+                                row.name.clone()
+                            };
+                            ui.label(name);
+                            ui.horizontal(|ui| {
+                                ui.label(format!("{}%", row.stored_level));
+                                // Keep the value clear of the vertical scrollbar.
+                                ui.add_space(18.0);
+                            });
+                            ui.end_row();
                         }
-                        let name = if row.name.is_empty() {
-                            "—".to_owned()
-                        } else {
-                            row.name.clone()
-                        };
-                        ui.label(name);
-                        ui.horizontal(|ui| {
-                            ui.label(format!("{}%", row.stored_level));
-                            // Keep the value clear of the vertical scrollbar.
-                            ui.add_space(18.0);
-                        });
-                        ui.end_row();
-                    }
-                });
-        });
+                    });
+            });
     }
 
     /// The Library tab: save the current patch / effect block to disk, and load or
@@ -4332,62 +4341,64 @@ impl App {
         ui.label(egui::RichText::new("Patches you've saved on this computer.").weak());
         ui.separator();
         let has_slot = self.now_playing.is_some();
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.heading("Patches");
-            if !has_slot {
-                ui.label(
-                    egui::RichText::new("Audition a patch to save it or load into its slot.")
-                        .weak(),
-                );
-            }
-            ui.horizontal(|ui| {
-                ui.label("Save current as:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.lib_patch_name)
-                        .hint_text("name")
-                        .desired_width(160.0),
-                );
-                let named = !self.lib_patch_name.trim().is_empty();
-                ui.add_enabled_ui(has_slot && named, |ui| {
-                    if action_button(ui, "Insert", ActionKind::Commit)
-                        .on_hover_text("save the now-playing patch as a new library patch")
-                        .clicked()
-                    {
-                        actions.push(Action::SavePatchLib);
-                    }
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.heading("Patches");
+                if !has_slot {
+                    ui.label(
+                        egui::RichText::new("Audition a patch to save it or load into its slot.")
+                            .weak(),
+                    );
+                }
+                ui.horizontal(|ui| {
+                    ui.label("Save current as:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.lib_patch_name)
+                            .hint_text("name")
+                            .desired_width(160.0),
+                    );
+                    let named = !self.lib_patch_name.trim().is_empty();
+                    ui.add_enabled_ui(has_slot && named, |ui| {
+                        if action_button(ui, "Insert", ActionKind::Commit)
+                            .on_hover_text("save the now-playing patch as a new library patch")
+                            .clicked()
+                        {
+                            actions.push(Action::SavePatchLib);
+                        }
+                    });
+                    ui.add_enabled_ui(named && self.clipboard.is_some(), |ui| {
+                        if action_button(ui, "Paste", ActionKind::Neutral)
+                            .on_hover_text("save the clipboard patch as a new library patch")
+                            .clicked()
+                        {
+                            actions.push(Action::PastePatchLib);
+                        }
+                    });
                 });
-                ui.add_enabled_ui(named && self.clipboard.is_some(), |ui| {
-                    if action_button(ui, "Paste", ActionKind::Neutral)
-                        .on_hover_text("save the clipboard patch as a new library patch")
-                        .clicked()
-                    {
-                        actions.push(Action::PastePatchLib);
-                    }
-                });
-            });
-            lib_list(
-                ui,
-                &config::json_stems(config::patches_dir()),
-                "No saved patches yet.",
-                has_slot,
-                "load into the now-playing slot (staged)",
-                config::patches_dir().as_deref(),
-                Action::LoadPatchLib,
-                Action::SavePatchOver,
-                Action::CopyPatchLib,
-                Some(Action::EditLibraryPatch),
-                actions,
-            );
+                lib_list(
+                    ui,
+                    &config::json_stems(config::patches_dir()),
+                    "No saved patches yet.",
+                    has_slot,
+                    "load into the now-playing slot (staged)",
+                    config::patches_dir().as_deref(),
+                    Action::LoadPatchLib,
+                    Action::SavePatchOver,
+                    Action::CopyPatchLib,
+                    Some(Action::EditLibraryPatch),
+                    actions,
+                );
 
-            ui.add_space(6.0);
-            ui.label(
-                egui::RichText::new(
-                    "Scenes (whole-bank snapshots) live in the Scene tab. Per-effect-block \
+                ui.add_space(6.0);
+                ui.label(
+                    egui::RichText::new(
+                        "Scenes (whole-bank snapshots) live in the Scene tab. Per-effect-block \
                      presets live in the Edit tab — open a block's “Library”.",
-                )
-                .weak(),
-            );
-        });
+                    )
+                    .weak(),
+                );
+            });
     }
 
     fn apply(&mut self, action: Action) {
@@ -4741,47 +4752,49 @@ impl App {
         ui.heading("Patch library");
         ui.label(egui::RichText::new("Drag a patch onto a slot to place it.").weak());
         ui.separator();
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            // The live device bank: drag a current unit patch straight into a slot.
-            ui.label(egui::RichText::new("Device bank").strong());
-            let mut any_bank = false;
-            for row in &self.rows {
-                // Only loaded rows have content to place.
-                if row.full.is_none() {
-                    continue;
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                // The live device bank: drag a current unit patch straight into a slot.
+                ui.label(egui::RichText::new("Device bank").strong());
+                let mut any_bank = false;
+                for row in &self.rows {
+                    // Only loaded rows have content to place.
+                    if row.full.is_none() {
+                        continue;
+                    }
+                    any_bank = true;
+                    let name = if row.name.trim().is_empty() {
+                        "(empty)"
+                    } else {
+                        row.name.as_str()
+                    };
+                    let text = format!("{}  {name}", slot_label(row.slot));
+                    let id = egui::Id::new(("scene-bank", row.slot));
+                    ui.dnd_drag_source(id, SceneDrag::Bank(row.slot), |ui| {
+                        ui.add(egui::Label::new(text).truncate().sense(egui::Sense::drag()));
+                    });
                 }
-                any_bank = true;
-                let name = if row.name.trim().is_empty() {
-                    "(empty)"
-                } else {
-                    row.name.as_str()
-                };
-                let text = format!("{}  {name}", slot_label(row.slot));
-                let id = egui::Id::new(("scene-bank", row.slot));
-                ui.dnd_drag_source(id, SceneDrag::Bank(row.slot), |ui| {
-                    ui.add(egui::Label::new(text).truncate().sense(egui::Sense::drag()));
-                });
-            }
-            if !any_bank {
-                ui.label(egui::RichText::new("bank not read yet").weak());
-            }
+                if !any_bank {
+                    ui.label(egui::RichText::new("bank not read yet").weak());
+                }
 
-            ui.add_space(6.0);
-            // Saved-to-disk patch files (the Library tab's patches).
-            ui.label(egui::RichText::new("Saved patches").strong());
-            let names = config::json_stems(config::patches_dir());
-            if names.is_empty() {
-                ui.label(
-                    egui::RichText::new("none saved — use the Library tab to save some").weak(),
-                );
-            }
-            for name in &names {
-                let id = egui::Id::new(("scene-palette", name));
-                ui.dnd_drag_source(id, SceneDrag::Lib(name.clone()), |ui| {
-                    ui.add(egui::Label::new(name).truncate().sense(egui::Sense::drag()));
-                });
-            }
-        });
+                ui.add_space(6.0);
+                // Saved-to-disk patch files (the Library tab's patches).
+                ui.label(egui::RichText::new("Saved patches").strong());
+                let names = config::json_stems(config::patches_dir());
+                if names.is_empty() {
+                    ui.label(
+                        egui::RichText::new("none saved — use the Library tab to save some").weak(),
+                    );
+                }
+                for name in &names {
+                    let id = egui::Id::new(("scene-palette", name));
+                    ui.dnd_drag_source(id, SceneDrag::Lib(name.clone()), |ui| {
+                        ui.add(egui::Label::new(name).truncate().sense(egui::Sense::drag()));
+                    });
+                }
+            });
     }
 
     /// The Scene tab's main panel: scene controls and the 100-slot grid. Each slot is
@@ -4849,6 +4862,9 @@ impl App {
         egui::ScrollArea::vertical()
             .id_salt("scenes-lib")
             .max_height(130.0)
+            // Fill width (scrollbar at the box's right edge) but shrink to content
+            // height so the box isn't padded to max_height when there are few scenes.
+            .auto_shrink([false, true])
             .show(ui, |ui| {
                 lib_list(
                     ui,
@@ -4879,94 +4895,96 @@ impl App {
     /// Edit / Revert / Copy / Paste / Clear.
     fn show_scene_rows(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         let can_paste = self.clipboard.is_some();
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for (idx, patch) in self.compose.iter().enumerate() {
-                let slot = idx + 1;
-                let label = if patch.name.trim().is_empty() {
-                    "(INIT)".to_owned()
-                } else {
-                    patch.name.clone()
-                };
-                // Whether this slot differs from its baseline (enables Revert).
-                let changed = self.compose_base.get(idx) != Some(patch);
-                let inner = ui.horizontal(|ui| {
-                    // Canonical action order (shared by every list): Edit, Revert,
-                    // Copy, Paste, Clear.
-                    if action_button(ui, icon::EDIT, ActionKind::Read)
-                        .on_hover_text("edit this slot's patch offline (no device)")
-                        .clicked()
-                    {
-                        actions.push(Action::EditComposerSlot(idx));
-                    }
-                    ui.add_enabled_ui(changed, |ui| {
-                        if action_button(ui, icon::REVERT, ActionKind::Caution)
-                            .on_hover_text("restore this slot to its last saved/loaded state")
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for (idx, patch) in self.compose.iter().enumerate() {
+                    let slot = idx + 1;
+                    let label = if patch.name.trim().is_empty() {
+                        "(INIT)".to_owned()
+                    } else {
+                        patch.name.clone()
+                    };
+                    // Whether this slot differs from its baseline (enables Revert).
+                    let changed = self.compose_base.get(idx) != Some(patch);
+                    let inner = ui.horizontal(|ui| {
+                        // Canonical action order (shared by every list): Edit, Revert,
+                        // Copy, Paste, Clear.
+                        if action_button(ui, icon::EDIT, ActionKind::Read)
+                            .on_hover_text("edit this slot's patch offline (no device)")
                             .clicked()
                         {
-                            actions.push(Action::ComposeRevert(idx));
+                            actions.push(Action::EditComposerSlot(idx));
                         }
-                    });
-                    if action_button(ui, icon::COPY, ActionKind::Read)
-                        .on_hover_text("copy this slot's patch")
-                        .clicked()
-                    {
-                        actions.push(Action::ComposeCopy(idx));
-                    }
-                    ui.add_enabled_ui(can_paste, |ui| {
-                        if action_button(ui, icon::PASTE, ActionKind::Neutral)
-                            .on_hover_text("paste the copied patch into this slot")
+                        ui.add_enabled_ui(changed, |ui| {
+                            if action_button(ui, icon::REVERT, ActionKind::Caution)
+                                .on_hover_text("restore this slot to its last saved/loaded state")
+                                .clicked()
+                            {
+                                actions.push(Action::ComposeRevert(idx));
+                            }
+                        });
+                        if action_button(ui, icon::COPY, ActionKind::Read)
+                            .on_hover_text("copy this slot's patch")
                             .clicked()
                         {
-                            actions.push(Action::ComposePaste(idx));
+                            actions.push(Action::ComposeCopy(idx));
                         }
+                        ui.add_enabled_ui(can_paste, |ui| {
+                            if action_button(ui, icon::PASTE, ActionKind::Neutral)
+                                .on_hover_text("paste the copied patch into this slot")
+                                .clicked()
+                            {
+                                actions.push(Action::ComposePaste(idx));
+                            }
+                        });
+                        if action_button(ui, icon::CLEAR, ActionKind::Destructive)
+                            .on_hover_text("reset this slot to INIT")
+                            .clicked()
+                        {
+                            actions.push(Action::ComposeClear(idx));
+                        }
+                        // Divider between the action icons and the reorder handle.
+                        ui.separator();
+                        let drag_id = egui::Id::new(("scene-slot", slot));
+                        ui.dnd_drag_source(drag_id, SceneDrag::Slot(idx), |ui| {
+                            ui.label(egui::RichText::new("↕").weak());
+                        })
+                        .response
+                        .on_hover_text("drag onto another slot to re-order");
+                        ui.label(egui::RichText::new(format!("U{slot:03}")).monospace());
+                        // Fixed-width but left-aligned (add_sized would centre it).
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(220.0, 18.0),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.add(egui::Label::new(label).truncate());
+                            },
+                        );
                     });
-                    if action_button(ui, icon::CLEAR, ActionKind::Destructive)
-                        .on_hover_text("reset this slot to INIT")
-                        .clicked()
-                    {
-                        actions.push(Action::ComposeClear(idx));
-                    }
-                    // Divider between the action icons and the reorder handle.
-                    ui.separator();
-                    let drag_id = egui::Id::new(("scene-slot", slot));
-                    ui.dnd_drag_source(drag_id, SceneDrag::Slot(idx), |ui| {
-                        ui.label(egui::RichText::new("↕").weak());
-                    })
-                    .response
-                    .on_hover_text("drag onto another slot to re-order");
-                    ui.label(egui::RichText::new(format!("U{slot:03}")).monospace());
-                    // Fixed-width but left-aligned (add_sized would centre it).
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(220.0, 18.0),
-                        egui::Layout::left_to_right(egui::Align::Center),
-                        |ui| {
-                            ui.add(egui::Label::new(label).truncate());
-                        },
+                    // Re-interact the whole row rect as a hover-sensing drop target, so a
+                    // released drag registers anywhere on the row (including over its
+                    // buttons) — the layout response alone misses drops there.
+                    let drop = ui.interact(
+                        inner.response.rect,
+                        egui::Id::new(("scene-drop", idx)),
+                        egui::Sense::hover(),
                     );
-                });
-                // Re-interact the whole row rect as a hover-sensing drop target, so a
-                // released drag registers anywhere on the row (including over its
-                // buttons) — the layout response alone misses drops there.
-                let drop = ui.interact(
-                    inner.response.rect,
-                    egui::Id::new(("scene-drop", idx)),
-                    egui::Sense::hover(),
-                );
-                if let Some(p) = drop.dnd_release_payload::<SceneDrag>() {
-                    match &*p {
-                        SceneDrag::Lib(name) => {
-                            actions.push(Action::ComposeAssign(idx, name.clone()));
-                        }
-                        SceneDrag::Bank(slot) => {
-                            actions.push(Action::ComposeAssignBank(idx, *slot));
-                        }
-                        SceneDrag::Slot(from) => {
-                            actions.push(Action::ComposeReorder(*from, idx));
+                    if let Some(p) = drop.dnd_release_payload::<SceneDrag>() {
+                        match &*p {
+                            SceneDrag::Lib(name) => {
+                                actions.push(Action::ComposeAssign(idx, name.clone()));
+                            }
+                            SceneDrag::Bank(slot) => {
+                                actions.push(Action::ComposeAssignBank(idx, *slot));
+                            }
+                            SceneDrag::Slot(from) => {
+                                actions.push(Action::ComposeReorder(*from, idx));
+                            }
                         }
                     }
                 }
-            }
-        });
+            });
     }
 
     fn show_central(&mut self, ctx: &egui::Context, actions: &mut Vec<Action>) {
