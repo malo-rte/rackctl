@@ -4923,7 +4923,6 @@ impl App {
                     {
                         actions.push(Action::ComposeClear(idx));
                     }
-                    ui.separator();
                     let drag_id = egui::Id::new(("scene-slot", slot));
                     ui.dnd_drag_source(drag_id, SceneDrag::Slot(idx), |ui| {
                         ui.label(egui::RichText::new("↕").weak());
