@@ -960,6 +960,18 @@ impl Patch {
         self.reverb.enable = false;
     }
 
+    /// A fresh INIT patch for an empty slot: a *valid* default chain (each effect
+    /// block once, in order) with every block bypassed and a blank name. Use this
+    /// rather than `Default`, whose chain is all-zero — an invalid routing that maps
+    /// every chain entry to [`Block::LevelChain`].
+    #[must_use]
+    pub fn init() -> Self {
+        let mut p = Self::default();
+        p.clear();
+        p.name.clear(); // blank (clear() names it "Empty"); an empty slot reads as INIT
+        p
+    }
+
     /// Overwrite `self`'s effect `block` with the same block from `other`,
     /// transplanting one whole effect block (every parameter it holds) between
     /// patches. [`Block::LevelChain`] (name / level / chain / assigns) is left
@@ -1263,6 +1275,17 @@ mod tests {
         assert!(!p.preamp.enable && !p.delay.enable && !p.reverb.enable);
         // Still a valid, byte-exact round-tripping patch.
         assert_eq!(Patch::from_raw(&p.to_raw()), p);
+    }
+
+    #[test]
+    fn init_has_a_valid_chain_unlike_default() {
+        let p = Patch::init();
+        assert_eq!(p.chain, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+        assert!(p.name.is_empty()); // blank, so an empty slot reads as INIT
+        assert!(!p.preamp.enable && !p.reverb.enable); // bypassed
+        // The derive default's chain is all-zero (every entry maps to LevelChain),
+        // which is the bug init() exists to avoid.
+        assert_eq!(Patch::default().chain, [0; 13]);
     }
 
     #[test]

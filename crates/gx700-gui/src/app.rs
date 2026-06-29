@@ -1696,8 +1696,8 @@ impl App {
             pending_delete: None,
             block_lib_open: false,
             confirm_refresh: false,
-            compose: vec![TypedPatch::default(); usize::from(USER_SLOTS)],
-            compose_base: vec![TypedPatch::default(); usize::from(USER_SLOTS)],
+            compose: vec![TypedPatch::init(); usize::from(USER_SLOTS)],
+            compose_base: vec![TypedPatch::init(); usize::from(USER_SLOTS)],
             compose_name: String::new(),
             edit_slot: None,
             edit_scratch: TypedPatch::default(),
@@ -2293,9 +2293,9 @@ impl App {
 
     // ---- The offline scene composer (Scene tab) ----
 
-    /// Start a fresh scene: every slot reset to an INIT (default) patch.
+    /// Start a fresh scene: every slot reset to an INIT patch.
     fn compose_new(&mut self) {
-        self.compose = vec![TypedPatch::default(); usize::from(USER_SLOTS)];
+        self.compose = vec![TypedPatch::init(); usize::from(USER_SLOTS)];
         self.compose_base = self.compose.clone();
         self.compose_name.clear();
         "started a new scene (all slots INIT)".clone_into(&mut self.status);
@@ -2328,7 +2328,7 @@ impl App {
         };
         let mut slots = patches;
         // A scene file may be short or long; normalise to exactly one patch per slot.
-        slots.resize(usize::from(USER_SLOTS), TypedPatch::default());
+        slots.resize(usize::from(USER_SLOTS), TypedPatch::init());
         self.compose = slots;
         self.compose_base = self.compose.clone();
         name.clone_into(&mut self.compose_name);
@@ -2371,10 +2371,10 @@ impl App {
         self.status = format!("placed {} into U{:03}", slot_label(slot), idx + 1);
     }
 
-    /// Reset composer slot `idx` to an INIT (default) patch.
+    /// Reset composer slot `idx` to an INIT patch.
     fn compose_clear(&mut self, idx: usize) {
         if let Some(slot) = self.compose.get_mut(idx) {
-            *slot = TypedPatch::default();
+            *slot = TypedPatch::init();
         }
     }
 
