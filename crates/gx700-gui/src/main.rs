@@ -20,6 +20,10 @@ struct Cli {
     /// ALSA rawmidi port of the GX-700 (`hw:CARD,DEV`); see `rackctl-gx700 ports`.
     #[arg(long)]
     port: Option<String>,
+    /// Start without connecting to the unit — edit scenes and the library offline.
+    /// Use the Connect button (top bar) to go online later.
+    #[arg(long)]
+    offline: bool,
 }
 
 /// Install the `JetBrains Mono Nerd Font` (vendored under `assets/fonts/`, SIL OFL
@@ -60,14 +64,19 @@ fn install_fonts(ctx: &eframe::egui::Context) {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let (mock, port) = (cli.mock, cli.port);
-    // Lets the app (re)open the device on demand (Retry button).
+    let (mock, port, offline) = (cli.mock, cli.port, cli.offline);
+    // Lets the app (re)open the device on demand (Retry / Connect button).
     let reopen: app::Reopen = Box::new(move || device::open(mock, port.as_deref()));
     // Open now if we can; otherwise start disconnected with a never-read
     // placeholder and let the user Retry (e.g. after passing the right port).
-    let (dev, connected) = match reopen() {
-        Ok(dev) => (dev, true),
-        Err(_) => (device::placeholder(), false),
+    // `--offline` skips the connect attempt entirely and starts in offline mode.
+    let (dev, connected) = if offline {
+        (device::placeholder(), false)
+    } else {
+        match reopen() {
+            Ok(dev) => (dev, true),
+            Err(_) => (device::placeholder(), false),
+        }
     };
 
     let mut viewport = eframe::egui::ViewportBuilder::default()
@@ -88,7 +97,7 @@ fn main() -> Result<()> {
         options,
         Box::new(move |cc| {
             install_fonts(&cc.egui_ctx);
-            let app = app::App::new(dev, connected, reopen);
+            let app = app::App::new(dev, connected, reopen, offline);
             cc.egui_ctx.set_zoom_factor(app.zoom());
             cc.egui_ctx
                 .style_mut(|style| style.spacing.slider_width = 160.0);

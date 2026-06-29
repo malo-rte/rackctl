@@ -1593,13 +1593,16 @@ pub(crate) struct App {
     bulk_ok: Option<bool>,
     /// `egui` input-time of the last BULK LOAD probe, to throttle re-probes.
     last_probe: f64,
+    /// Launched with `--offline`: started without connecting, for scene/library
+    /// editing. The top bar offers Connect instead of Retry.
+    offline: bool,
     status: String,
     zoom: f32,
     window: Option<[f32; 2]>,
 }
 
 impl App {
-    pub(crate) fn new(device: Device, connected: bool, reopen: Reopen) -> Self {
+    pub(crate) fn new(device: Device, connected: bool, reopen: Reopen, offline: bool) -> Self {
         let cfg = config::load();
         let mut rows: Vec<PatchRow> = (1..=USER_SLOTS).map(PatchRow::empty).collect();
         let mut presets: Vec<PatchRow> = (PRESET_START..=PRESET_END).map(PatchRow::empty).collect();
@@ -1652,7 +1655,8 @@ impl App {
             edit_scratch: TypedPatch::default(),
             edit_base: TypedPatch::default(),
             edit_source: None,
-            tab: Tab::Patches,
+            // Offline starts on the Scene tab — the screen that works without a unit.
+            tab: if offline { Tab::Scene } else { Tab::Patches },
             selected_block: Block::Compressor,
             bulk_prompt: false,
             writer: None,
@@ -1661,8 +1665,11 @@ impl App {
             write_failed: Vec::new(),
             bulk_ok: None,
             last_probe: 0.0,
+            offline,
             status: if connected {
                 "checking BULK LOAD mode…".to_owned()
+            } else if offline {
+                "offline — editing scenes and the library; Connect to go online".to_owned()
             } else {
                 "not connected — pass --port hw:CARD,DEV (or --mock), then Retry".to_owned()
             },
@@ -4629,6 +4636,14 @@ impl eframe::App for App {
                             }
                         });
                     }
+                } else if self.offline {
+                    ui.label(egui::RichText::new("offline").weak());
+                    if action_button(ui, "Connect", ActionKind::Read)
+                        .on_hover_text("connect to the unit to go online")
+                        .clicked()
+                    {
+                        actions.push(Action::Retry);
+                    }
                 } else {
                     ui.colored_label(egui::Color32::YELLOW, "not connected");
                     if action_button(ui, "Retry", ActionKind::Read).clicked() {
@@ -5163,6 +5178,7 @@ mod tests {
             crate::device::placeholder(),
             false,
             Box::new(|| crate::device::open(true, None)),
+            false,
         )
     }
 
@@ -5205,10 +5221,29 @@ mod tests {
     #[test]
     fn edit_device_patch_targets_the_slot_and_opens_the_editor() {
         let dev = crate::device::open(true, None).expect("mock device");
-        let mut app = App::new(dev, true, Box::new(|| crate::device::open(true, None)));
+        let mut app = App::new(
+            dev,
+            true,
+            Box::new(|| crate::device::open(true, None)),
+            false,
+        );
         app.edit_device_patch(1);
         assert_eq!(app.edit_slot, Some(1));
         assert!(app.tab == Tab::Edit);
+    }
+
+    #[test]
+    fn offline_mode_starts_disconnected_on_the_scene_tab() {
+        let app = App::new(
+            crate::device::placeholder(),
+            false,
+            Box::new(|| crate::device::open(true, None)),
+            true,
+        );
+        assert!(app.offline);
+        assert!(!app.connected);
+        assert!(app.tab == Tab::Scene);
+        assert!(!app.editable());
     }
 
     #[test]
@@ -5224,7 +5259,12 @@ mod tests {
     #[test]
     fn compose_assign_bank_copies_the_loaded_patch_into_the_slot() {
         let dev = crate::device::open(true, None).expect("mock device");
-        let mut app = App::new(dev, true, Box::new(|| crate::device::open(true, None)));
+        let mut app = App::new(
+            dev,
+            true,
+            Box::new(|| crate::device::open(true, None)),
+            false,
+        );
         app.ensure_loaded(1); // deep-read bank slot 1 from the mock
         let bank = app.effective_patch(1).expect("loaded");
         app.compose_assign_bank(4, 1);
