@@ -4863,7 +4863,14 @@ impl App {
                     .response
                     .on_hover_text("drag onto another slot to re-order");
                     ui.label(egui::RichText::new(format!("U{slot:03}")).monospace());
-                    ui.add_sized([220.0, 18.0], egui::Label::new(label).truncate());
+                    // Fixed-width but left-aligned (add_sized would centre it).
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(220.0, 18.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.add(egui::Label::new(label).truncate());
+                        },
+                    );
                 });
                 // Re-interact the whole row rect as a hover-sensing drop target, so a
                 // released drag registers anywhere on the row (including over its
