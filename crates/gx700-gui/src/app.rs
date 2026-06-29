@@ -4619,9 +4619,10 @@ impl eframe::App for App {
                         ui.add_enabled_ui(self.editable() && pending > 0, |ui| {
                             if action_button(
                                 ui,
-                                format!("Write changes to unit ({pending})"),
+                                format!("Write changes ({pending})"),
                                 ActionKind::Commit,
                             )
+                            .on_hover_text("store all pending changes to the unit (BULK LOAD)")
                             .clicked()
                             {
                                 actions.push(Action::OpenBulkPrompt);
