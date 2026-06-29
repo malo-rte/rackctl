@@ -1484,9 +1484,14 @@ fn show_assign_schematic(ui: &mut egui::Ui, lo: i32, hi: i32, min: i32, max: i32
     let px = |fx: f32| plot.left() + fx * plot.width();
     let py = |fy: f32| plot.bottom() - fy * plot.height();
     let frac = |val: i32| f32::from(u8::try_from(val.clamp(0, 127)).unwrap_or(0)) / 127.0;
-    // Map a Min/Max value (0..16383) onto the Y axis, kept off the edges so labels fit.
-    let lvl =
-        |val: i32| 0.1 + 0.8 * f32::from(u16::try_from(val.clamp(0, 16383)).unwrap_or(0)) / 16383.0;
+    // Map a Min/Max value onto the Y axis. The target's absolute range is unknown, so
+    // self-normalise to the larger of Min/Max — the sweep fills the height and editing
+    // either value moves its level. Equal Min/Max read as a flat line (no sweep).
+    let denom = min.max(max).max(1);
+    let lvl = |val: i32| {
+        let to_f = |x: i32| f32::from(u16::try_from(x.clamp(0, denom)).unwrap_or(0));
+        0.1 + 0.8 * to_f(val) / to_f(denom)
+    };
     let lo_x = frac(lo);
     let hi_x = frac(hi).max(lo_x);
     let (y_min, y_max) = (lvl(min), lvl(max));
