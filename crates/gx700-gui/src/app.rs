@@ -4249,6 +4249,9 @@ impl App {
                     actions.push(Action::ClearRow(row.slot));
                 }
             });
+            // Divider between the action icons and the slot's reorder handle (next
+            // grid column), matching the composer.
+            ui.separator();
         });
     }
 
@@ -4923,6 +4926,8 @@ impl App {
                     {
                         actions.push(Action::ComposeClear(idx));
                     }
+                    // Divider between the action icons and the reorder handle.
+                    ui.separator();
                     let drag_id = egui::Id::new(("scene-slot", slot));
                     ui.dnd_drag_source(drag_id, SceneDrag::Slot(idx), |ui| {
                         ui.label(egui::RichText::new("↕").weak());

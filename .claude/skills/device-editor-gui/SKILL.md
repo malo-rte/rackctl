@@ -77,10 +77,12 @@ Rules are SHOULD unless marked MUST. Stable IDs `GUI-NN`.
   **one canonical order** so a given action sits in the same relative position in every
   list. Render each list as a *subset* of that order — never reorder per list. The
   project's order is **Edit · Load · Save · Revert · Copy · Paste · Clear · Delete**
-  (primary action first, destructive last). Use **uniform spacing** — no per-group
-  divider/`separator` in list rows; group an enable-state set (e.g. Save+Revert) with
-  the enable wrapper only, not with a visible divider, so every list spaces icons the
-  same.
+  (primary action first, destructive last). Use **uniform spacing within the action
+  icons** — no divider/`separator` *between* them, and group an enable-state set (e.g.
+  Save+Revert) with the enable wrapper only, not a visible divider. The one divider a
+  row may carry is a single `separator` **between the action-icon group and a reorder
+  handle** (the `↕` grip) — and if a row has that handle, every row with a handle gets
+  the same divider, so the grip is offset consistently across lists.
 - **GUI-42** An icon button MUST keep a **text tooltip** — an icon alone is ambiguous.
 - **GUI-43** If using an icon font, **vendor it with its license**, verify every glyph
   against the font's `cmap` (no tofu) before shipping it, and pick the spacing variant
