@@ -2905,6 +2905,19 @@ impl App {
         ui.label(format!("{where_label}  {:?}", typed.name));
         ui.label(egui::RichText::new("Drag the ↕ handle to re-order the chain.").weak());
         ui.separator();
+        // The patch-common section (output level + the 4 control assigns). It isn't
+        // part of the effect chain, so it has no handle/bypass — just selectable.
+        if ui
+            .selectable_label(
+                self.selected_block == Block::LevelChain,
+                Block::LevelChain.label(),
+            )
+            .on_hover_text("patch output level and control assigns")
+            .clicked()
+        {
+            actions.push(Action::SelectBlock(Block::LevelChain));
+        }
+        ui.separator();
         // Drag-to-reorder: a separate ↕ handle per row is the drag source carrying
         // the chain index; the whole row is the drop target. Keeping the handle off
         // the name's rect means the name's click (select) isn't stolen by the drag.
@@ -3035,44 +3048,48 @@ impl App {
         // additive block clipboard) and Library (this block type's preset library).
         ui.horizontal(|ui| {
             ui.heading(block.label());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let edit = self.edit_enabled();
-                // Added right-to-left, so they read Copy · Paste · Revert · Library.
-                if ui
-                    .selectable_label(self.block_lib_open, "Library")
-                    .on_hover_text("this effect's saved presets")
-                    .clicked()
-                {
-                    actions.push(Action::ToggleBlockLib);
-                }
-                ui.add_enabled_ui(edit && self.block_changed(slot, block), |ui| {
-                    if action_button(ui, "Revert", ActionKind::Caution)
-                        .on_hover_text("discard this block's edits, back to the stored values")
+            // The block clipboard / preset library applies to effect blocks only, not
+            // the patch-common Level/Chain section.
+            if block != Block::LevelChain {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let edit = self.edit_enabled();
+                    // Added right-to-left, so they read Copy · Paste · Revert · Library.
+                    if ui
+                        .selectable_label(self.block_lib_open, "Library")
+                        .on_hover_text("this effect's saved presets")
                         .clicked()
                     {
-                        actions.push(Action::RevertBlock(slot, block));
+                        actions.push(Action::ToggleBlockLib);
                     }
+                    ui.add_enabled_ui(edit && self.block_changed(slot, block), |ui| {
+                        if action_button(ui, "Revert", ActionKind::Caution)
+                            .on_hover_text("discard this block's edits, back to the stored values")
+                            .clicked()
+                        {
+                            actions.push(Action::RevertBlock(slot, block));
+                        }
+                    });
+                    ui.add_enabled_ui(edit && self.has_block_clip(block), |ui| {
+                        if action_button(ui, "Paste", ActionKind::Neutral)
+                            .on_hover_text(format!("paste the copied {} block here", block.label()))
+                            .clicked()
+                        {
+                            actions.push(Action::PasteBlock(slot, block));
+                        }
+                    });
+                    ui.add_enabled_ui(edit, |ui| {
+                        if action_button(ui, "Copy", ActionKind::Read)
+                            .on_hover_text("copy this block (combine blocks from other patches)")
+                            .clicked()
+                        {
+                            actions.push(Action::CopyBlock(block));
+                        }
+                    });
                 });
-                ui.add_enabled_ui(edit && self.has_block_clip(block), |ui| {
-                    if action_button(ui, "Paste", ActionKind::Neutral)
-                        .on_hover_text(format!("paste the copied {} block here", block.label()))
-                        .clicked()
-                    {
-                        actions.push(Action::PasteBlock(slot, block));
-                    }
-                });
-                ui.add_enabled_ui(edit, |ui| {
-                    if action_button(ui, "Copy", ActionKind::Read)
-                        .on_hover_text("copy this block (combine blocks from other patches)")
-                        .clicked()
-                    {
-                        actions.push(Action::CopyBlock(block));
-                    }
-                });
-            });
+            }
         });
         ui.separator();
-        if self.block_lib_open {
+        if self.block_lib_open && block != Block::LevelChain {
             self.show_block_library(ui, slot, block, actions);
             return;
         }
