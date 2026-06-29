@@ -73,7 +73,11 @@ Rules are SHOULD unless marked MUST. Stable IDs `GUI-NN`.
   Delete are Destructive even when staged/undoable; the *intent* is to throw content
   away.
 - **GUI-41** Keep row controls **consistent across every list**: action buttons on the
-  same side (left, in this project), identity (slot/name/level) following.
+  same side (left, in this project) with identity (slot/name/level) following, and in
+  **one canonical order** so a given action sits in the same relative position in every
+  list. Render each list as a *subset* of that order — never reorder per list. The
+  project's order is **Edit · Load · Save · Revert · Copy · Paste · Clear · Delete**
+  (primary action first, destructive last).
 - **GUI-42** An icon button MUST keep a **text tooltip** — an icon alone is ambiguous.
 - **GUI-43** If using an icon font, **vendor it with its license**, verify every glyph
   against the font's `cmap` (no tofu) before shipping it, and pick the spacing variant
