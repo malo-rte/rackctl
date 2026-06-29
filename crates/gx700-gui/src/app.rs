@@ -3031,6 +3031,108 @@ impl App {
         ui.separator();
     }
 
+    /// The patch-common Level/Chain editor: output level, then each of the four
+    /// control assigns as its own labelled group (target, source, mode, the min/max
+    /// the target sweeps between, and the action lo/hi range that arms it).
+    fn show_levelchain_editor(
+        &self,
+        ui: &mut egui::Ui,
+        slot: u16,
+        typed: &TypedPatch,
+        actions: &mut Vec<Action>,
+    ) {
+        // Per-assign field labels, in the same order as the keys below. Mode is an
+        // enum (combo); every other field is a drag-value.
+        const LABELS: [&str; 7] = [
+            "Target",
+            "Source",
+            "Mode",
+            "Min",
+            "Max",
+            "Action lo",
+            "Action hi",
+        ];
+        // Static `assignN-<suffix>` keys (param_drag/param_combo need `&'static str`).
+        const KEYS: [[&str; 7]; 4] = [
+            [
+                "assign1-target",
+                "assign1-source",
+                "assign1-mode",
+                "assign1-min",
+                "assign1-max",
+                "assign1-act-lo",
+                "assign1-act-hi",
+            ],
+            [
+                "assign2-target",
+                "assign2-source",
+                "assign2-mode",
+                "assign2-min",
+                "assign2-max",
+                "assign2-act-lo",
+                "assign2-act-hi",
+            ],
+            [
+                "assign3-target",
+                "assign3-source",
+                "assign3-mode",
+                "assign3-min",
+                "assign3-max",
+                "assign3-act-lo",
+                "assign3-act-hi",
+            ],
+            [
+                "assign4-target",
+                "assign4-source",
+                "assign4-mode",
+                "assign4-min",
+                "assign4-max",
+                "assign4-act-lo",
+                "assign4-act-hi",
+            ],
+        ];
+        let enabled = self.edit_enabled();
+        egui::Grid::new("gx700-lc-level")
+            .num_columns(2)
+            .spacing([12.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Output level")
+                    .on_hover_text("Patch master level (also on the patch row).");
+                param_drag(ui, slot, "output-level", typed, enabled, actions);
+                ui.end_row();
+            });
+        ui.add_space(6.0);
+        ui.label(
+            egui::RichText::new(
+                "Control assigns — route a Source controller to a Target parameter, \
+                 sweeping it between Min and Max while the Source is within Action lo..hi.",
+            )
+            .weak(),
+        );
+        for (n, keys) in KEYS.iter().enumerate() {
+            ui.add_space(2.0);
+            egui::CollapsingHeader::new(format!("Assign {}", n + 1))
+                .id_salt(("gx700-assign", n))
+                .default_open(n == 0)
+                .show(ui, |ui| {
+                    egui::Grid::new(("gx700-assign-grid", n))
+                        .num_columns(2)
+                        .spacing([12.0, 6.0])
+                        .show(ui, |ui| {
+                            for (&label, &key) in LABELS.iter().zip(keys.iter()) {
+                                ui.label(label);
+                                if key.ends_with("-mode") {
+                                    param_combo(ui, slot, key, typed, enabled, actions);
+                                } else {
+                                    param_drag(ui, slot, key, typed, enabled, actions);
+                                }
+                                ui.end_row();
+                            }
+                        });
+                });
+        }
+    }
+
     fn show_block_params(&mut self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
         let Some(slot) = self.edit_slot else {
             ui.label(
@@ -3093,61 +3195,76 @@ impl App {
             self.show_block_library(ui, slot, block, actions);
             return;
         }
+        self.show_block_editor(ui, slot, block, &typed, actions);
+    }
+
+    /// Render the selected block's parameter editor inside the scrolling area: a
+    /// custom layout for blocks that have one, else the generic per-parameter list.
+    fn show_block_editor(
+        &self,
+        ui: &mut egui::Ui,
+        slot: u16,
+        block: Block,
+        typed: &TypedPatch,
+        actions: &mut Vec<Action>,
+    ) {
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                // The Equalizer gets a custom band-table layout (curve + Gain/Freq/Q
-                // grid); every other block uses the generic per-parameter list.
+                if block == Block::LevelChain {
+                    self.show_levelchain_editor(ui, slot, typed, actions);
+                    return;
+                }
                 if block == Block::Equalizer {
-                    self.show_eq_editor(ui, slot, &typed, actions);
+                    self.show_eq_editor(ui, slot, typed, actions);
                     return;
                 }
                 if block == Block::Compressor {
-                    self.show_comp_editor(ui, slot, &typed, actions);
+                    self.show_comp_editor(ui, slot, typed, actions);
                     return;
                 }
                 if block == Block::NoiseSuppressor {
-                    self.show_ns_editor(ui, slot, &typed, actions);
+                    self.show_ns_editor(ui, slot, typed, actions);
                     return;
                 }
                 if block == Block::Reverb {
-                    self.show_reverb_editor(ui, slot, &typed, actions);
+                    self.show_reverb_editor(ui, slot, typed, actions);
                     return;
                 }
                 if block == Block::Distortion {
-                    self.show_dist_editor(ui, slot, &typed, actions);
+                    self.show_dist_editor(ui, slot, typed, actions);
                     return;
                 }
                 if block == Block::Preamp {
-                    self.show_preamp_editor(ui, slot, &typed, actions);
+                    self.show_preamp_editor(ui, slot, typed, actions);
                     return;
                 }
                 if block == Block::Delay {
-                    self.show_delay_editor(ui, slot, &typed, actions);
+                    self.show_delay_editor(ui, slot, typed, actions);
                     return;
                 }
                 if block == Block::SpeakerSim {
-                    self.show_speaker_editor(ui, slot, &typed, actions);
+                    self.show_speaker_editor(ui, slot, typed, actions);
                     return;
                 }
                 if block == Block::Wah {
-                    self.show_wah_editor(ui, slot, &typed, actions);
+                    self.show_wah_editor(ui, slot, typed, actions);
                     return;
                 }
                 if block == Block::Loop {
-                    self.show_loop_editor(ui, slot, &typed, actions);
+                    self.show_loop_editor(ui, slot, typed, actions);
                     return;
                 }
                 if block == Block::Chorus {
-                    self.show_chorus_editor(ui, slot, &typed, actions);
+                    self.show_chorus_editor(ui, slot, typed, actions);
                     return;
                 }
                 if block == Block::TremoloPan {
-                    self.show_trem_editor(ui, slot, &typed, actions);
+                    self.show_trem_editor(ui, slot, typed, actions);
                     return;
                 }
                 if block == Block::Modulation {
-                    self.show_mod_editor(ui, slot, &typed, actions);
+                    self.show_mod_editor(ui, slot, typed, actions);
                     return;
                 }
                 for &p in param::ALL {
