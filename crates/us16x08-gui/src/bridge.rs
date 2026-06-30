@@ -13,6 +13,7 @@ use eframe::egui;
 use rackctl_us16x08::{Control, Meters, NUM_CHANNELS, Value};
 
 use crate::app::App;
+use crate::channel;
 
 /// Full-scale meter sample (see `Meters` / `convert::meter_scale`).
 const METER_FULL_SCALE: f32 = 32768.0;
@@ -119,14 +120,16 @@ fn master_meters(app: &mut App, ui: &mut egui::Ui, now: f64) {
             meter_bar(ui, fraction(r), app.peak(MASTER_R), now);
         });
         // Mute button centred under the two meter bars (a single left-aligned
-        // "M" would sit under the left bar only).
+        // "M" would sit under the left bar only). Colour-lit red when muted, to
+        // match the channel strip and bridge mutes.
         let muted = app.cached_bool(Control::MasterMute, 0);
         let width = 2.0 * METER_SIZE.x + ui.spacing().item_spacing.x;
         let height = ui.spacing().interact_size.y;
-        if ui
-            .add_sized([width, height], egui::SelectableLabel::new(muted, "M"))
-            .clicked()
-        {
+        let mut button = egui::Button::new("M");
+        if muted {
+            button = button.fill(channel::MUTE_ON);
+        }
+        if ui.add_sized([width, height], button).clicked() {
             app.set(Control::MasterMute, 0, Value::Bool(!muted));
         }
     });
@@ -164,15 +167,18 @@ fn channel_strip(app: &mut App, ui: &mut egui::Ui, ch: u32, now: f64) {
         let level = app.meters().channel_db(ch).unwrap_or(0);
         meter_bar(ui, fraction(level), app.peak(ch), now);
 
-        // Mute and solo, side by side under the meter.
+        // Mute and solo, side by side under the meter — colour-lit toggles
+        // matching the channel strip (red when muted, amber-gold when soloed).
         ui.horizontal(|ui| {
             let muted = app.cached_bool(Control::MuteSwitch, ch);
-            if ui.selectable_label(muted, "M").clicked() {
+            if channel::toggle_button(ui, muted, "M", channel::MUTE_ON)
+                .on_hover_text("Mute this channel")
+                .clicked()
+            {
                 app.set(Control::MuteSwitch, ch, Value::Bool(!muted));
             }
             let solo = app.soloed(ch);
-            if ui
-                .selectable_label(solo, "S")
+            if channel::toggle_button(ui, solo, "S", channel::SOLO_ON)
                 .on_hover_text("Solo: mute the other channels")
                 .clicked()
             {

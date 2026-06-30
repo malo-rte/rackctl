@@ -32,16 +32,16 @@ pub(crate) const VALUE_BOX_WIDTH: f32 = 60.0;
 /// right of the input-0 line for the gain-reduction bar.
 const GR_LANE_MAX: f64 = 6.0;
 
-/// Fill colours for the lit Mute / Solo toggle buttons. Dark, saturated tones
-/// (like the shared `ActionKind` fills) so the default light button text stays
-/// readable: red for muted, amber-gold for soloed.
-const MUTE_ON: egui::Color32 = egui::Color32::from_rgb(170, 55, 55);
-const SOLO_ON: egui::Color32 = egui::Color32::from_rgb(165, 140, 40);
+/// Fill colours for the lit Mute / Solo toggle buttons (shared with the meter
+/// bridge). Dark, saturated tones (like the shared `ActionKind` fills) so the
+/// default light button text stays readable: red for muted, amber-gold for soloed.
+pub(crate) const MUTE_ON: egui::Color32 = egui::Color32::from_rgb(170, 55, 55);
+pub(crate) const SOLO_ON: egui::Color32 = egui::Color32::from_rgb(165, 140, 40);
 
 /// A mixer-style toggle button: filled with `on_fill` when `on`, a plain button
 /// otherwise. Returns the [`egui::Response`] so callers chain `.on_hover_text` and
 /// test `.clicked()`.
-fn toggle_button(
+pub(crate) fn toggle_button(
     ui: &mut egui::Ui,
     on: bool,
     label: &str,
