@@ -217,28 +217,15 @@ impl Tab {
     }
 }
 
-/// Parse a saved patch file: a typed `Patch` (the readable, grouped-by-block form
-/// the GUI writes) — checked for device + version — or, as a fallback, a bare typed
-/// `Patch` or a raw `RawPatch` (the CLI's / older form). `Err` with a reason (e.g.
-/// from a different device) when the file is recognisable but unusable.
+/// Parse a saved patch file across every supported on-disk form (rackctl-core
+/// envelope, bare typed, legacy raw), via the shared library.
 fn parse_patch_text(text: &str) -> Result<TypedPatch, String> {
-    if let Some(res) = config::load_item::<TypedPatch>(text) {
-        return res;
-    }
-    if let Ok(typed) = serde_json::from_str::<TypedPatch>(text) {
-        return Ok(typed);
-    }
-    serde_json::from_str::<RawPatch>(text)
-        .map(|raw| TypedPatch::from_raw(&raw))
-        .map_err(|_| "unrecognised patch file".to_owned())
+    rackctl_gx700_lib::parse_patch(text)
 }
 
-/// Parse a saved block preset: our envelope or a bare `BlockData`.
+/// Parse a saved block preset (envelope or bare `BlockData`), via the shared library.
 fn parse_block_text(text: &str) -> Result<rackctl_gx700::typed::BlockData, String> {
-    if let Some(res) = config::load_item(text) {
-        return res;
-    }
-    serde_json::from_str(text).map_err(|_| "unrecognised block file".to_owned())
+    rackctl_gx700_lib::parse_block(text)
 }
 
 /// Move the item at index `from` to index `to`, shifting the items in between (the
@@ -251,12 +238,37 @@ fn move_within<T>(items: &mut Vec<T>, from: usize, to: usize) {
     items.insert(to, item);
 }
 
-/// Parse a saved scene (a whole bank): our envelope or a bare patch array.
+/// Parse a saved scene across every supported form (rackctl-core envelope, the
+/// GUI's legacy flat patch list, the CLI's raw-patch scene) into the composer's
+/// dense slot vector.
 fn parse_scene_text(text: &str) -> Result<Vec<TypedPatch>, String> {
-    if let Some(res) = config::load_item(text) {
-        return res;
+    rackctl_gx700_lib::parse_scene(text).map(|s| scene_to_compose(&s))
+}
+
+/// A shared library [`Scene`](rackctl_gx700_lib::Scene) (sparse `slot -> patch`) to
+/// the composer's dense `USER_SLOTS`-length vector; empty slots become INIT.
+fn scene_to_compose(scene: &rackctl_gx700_lib::Scene) -> Vec<TypedPatch> {
+    (1..=USER_SLOTS)
+        .map(|slot| {
+            scene
+                .patches
+                .get(&slot)
+                .cloned()
+                .unwrap_or_else(TypedPatch::init)
+        })
+        .collect()
+}
+
+/// The composer's dense slot vector to a named shared library
+/// [`Scene`](rackctl_gx700_lib::Scene), assigning slots `1..=N`.
+fn compose_to_scene(name: &str, patches: &[TypedPatch]) -> rackctl_gx700_lib::Scene {
+    let mut scene = rackctl_gx700_lib::Scene::new(name);
+    for (i, patch) in patches.iter().enumerate() {
+        if let Ok(slot) = u16::try_from(i + 1) {
+            scene.patches.insert(slot, patch.clone());
+        }
     }
-    serde_json::from_str(text).map_err(|_| "unrecognised scene file".to_owned())
+    scene
 }
 
 /// Render a library list: each saved `name` with a Load (gated on `can_load`) and
@@ -326,31 +338,11 @@ fn lib_list(
     }
 }
 
-/// Stable on-disk subdirectory name for a block's preset library.
-fn block_dir_name(block: Block) -> &'static str {
-    match block {
-        Block::Compressor => "compressor",
-        Block::Wah => "wah",
-        Block::Distortion => "distortion",
-        Block::Preamp => "preamp",
-        Block::Loop => "loop",
-        Block::Equalizer => "equalizer",
-        Block::SpeakerSim => "speaker_sim",
-        Block::NoiseSuppressor => "noise_suppressor",
-        Block::Modulation => "modulation",
-        Block::Delay => "delay",
-        Block::Chorus => "chorus",
-        Block::TremoloPan => "tremolo_pan",
-        Block::Reverb => "reverb",
-        Block::LevelChain => "level_chain",
-        _ => "other",
-    }
-}
-
 /// The preset-library directory for `block` (`<settings>/blocks/<type>`), so each
-/// effect type's presets live in their own folder.
+/// effect type's presets live in their own folder. The subdirectory name comes
+/// from the shared library, so the GUI and CLI agree on it.
 fn block_presets_dir(block: Block) -> Option<std::path::PathBuf> {
-    config::blocks_dir().map(|d| d.join(block_dir_name(block)))
+    config::blocks_dir().map(|d| d.join(rackctl_gx700_lib::block_dir_name(block)))
 }
 
 /// Display label for a slot: `U001..U100` for user patches, `P001..P100` for the
@@ -2598,11 +2590,10 @@ impl App {
             "enter a name for the scene".clone_into(&mut self.status);
             return false;
         }
-        let Some(path) = config::lib_path(config::scenes_dir(), name) else {
-            return false;
-        };
-        match config::save_item(&path, &patches.to_vec()) {
-            Ok(()) => {
+        // Write the canonical shared scene format (slot -> patch), so a scene saved
+        // here loads in the CLI and vice versa.
+        match rackctl_gx700_lib::library::save_scene(&compose_to_scene(name, patches)) {
+            Ok(_path) => {
                 self.status = format!(
                     "saved scene \u{201c}{name}\u{201d} ({} patches)",
                     patches.len()
@@ -5712,8 +5703,11 @@ mod tests {
     fn parse_scene_reads_bare_and_enveloped() {
         let bank = vec![TypedPatch::default(), TypedPatch::default()];
         let bare = serde_json::to_string(&bank).unwrap();
-        assert_eq!(parse_scene_text(&bare).unwrap().len(), 2);
-        assert_eq!(parse_scene_text(&envelope(&bare)).unwrap().len(), 2);
+        // parse_scene_text returns the composer's dense USER_SLOTS vector: a 2-patch
+        // legacy list fills slots 1..=2 and the remaining slots with INIT.
+        let n = usize::from(USER_SLOTS);
+        assert_eq!(parse_scene_text(&bare).unwrap().len(), n);
+        assert_eq!(parse_scene_text(&envelope(&bare)).unwrap().len(), n);
     }
 
     #[test]

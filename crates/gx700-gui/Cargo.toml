@@ -21,6 +21,8 @@ alsa = ["rackctl-gx700/alsa"]
 
 [dependencies]
 rackctl-gx700 = { path = "../gx700", default-features = false }
+rackctl-gx700-lib = { workspace = true }
+rackctl-core = { workspace = true }
 rackctl-ui = { path = "../ui-common" }
 clap.workspace = true
 eframe.workspace = true
