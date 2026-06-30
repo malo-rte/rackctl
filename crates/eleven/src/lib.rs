@@ -45,7 +45,8 @@ pub mod sysex;
 // The data model lives in `rackctl-eleven-model`; re-export it so this crate's
 // public surface carries the shared `Error`/`Result` and the value codec.
 pub use rackctl_eleven_model::{
-    AMP_GAIN, Block, Error, Param, RawValue, Result, Rig, error, tfx, value,
+    AMP_GAIN, Block, BlockData, Error, Param, ParamRecord, PatchBackup, RawValue, RestoreAction,
+    Result, Rig, backup, error, param, tfx, value,
 };
 
 #[cfg(feature = "alsa")]

@@ -15,6 +15,7 @@ use rackctl_midi::MidiPort;
 
 use super::Transport;
 use crate::sysex::{self, CHANGE_REPORT, Framer, Identity, READ_REPLY};
+use rackctl_eleven_model::backup::{BlockData, PatchBackup, RestoreAction};
 use rackctl_eleven_model::error::{Error, Result};
 use rackctl_eleven_model::value::{RawValue, VALUE_LEN};
 
@@ -35,6 +36,22 @@ const SCAN_QUIET_POLLS: u32 = 50;
 /// Gap left after each message of the store sequence, so the unit processes each
 /// directory/commit write before the next.
 const STORE_PACE: Duration = Duration::from_millis(40);
+
+/// Gap between the block reads of a patch capture, so the paced reads never look
+/// like a flood (which can wedge the unit's editor parser).
+const CAPTURE_PACE: Duration = Duration::from_millis(15);
+
+/// The block ids probed when capturing a patch. The aggregate `0x01` is captured
+/// for reference (it is read-only and never written back); `0x05` name, `0x07`
+/// config and `0x08` FX-chain are patch metadata; `0x1E..=0x3F` covers the
+/// model-dependent parameter blocks (the densest, `0x21`, holds the amp). The
+/// directory/commit blocks `0x02..0x04` are deliberately not read — they are the
+/// store sequence's own, not patch content.
+fn patch_block_probe() -> Vec<u8> {
+    let mut ids = vec![0x01u8, 0x05, 0x07, 0x08];
+    ids.extend(0x1E..=0x3F);
+    ids
+}
 
 /// Fold a byte-level link error into this crate's [`Error`]. (The shared `Error`
 /// lives in `rackctl-eleven-model`, so a blanket `From<MidiError>` would be an
@@ -66,6 +83,19 @@ fn format_report(payload: &[u8]) -> String {
         }
     }
     format!("(raw) {}", hex(payload))
+}
+
+/// Extract a printable-ASCII patch name from a `0x05` name-block payload (trailing
+/// NUL / padding trimmed).
+fn ascii_name(payload: &[u8]) -> String {
+    payload
+        .iter()
+        .take_while(|&&b| b != 0)
+        .filter(|&&b| (0x20..0x7f).contains(&b))
+        .map(|&b| b as char)
+        .collect::<String>()
+        .trim()
+        .to_owned()
 }
 
 /// A live connection to an Eleven Rack: the Digidesign protocol over a
@@ -247,6 +277,98 @@ impl RawMidi {
             }
         }
         Err(Error::Timeout)
+    }
+
+    /// Write a whole block into the edit buffer: `00 <block> <payload>`. The
+    /// payload is the bytes a `01 <block>` read returned. This affects the *edit
+    /// buffer* only; [`Self::store`] persists it to a slot.
+    ///
+    /// # Errors
+    /// [`Error::Transport`] on a link failure.
+    pub fn write_block(&mut self, block: u8, payload: &[u8]) -> Result<()> {
+        let mut msg = vec![0xF0, 0x13, 0x0B, self.device_id, 0x00, block];
+        msg.extend_from_slice(payload);
+        msg.push(0xF7);
+        self.port.write_all(&msg).map_err(midi_err)?;
+        Ok(())
+    }
+
+    /// Capture the *currently selected* patch as a device-faithful [`PatchBackup`]:
+    /// read each candidate block (`0x01`, `0x05`, `0x07`, `0x08`, `0x1E..=0x3F`) and
+    /// keep the ones that answer with a payload. Reads are paced so the sweep never
+    /// floods the unit. Select the patch first (`select_rig` + a settle delay).
+    ///
+    /// # Errors
+    /// [`Error::Transport`] on a link failure. A block that does not answer is
+    /// simply omitted (not every id is populated), so this does not fail on a
+    /// missing block.
+    pub fn capture_patch(&mut self) -> Result<PatchBackup> {
+        let mut blocks = Vec::new();
+        for id in patch_block_probe() {
+            if let Ok(bytes) = self.read_block(&[id])
+                && !bytes.is_empty()
+            {
+                blocks.push(BlockData { id, bytes });
+            }
+            sleep(CAPTURE_PACE);
+        }
+        let name = blocks
+            .iter()
+            .find(|b| b.id == 0x05)
+            .map_or_else(String::new, |b| ascii_name(&b.bytes));
+        Ok(PatchBackup::new(name, blocks))
+    }
+
+    /// Restore a [`PatchBackup`] into User `slot`: write each restorable block into
+    /// the edit buffer, then run the store sequence to persist it. The read-only
+    /// aggregate and the directory/commit blocks are skipped (see
+    /// [`BlockData::is_restorable`]).
+    ///
+    /// The caller should `select_rig` the target slot first (so the edit buffer
+    /// starts from a real patch) and verify afterwards by re-reading.
+    ///
+    /// # Errors
+    /// [`Error::Transport`] on a link failure during a block write or the store.
+    pub fn restore_patch(&mut self, slot: u16, patch: &PatchBackup) -> Result<()> {
+        for b in &patch.blocks {
+            match b.restore_action() {
+                // System/device blocks are NEVER written — writing them blindly
+                // (e.g. the `0x22` device-info register) can put the unit into a bad
+                // global state. See `SAFE_FLAT_BLOCKS`.
+                RestoreAction::Skip => {}
+                // Safe flat patch-content blocks (name, FX-chain): write whole.
+                RestoreAction::WholeBlock => {
+                    self.write_block(b.id, &b.bytes)?;
+                    sleep(STORE_PACE);
+                }
+                // Parameter-table blocks (e.g. the amp `0x21`): a whole-block write
+                // does not take, and the physical index is reassigned on reload.
+                // Re-read the *live* table to map each stable `target` to its current
+                // index, then write the value there (`00 11 <id> <index> <value>`).
+                RestoreAction::PerParam => {
+                    let Some(want) = b.param_records() else {
+                        continue;
+                    };
+                    let live = self
+                        .read_block(&[b.id])
+                        .ok()
+                        .and_then(|bytes| BlockData { id: b.id, bytes }.param_records())
+                        .unwrap_or_default();
+                    for r in want {
+                        let Some(live_index) =
+                            live.iter().find(|l| l.target == r.target).map(|l| l.index)
+                        else {
+                            continue;
+                        };
+                        let val = RawValue::from_bytes([r.value, 0, 0, 0, 0x10]);
+                        self.write(&[0x11, b.id, live_index], &val)?;
+                        sleep(STORE_PACE);
+                    }
+                }
+            }
+        }
+        self.store(slot, &patch.name)?;
+        Ok(())
     }
 
     /// Stream the unit's unsolicited change reports, one decoded line per moved

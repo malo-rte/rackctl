@@ -254,7 +254,41 @@ it keeps answering the Universal Identity request but stops answering parameter 
 and a power-cycle may not revive it (re-enumerating the USB cable does). Keep reads
 paced and in small bursts, and prefer passive listening for discovery.
 
-== Parameter catalog (in progress)
+== Parameter catalog
+
+The Eleven Rack has *two* parameter namespaces, and the catalog spans both:
+
+. *MIDI CC numbers* (remote control) — the authoritative *names, per-model
+  structure and value semantics* of every control, transcribed from the User
+  Guide's Chapter 11 into `crates/eleven-model/src/param.rs` (the `param` module:
+  16 amp models, ~20 effects, the shared stepped-value tables, and the
+  `General`/`Misc` controls). This is the canonical parameter list and drives the
+  CLI `list` / `info` commands. See *MIDI CC reference* below.
+. *SysEx addresses* (`11 <block> <index>`) — what the editor actually reads/writes.
+  The block byte is *model/slot-specific* and the index is a small *sequential*
+  offset; these are mapped by live capture (below), **not** derivable from the CC
+  numbers. The two namespaces are unrelated: for amp *DC Modern* the captured
+  indices are Gain `07`, Master `09`, … Presence `0D`, whereas its CCs are Gain 13,
+  Master 10, Presence 21. (The lone `crate::AMP_GAIN` = `11 21 0D` matches CC 13
+  only by coincidence on that one model.)
+
+So `param.rs` answers "*what* are the parameters, their ranges and meanings"; the
+capture tables below answer "*where* a given model writes them". Binding the two
+per model (CC/name ↔ internal index, and the effect-slot block ids) is the
+remaining hardware-mapping work.
+
+[NOTE]
+====
+The installed Windows *Eleven Rack Editor* was mined as a possible source for the
+parameter metadata and is a *dead end*: it is a Pro Tools-derived application whose
+extractable strings are all Pro Tools UI, debug symbols (`DigiTrace…`), or skinned
+UI image-asset names (`.idb`/`.vdb`). It reads the *model names* from the device
+(block `0x20`) at startup and renders parameter UIs from binary resources — there is
+no extractable per-model parameter table in it. The User Guide's Chapter 11 chart is
+the real source.
+====
+
+=== Live address captures (per model/slot)
 
 Mapped live by passive listening on preset *A1*, amp model *DC Modern* (firmware
 `0157`). The amp model determines its block id; this model answers at SysEx block
@@ -326,6 +360,56 @@ patch persists across a reselect. So *restore* = select the slot, write the patc
 blocks/params to the edit buffer, then run this store sequence with that slot. (The unit
 echoes each write as a `0x02` report; the editor then reads back to verify.)
 
+== Restoring a patch (write the edit buffer, then store)
+
+Implemented as a *device-faithful* round-trip that avoids decoding per-parameter value
+scaling. A `PatchBackup` (the `rackctl-eleven capture` command) snapshots a patch as the
+raw payloads the unit returned for each content block — name `0x05`, config `0x07`,
+FX-chain `0x08`, and the parameter blocks (`0x1E..=0x3F`; the densest, `0x21`, is the amp).
+The read-only aggregate `0x01` is captured for reference but never written back, and the
+directory/commit blocks `0x02..0x04` are not captured.
+
+Restore (`rackctl-eleven restore <name> --slot N`) selects slot N, writes each block by its
+[`RestoreAction`] into the edit buffer, runs the store sequence, then re-captures and compares
+to verify. The action depends on the block kind — *hardware-confirmed* on a same-model restore
+(firmware `0157`):
+
+* *Parameter-table blocks* (the amp `0x21`): a whole-block write does *not* take — the unit
+  rebuilds the table itself. They are replayed *per parameter*. Crucially, the record
+  *index* is **not stable**: the same parameter appears at a different `index` after a reload
+  (a captured amp had its knobs at indices `0x4c..0x56`; after restore they were `0x1e..0x28`).
+  The *`target`* byte is the **stable logical id**. So restore re-reads the *live* table,
+  maps each captured value's `target` to its current `index`, and writes `00 11 <block>
+  <live-index> <value>`. Verify likewise compares values keyed by `target`, not by raw bytes.
+* *Safe flat blocks* — *only* the name `0x05` and FX-chain `0x08` — are written whole
+  (`00 <block> <payload>`).
+* *Everything else is skipped.*
+
+[CAUTION]
+====
+*Do not blindly whole-block-write the captured range.* Many blocks a capture turns up are
+*device/system* state, **not** patch content: `0x22` is the unit's *device-info* register
+(read at startup as `01 22`), the single-byte `0x30..0x3f` blocks are model selectors / system
+flags, and `0x34` is the store/revision counter (it ticks `127 → 126 …` per store). An early
+restore wrote *all* of them; writing the `0x22` device-info register put the unit into *Retail
+Demo Mode* — a dimmed display (bright at boot, fades in 2-3 s; **not** a backlight fault) and a
+*blocked* "Reset Memory". Recovery is a *hardware total reset*: hold *REV + MOD + FX LOOP* while
+powering on (this bypasses the software menu; `REV + FX LOOP` is the non-destructive flush). So
+restore now writes a flat block only if it is on the `SAFE_FLAT_BLOCKS` allowlist (`0x05`,
+`0x08`); parameter values still restore fully via the per-parameter path. A *cross-model*
+restore (which needs the model-selector blocks set first) is deferred until those system blocks
+are individually characterised.
+====
+
+[NOTE]
+====
+*Open:* on the amp table, 8 of 11 parameters restore exactly; three (`target` `0x06`/`0x07`/
+`0x08` on the test amp) keep their previous value — a write to their index does not stick,
+so they are a distinct *derived/computed* parameter class needing a different write (still to
+be characterised; the sustained read/write also eventually wedges the editor parser, so this
+needs paced probing on a freshly re-enumerated unit).
+====
+
 == Startup sequence and directories
 
 A USB capture of the Windows editor connecting shows it has *no special wake/init* —
@@ -385,11 +469,14 @@ Chapter 11 is the full chart: block *bypass* CCs (DIST 25, MOD 50, DELAY 28, REV
 36, FX LOOP 107, WAH 43, AMP 111, FX1 63, FX2 86), global controls (Volume Pedal 7,
 Wah Position 4, Multi-FX 11, Tap Tempo 64), and per-amp-model and per-effect parameter
 CCs. Notably an effect's parameter CCs *differ by slot* (its "as MOD / as FX1 / as
-FX2" columns). These CC numbers are a *different* addressing scheme from the SysEx
-addresses, but the chart's *parameter names, per-model structure and value semantics*
-(e.g. bypass `0-63 = Off, 64-127 = On`) are the reference for naming the catalog
-(see `eleven-rack-rig-format.adoc` for the rig-file keys, and
-`docs/external-specs/README.adoc` for the manual).
+FX2" columns) — every slot effect shares the *same positional CC table per slot*, so
+the CC is a function of `(slot, parameter position)`. These CC numbers are a
+*different* addressing scheme from the SysEx addresses (see *Parameter catalog*
+above), but the chart's *parameter names, per-model structure and value semantics*
+(e.g. bypass `0-63 = Off, 64-127 = On`) are authoritative. This chart is fully
+transcribed into `crates/eleven-model/src/param.rs` (the `param` module) and exposed
+by the CLI `list` / `info` commands. (See `eleven-rack-rig-format.adoc` for the
+rig-file keys, and `docs/external-specs/README.adoc` for the manual.)
 
 == Open questions (tracked work)
 
@@ -399,8 +486,12 @@ addresses, but the chart's *parameter names, per-model structure and value seman
   Writing the `0x01` aggregate blob still does nothing; a plain edit-buffer write still
   does not persist without this sequence.
 * Full block/address map beyond the amp block.
-* Per-parameter value type / range / units (int vs. float vs. packed) — the
-  MIDI CC reference (above) gives names and value semantics to cross-check against.
+* *Named parameter catalog — DONE.* The User Guide's Chapter 11 MIDI CC chart is
+  fully transcribed into the `param` module (`crates/eleven-model/src/param.rs`):
+  per-model/per-effect names, CCs and value semantics (knob / switch / stepped),
+  surfaced by the CLI `list` / `info`. Remaining is *binding* each CC/name to its
+  internal SysEx `<block> <index>` per model (a hardware-capture pass), since the
+  two namespaces are unrelated.
 * *Whole-patch bulk dump — SOLVED.* It is a read request with a *1-byte block
   address*: `01 <block_id>` returns `12 <block_id> <whole-block payload>` (see
   *Block dumps* under Opcodes). Request each populated block to read the full patch,

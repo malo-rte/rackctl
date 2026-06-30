@@ -123,6 +123,115 @@ pub fn rigs() {
     }
 }
 
+// ---- parameter catalog (offline; no device) ----
+
+/// Print one `param::Param` as a catalog row: name, MIDI CC and value kind.
+fn print_param(p: &rackctl_eleven::param::Param) {
+    use rackctl_eleven::param::Kind;
+    let kind = match p.kind {
+        Kind::Knob => "knob 0-127".to_string(),
+        Kind::Switch { off, on } => format!("switch <64={off} >=64={on}"),
+        Kind::Stepped(steps) => format!("stepped ({} positions)", steps.len()),
+        _ => "?".to_string(),
+    };
+    println!("  {:<22} CC {:>3}   {kind}", p.name, p.cc);
+}
+
+/// List the parameter catalog: amp models and effects (User Guide Ch.11). With an
+/// argument, list only the matching amp/effect.
+pub fn list(filter: Option<&str>) {
+    use rackctl_eleven::param;
+    let matches = |name: &str| {
+        filter.is_none_or(|f| name.to_ascii_lowercase().contains(&f.to_ascii_lowercase()))
+    };
+
+    if filter.is_none() {
+        println!("General/Frequently Used Controls");
+        for p in param::GENERAL {
+            print_param(p);
+        }
+        println!("\nAmplifier (applies to all amps)");
+        for p in param::AMP_GLOBAL {
+            print_param(p);
+        }
+    }
+
+    for amp in param::AMPS {
+        if matches(amp.name) {
+            println!("\nAmp: {}", amp.name);
+            for p in amp.params {
+                print_param(p);
+            }
+        }
+    }
+    for fx in param::EFFECTS {
+        if matches(fx.name) {
+            println!("\nEffect: {}   ({:?})", fx.name, fx.placement);
+            for p in fx.params {
+                print_param(p);
+            }
+        }
+    }
+}
+
+/// Show one parameter in detail: which model/effect it belongs to, its MIDI CC,
+/// and full value semantics. (The CC is the remote-control number, not a `SysEx`
+/// address — the wire address is model/slot-specific; see the protocol doc.)
+pub fn info(name: &str) -> Result<()> {
+    use rackctl_eleven::param;
+    let mut found = false;
+    let needle = name.to_ascii_lowercase();
+    let hit = |n: &str| n.to_ascii_lowercase() == needle;
+
+    for amp in param::AMPS {
+        for p in amp.params {
+            if hit(p.name) {
+                found = true;
+                println!("{} / {}  (MIDI CC {})", amp.name, p.name, p.cc);
+                describe_kind(p.kind);
+            }
+        }
+    }
+    for fx in param::EFFECTS {
+        for (pos, p) in fx.params.iter().enumerate() {
+            if hit(p.name) {
+                found = true;
+                println!(
+                    "{} / {}  (MIDI CC {}, {:?}, position {pos})",
+                    fx.name, p.name, p.cc, fx.placement
+                );
+                if fx.placement != param::Placement::Fixed {
+                    let mod_cc = param::slot_cc(param::Slot::Mod, pos);
+                    let fx1 = param::slot_cc(param::Slot::Fx1, pos);
+                    let fx2 = param::slot_cc(param::Slot::Fx2, pos);
+                    println!("  MIDI CC by slot:  Mod {mod_cc:?}  FX1 {fx1:?}  FX2 {fx2:?}");
+                }
+                describe_kind(p.kind);
+            }
+        }
+    }
+    if !found {
+        anyhow::bail!("no parameter named {name:?}; try `list` to see the catalog");
+    }
+    Ok(())
+}
+
+/// Print the value semantics of a `param::Kind` for `info`.
+fn describe_kind(kind: rackctl_eleven::param::Kind) {
+    use rackctl_eleven::param::Kind;
+    match kind {
+        Kind::Knob => println!("  knob, raw 0-127"),
+        Kind::Switch { off, on } => println!("  switch: 0-63 = {off}, 64-127 = {on}"),
+        Kind::Stepped(steps) => {
+            println!("  stepped:");
+            for s in steps {
+                println!("    {:>3}-{:<3}  {}", s.lo, s.hi, s.label);
+            }
+        }
+        _ => println!("  (unknown kind)"),
+    }
+}
+
 // ---- hardware-only commands ----
 
 /// Select a User patch slot (Program Change).
@@ -187,6 +296,82 @@ pub fn store(port: Option<&str>, slot: u8, name: &str) -> Result<()> {
     open_rawmidi(port)?.store(u16::from(slot), name)?;
     println!("stored the current edit buffer to User slot {slot} as {name:?}");
     Ok(())
+}
+
+/// Capture the current sound (or User slot `slot`) to the on-disk backup library.
+#[cfg(feature = "alsa")]
+pub fn capture(port: Option<&str>, name: &str, slot: Option<u8>) -> Result<()> {
+    let mut dev = open_rawmidi(port)?;
+    if let Some(s) = slot {
+        dev.select_rig(0, s)?;
+        std::thread::sleep(std::time::Duration::from_millis(300));
+    }
+    let patch = dev.capture_patch()?;
+    let file = rackctl_eleven_lib::save_backup(name, &patch).map_err(anyhow::Error::msg)?;
+    println!(
+        "captured {:?} ({} blocks) -> {}",
+        patch.name,
+        patch.blocks.len(),
+        file.display()
+    );
+    Ok(())
+}
+
+/// Restore a saved backup into User `slot`: select it, write the captured blocks
+/// into the edit buffer, run the store sequence, then verify by re-reading.
+#[cfg(feature = "alsa")]
+pub fn restore(port: Option<&str>, name: &str, slot: u8) -> Result<()> {
+    let patch = rackctl_eleven_lib::load_backup(name).map_err(anyhow::Error::msg)?;
+    let mut dev = open_rawmidi(port)?;
+    dev.select_rig(0, slot)?;
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let written: Vec<&rackctl_eleven::BlockData> = patch
+        .blocks
+        .iter()
+        .filter(|b| b.restore_action() != rackctl_eleven::RestoreAction::Skip)
+        .collect();
+    dev.restore_patch(u16::from(slot), &patch)?;
+    let skipped = patch.blocks.len() - written.len();
+    println!(
+        "restored {:?} ({} blocks written, {skipped} system/metadata blocks skipped) to User slot {slot}; verifying…",
+        patch.name,
+        written.len()
+    );
+
+    // Verify: re-select the slot and re-capture, then compare only the blocks we wrote.
+    dev.select_rig(0, slot)?;
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    let after = dev.capture_patch()?;
+    let (mut ok, mut bad) = (0u32, 0u32);
+    for b in written {
+        let after_b = after.blocks.iter().find(|x| x.id == b.id);
+        // Parameter-table blocks: compare values keyed by the stable `target`, since
+        // the physical index is reassigned on reload. Flat blocks: byte-exact.
+        let matched = if let Some(want) = b.param_values_by_target() {
+            after_b.and_then(rackctl_eleven::BlockData::param_values_by_target) == Some(want)
+        } else {
+            after_b.map(|x| x.bytes.as_slice()) == Some(b.bytes.as_slice())
+        };
+        if matched {
+            ok += 1;
+        } else {
+            bad += 1;
+            println!("  block {:#04X}: MISMATCH", b.id);
+        }
+    }
+    if bad == 0 {
+        println!("verified: all {ok} blocks match");
+    } else {
+        anyhow::bail!("restore verify failed: {bad} block(s) differ ({ok} matched)");
+    }
+    Ok(())
+}
+
+/// List the saved patch backups.
+pub fn backups() {
+    for name in rackctl_eleven_lib::list_backups() {
+        println!("{name}");
+    }
 }
 
 /// Rename a User slot, preserving its patch data (select it, then store it back).
@@ -292,6 +477,8 @@ no_alsa! {
     dump(port: Option<&str>, slot: Option<u8>);
     save(port: Option<&str>, name: &str, slot: Option<u8>);
     store(port: Option<&str>, slot: u8, name: &str);
+    capture(port: Option<&str>, name: &str, slot: Option<u8>);
+    restore(port: Option<&str>, name: &str, slot: u8);
     rename(port: Option<&str>, slot: u8, name: &str);
     backup(port: Option<&str>, out: &str, count: u8);
     monitor(port: Option<&str>);

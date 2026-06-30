@@ -5,9 +5,10 @@
 //! lands, on `rackctl-core` (the device-neutral on-disk library), providing what
 //! both a CLI and a GUI need but neither should own privately.
 //!
-//! It provides `.tfx` rig import and the named on-disk rig library (save / load /
-//! list, via `rackctl-core`); device-touching management (the MIDI library
-//! backup/restore) arrives with later steps (see `docs/eleven-rack-roadmap.adoc`).
+//! It provides `.tfx` rig import, the named on-disk rig library (save / load /
+//! list, via `rackctl-core`), and the device-faithful **patch backup** library
+//! ([`save_backup`] / [`load_backup`] / [`list_backups`]) that the MIDI
+//! capture/restore round-trip uses.
 //!
 //! NOTE: Eleven Rack, Digidesign and Avid are trademarks of Avid Technology, Inc.
 //! This is an independent, unofficial project.
@@ -15,7 +16,7 @@
 
 use std::path::{Path, PathBuf};
 
-use rackctl_eleven::Rig;
+use rackctl_eleven::{PatchBackup, Rig};
 
 // Re-export the protocol crate so a frontend can depend on this one crate.
 pub use rackctl_eleven as device;
@@ -30,6 +31,10 @@ pub const LIB_VERSION: u32 = 1;
 
 /// On-disk library subdirectory for saved rigs.
 const RIGS: &str = "rigs";
+
+/// On-disk library subdirectory for device-faithful patch backups (the MIDI
+/// snapshot form, distinct from interchange `.tfx` rigs).
+const BACKUPS: &str = "backups";
 
 fn no_dir() -> String {
     "no config directory available".to_owned()
@@ -70,4 +75,32 @@ pub fn load_rig(name: &str) -> Result<Rig, String> {
 #[must_use]
 pub fn list_rigs() -> Vec<String> {
     rackctl_core::list_stems(DEVICE_ID, RIGS)
+}
+
+/// Save a device-faithful [`PatchBackup`] to the backup library as `name`.
+///
+/// # Errors
+/// If no config directory is available, or the write fails.
+pub fn save_backup(name: &str, patch: &PatchBackup) -> Result<PathBuf, String> {
+    let file = rackctl_core::item_path(DEVICE_ID, BACKUPS, name).ok_or_else(no_dir)?;
+    rackctl_core::save_item(&file, DEVICE_ID, LIB_VERSION, patch)?;
+    Ok(file)
+}
+
+/// Load the named [`PatchBackup`] from the backup library.
+///
+/// # Errors
+/// If the file is missing/unreadable, or matches no known format.
+pub fn load_backup(name: &str) -> Result<PatchBackup, String> {
+    let file = rackctl_core::item_path(DEVICE_ID, BACKUPS, name).ok_or_else(no_dir)?;
+    let text = rackctl_core::read_text(&file)
+        .ok_or_else(|| format!("could not read {}", file.display()))?;
+    rackctl_core::decode_item::<PatchBackup>(DEVICE_ID, LIB_VERSION, &text)
+        .unwrap_or_else(|| Err("unrecognised backup file".to_owned()))
+}
+
+/// The names of saved patch backups, sorted.
+#[must_use]
+pub fn list_backups() -> Vec<String> {
+    rackctl_core::list_stems(DEVICE_ID, BACKUPS)
 }

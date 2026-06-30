@@ -5,8 +5,9 @@
 //! Parameter-level commands (`get`/`set`/`scan`) run on the mock or hardware; the
 //! patch/slot commands need a connected unit (`--port`).
 //!
-//! Some GX-700 commands have no Eleven Rack equivalent yet: `list`/`info` await
-//! the named parameter catalog, and `load`/`copy` await library restore.
+//! `list`/`info` browse the parameter catalog (offline, no device). The remaining
+//! GX-700 commands without an Eleven Rack equivalent yet are `load`/`copy`, which
+//! await library restore.
 #![forbid(unsafe_code)]
 
 mod commands;
@@ -90,6 +91,24 @@ enum Command {
         /// Name for the stored rig.
         name: String,
     },
+    /// Capture the current sound (or a slot) to the on-disk backup library.
+    Capture {
+        /// Name to save the backup under.
+        name: String,
+        /// Capture User slot N instead of the current sound.
+        #[arg(long)]
+        slot: Option<u8>,
+    },
+    /// Restore a saved backup into a User slot (writes the edit buffer, then stores).
+    Restore {
+        /// Name of the saved backup (see `backups`).
+        name: String,
+        /// Target User slot number (0-based).
+        #[arg(long)]
+        slot: u8,
+    },
+    /// List the saved patch backups.
+    Backups,
     /// Rename a User slot, preserving its patch data.
     Rename {
         /// User slot number (0-based).
@@ -107,6 +126,16 @@ enum Command {
     },
     /// List the rigs saved in the on-disk library.
     Rigs,
+    /// List the parameter catalog (amp models and effects); optionally filtered.
+    List {
+        /// Only show amps/effects whose name contains this text.
+        filter: Option<String>,
+    },
+    /// Show one parameter's CC/index, wire address and value semantics.
+    Info {
+        /// Parameter name, e.g. `presence` or `decay`.
+        name: String,
+    },
     /// Back up the unit's whole patch library to a directory.
     Backup {
         /// Output directory (created if missing).
@@ -142,12 +171,23 @@ fn main() -> Result<()> {
         Command::Dump { slot } => commands::dump(port, slot),
         Command::Save { name, slot } => commands::save(port, &name, slot),
         Command::Store { slot, name } => commands::store(port, slot, &name),
+        Command::Capture { name, slot } => commands::capture(port, &name, slot),
+        Command::Restore { name, slot } => commands::restore(port, &name, slot),
+        Command::Backups => {
+            commands::backups();
+            Ok(())
+        }
         Command::Rename { slot, name } => commands::rename(port, slot, &name),
         Command::Import { file, name } => commands::import(&file, name.as_deref()),
         Command::Rigs => {
             commands::rigs();
             Ok(())
         }
+        Command::List { filter } => {
+            commands::list(filter.as_deref());
+            Ok(())
+        }
+        Command::Info { name } => commands::info(&name),
         Command::Backup { out, count } => commands::backup(port, &out, count),
         Command::Monitor => commands::monitor(port),
         Command::Identity => commands::identity(port),
