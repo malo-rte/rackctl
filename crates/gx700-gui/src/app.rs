@@ -5570,7 +5570,9 @@ impl App {
                     if n == 1 { "" } else { "s" }
                 ));
                 ui.horizontal(|ui| {
-                    if action_button(ui, "Discard & refresh", ActionKind::Destructive).clicked() {
+                    // Caution, not Destructive: it discards your own unsaved edits
+                    // (re-reading the stored bank), not existing device content.
+                    if action_button(ui, "Discard & refresh", ActionKind::Caution).clicked() {
                         actions.push(Action::ConfirmRefresh);
                     }
                     if action_button(ui, "Cancel", ActionKind::Neutral).clicked() {
