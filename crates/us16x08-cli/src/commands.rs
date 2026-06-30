@@ -10,8 +10,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use directories::ProjectDirs;
 use rackctl_us16x08::{
-    Backend, Control, Kind, LoadTiming, Meters, NUM_CHANNELS, NUM_OUTPUTS, Preset, Scope, Section,
-    Us16x08, Value, Watcher, units,
+    Backend, Control, DEVICE_ID, Kind, LIB_VERSION, LoadTiming, Meters, NUM_CHANNELS, NUM_OUTPUTS,
+    Preset, Scope, Section, Us16x08, Value, Watcher, units,
 };
 
 use crate::value::{format_value, parse_value};
@@ -198,8 +198,9 @@ pub(crate) fn save<B: Backend>(
         (Some(ch), Section::Strip) => dev.capture_strip(ch)?,
         (Some(ch), section) => dev.capture_section(ch, section)?,
     };
-    let json = serde_json::to_string_pretty(&preset).context("serializing preset")?;
-    fs::write(path, json).with_context(|| format!("writing {path:?}"))?;
+    rackctl_core::save_item(Path::new(path), DEVICE_ID, LIB_VERSION, &preset)
+        .map_err(anyhow::Error::msg)
+        .with_context(|| format!("writing {path:?}"))?;
     Ok(())
 }
 
@@ -211,8 +212,12 @@ pub(crate) fn load<B: Backend>(
     channel: Option<u32>,
 ) -> Result<()> {
     let text = fs::read_to_string(path).with_context(|| format!("reading {path:?}"))?;
-    let preset: Preset =
-        serde_json::from_str(&text).with_context(|| format!("parsing {path:?}"))?;
+    let preset: Preset = match rackctl_core::decode_item::<Preset>(DEVICE_ID, LIB_VERSION, &text) {
+        // Newest form: the shared library envelope. A bare preset (the legacy form,
+        // or one saved by another tool) falls through to a direct parse.
+        Some(res) => res.map_err(anyhow::Error::msg)?,
+        None => serde_json::from_str(&text).with_context(|| format!("parsing {path:?}"))?,
+    };
     // When the udev rule fires this right after the card re-enumerates, the
     // device answers reads but silently drops writes for a moment. Wait until a
     // write round-trips, then apply with the master muted and every write
@@ -246,8 +251,7 @@ fn wait_until_writable<B: Backend>(dev: &mut Us16x08<B>) {
 /// `<config>/rackctl/us16x08`. Migrates a pre-rename `tascam-mixer` directory
 /// into place on first use, so an existing default carries over.
 fn default_preset_path() -> Result<PathBuf> {
-    let dir = ProjectDirs::from("", "malo-rte", "rackctl")
-        .map(|dirs| dirs.config_dir().join("us16x08"))
+    let dir = rackctl_core::device_dir(DEVICE_ID)
         .context("could not determine the configuration directory")?;
     migrate_legacy_settings(&dir);
     Ok(dir.join("default-preset.json"))
@@ -282,8 +286,9 @@ pub(crate) fn default_preset<B: Backend>(dev: &mut Us16x08<B>, save: bool) -> Re
             fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
         }
         let preset = dev.capture_mixer()?;
-        let json = serde_json::to_string_pretty(&preset).context("serializing preset")?;
-        fs::write(&path, json).with_context(|| format!("writing {}", path.display()))?;
+        rackctl_core::save_item(&path, DEVICE_ID, LIB_VERSION, &preset)
+            .map_err(anyhow::Error::msg)
+            .with_context(|| format!("writing {}", path.display()))?;
         eprintln!("saved default preset to {}", path.display());
         return Ok(());
     }

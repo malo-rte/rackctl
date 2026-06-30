@@ -21,6 +21,7 @@ alsa = ["rackctl-us16x08/alsa"]
 
 [dependencies]
 rackctl-us16x08 = { path = "../us16x08", default-features = false }
+rackctl-core = { workspace = true }
 clap.workspace = true
 clap_complete.workspace = true
 anyhow.workspace = true

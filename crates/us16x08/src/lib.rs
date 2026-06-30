@@ -56,6 +56,15 @@ mod preset;
 pub mod convert;
 pub mod units;
 
+/// This device's stable model id, stamped into every saved library item (the
+/// rackctl-core envelope) so a file is matched to the US-16x08 on load.
+pub const DEVICE_ID: &str = "us16x08";
+
+/// Current on-disk library *envelope* version (distinct from [`PRESET_VERSION`],
+/// the preset payload's own schema). Bump when the envelope shape changes; older
+/// versions load, newer ones are refused.
+pub const LIB_VERSION: u32 = 1;
+
 #[cfg(feature = "alsa")]
 pub use backend::AlsaBackend;
 pub use backend::{Backend, MockBackend};

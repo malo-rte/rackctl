@@ -584,22 +584,21 @@ impl App {
         self.sync_controls();
     }
 
-    /// Capture the whole mixer (or one channel's strip) to a JSON file.
+    /// Capture the whole mixer (or one channel's strip) and save it (enveloped).
     fn save_preset(&mut self, path: &Path, channel: Option<u32>) {
         let result = self
-            .build_preset_json(channel)
-            .and_then(|json| std::fs::write(path, json).map_err(|e| e.to_string()));
+            .build_preset_value(channel)
+            .and_then(|value| config::save_item(path, &value));
         self.status = match result {
             Ok(()) => format!("saved {}", path.display()),
             Err(e) => format!("save failed: {e}"),
         };
     }
 
-    /// Capture a preset and serialise it. A whole-mixer preset also carries the
-    /// GUI-only stereo-link grouping as an extra `links` field, so loading it
-    /// restores the grouping. The library and CLI do not use that field (serde
-    /// ignores it), keeping the file a valid hardware preset.
-    fn build_preset_json(&self, channel: Option<u32>) -> Result<String, String> {
+    /// Capture a preset as a JSON value. A whole-mixer preset also carries the
+    /// GUI-only stereo-link grouping as an extra `links` field inside the payload,
+    /// so loading it restores the grouping; the library and CLI ignore that field.
+    fn build_preset_value(&self, channel: Option<u32>) -> Result<serde_json::Value, String> {
         let preset = match channel {
             Some(ch) => lock(&self.device).capture_strip(ch),
             None => lock(&self.device).capture_mixer(),
@@ -612,18 +611,13 @@ impl App {
             let links = serde_json::to_value(self.links).map_err(|e| e.to_string())?;
             object.insert("links".to_owned(), links);
         }
-        serde_json::to_string_pretty(&value).map_err(|e| e.to_string())
+        Ok(value)
     }
 
-    /// Load a JSON preset. A strip preset needs a target `channel`; a mixer
-    /// preset must be loaded with `None`.
+    /// Load a JSON preset (shared library envelope or a legacy bare preset). A
+    /// strip preset needs a target `channel`; a mixer preset loads with `None`.
     fn load_preset(&mut self, path: &Path, channel: Option<u32>) {
-        let parsed = std::fs::read_to_string(path)
-            .map_err(|e| e.to_string())
-            .and_then(|text| {
-                serde_json::from_str::<serde_json::Value>(&text).map_err(|e| e.to_string())
-            });
-        let value = match parsed {
+        let value = match read_preset_value(path) {
             Ok(value) => value,
             Err(e) => {
                 self.status = format!("load failed: {e}");
@@ -833,10 +827,9 @@ impl App {
                     .into_iter()
                     .filter(|(key, _)| keys.contains(key.as_str()))
                     .collect();
-                let filtered = Preset::Strip { version, controls };
-                serde_json::to_string_pretty(&filtered).map_err(|e| e.to_string())
+                Ok(Preset::Strip { version, controls })
             })
-            .and_then(|json| std::fs::write(path, json).map_err(|e| e.to_string()));
+            .and_then(|filtered| config::save_item(path, &filtered));
         self.status = match result {
             Ok(()) => format!("saved {}", path.display()),
             Err(e) => format!("save failed: {e}"),
@@ -845,7 +838,7 @@ impl App {
 
     /// Delete a saved preset file.
     pub(crate) fn delete_preset(&mut self, path: &Path) {
-        self.status = match std::fs::remove_file(path) {
+        self.status = match config::delete_file(path) {
             Ok(()) => format!("deleted {}", preset_label(path)),
             Err(e) => format!("delete failed: {e}"),
         };
@@ -1132,11 +1125,23 @@ fn extract_links(value: &serde_json::Value) -> Option<[bool; 8]> {
     Some(links)
 }
 
+/// Read a preset file as a JSON value, accepting the shared library envelope or a
+/// legacy bare preset (so files saved before the envelope, or by another tool,
+/// still load).
+fn read_preset_value(path: &Path) -> Result<serde_json::Value, String> {
+    let text =
+        config::read_text(path).ok_or_else(|| format!("could not read {}", path.display()))?;
+    match config::load_item::<serde_json::Value>(&text) {
+        Some(res) => res,
+        None => serde_json::from_str(&text).map_err(|e| e.to_string()),
+    }
+}
+
 /// Read a strip preset file and resolve it to `(control, value)` pairs for the
 /// paste clipboard. (EQ / compressor presets are partial strips.)
 fn read_strip_values(path: &Path) -> Result<Vec<(Control, Value)>, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let preset: Preset = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let value = read_preset_value(path)?;
+    let preset: Preset = serde_json::from_value(value).map_err(|e| e.to_string())?;
     Ok(preset.strip_values())
 }
 
