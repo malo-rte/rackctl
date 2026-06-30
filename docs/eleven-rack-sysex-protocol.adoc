@@ -135,8 +135,14 @@ The address is *multi-byte* (three bytes seen). It behaves like the GX-700's
 section/block/parameter scheme: a leading block selector, then a contiguous array
 of parameter offsets.
 
-The three bytes act as *section / block / parameter*. Mapped by scanning (firmware
-`0157`):
+The three bytes act as *section / model-table / index*. byte1 selects the *active
+model's parameter table* (hence it is model-dependent — the DC Modern amp answers at
+`0x3D`, an earlier rig's amp at `0x21`), and byte2 is an *index into that table* that
+points at the actual parameter in the patch. The catalog is therefore keyed by
+`(model-table id, index)`; if the table itself proves readable, a whole model's
+parameters could be enumerated at once rather than swept one knob at a time.
+
+Mapped by scanning (firmware `0157`):
 
 * *Section `0x11` is the current rig's parameters.* Under it, byte1 enumerates
   *~13 blocks* at `0x1E`..`0x2A` (the rig's effect blocks), each a 128-entry
