@@ -146,6 +146,56 @@ impl RawMidi {
         Err(Error::Timeout)
     }
 
+    /// Select a rig: Bank Select (`CC 32`, `1` = Factory, `0` = User) then a
+    /// Program Change. Give the unit a moment to load before reading it.
+    ///
+    /// # Errors
+    /// [`Error::Transport`] on a link failure.
+    pub fn select_rig(&mut self, bank: u8, program: u8) -> Result<()> {
+        self.port
+            .write_all(&[0xB0, 0x20, bank & 0x7f])
+            .map_err(midi_err)?;
+        self.port
+            .write_all(&[0xC0, program & 0x7f])
+            .map_err(midi_err)?;
+        Ok(())
+    }
+
+    /// Bulk-read a whole block of the current patch: send `01 <block>` and return
+    /// the block's payload (everything after the echoed block id in the reply).
+    /// Block `0x01` is the full packed patch; `0x05` is the rig name.
+    ///
+    /// # Errors
+    /// [`Error::Timeout`] if the unit does not answer; [`Error::Transport`] on a
+    /// link failure.
+    pub fn read_block(&mut self, block: u8) -> Result<Vec<u8>> {
+        self.drain_input();
+        self.port
+            .write_all(&sysex::build_read_request(self.device_id, &[block]))
+            .map_err(midi_err)?;
+        let mut framer = Framer::new();
+        let mut buf = [0u8; 512];
+        for _ in 0..REPLY_POLLS {
+            match self.port.read(&mut buf).map_err(midi_err)? {
+                0 => sleep(POLL_INTERVAL),
+                n => {
+                    for msg in framer.push(buf.get(..n).unwrap_or(&[])) {
+                        let Ok(parsed) = sysex::parse(&msg) else {
+                            continue;
+                        };
+                        if parsed.opcode != READ_REPLY {
+                            continue;
+                        }
+                        if let Some(rest) = parsed.payload.strip_prefix(&[block]) {
+                            return Ok(rest.to_vec());
+                        }
+                    }
+                }
+            }
+        }
+        Err(Error::Timeout)
+    }
+
     /// Stream the unit's unsolicited change reports, one decoded line per moved
     /// parameter, until interrupted. This is the knob-sweep aid for mapping which
     /// address a front-panel control drives. Each line is `<addr> -> <value>`.

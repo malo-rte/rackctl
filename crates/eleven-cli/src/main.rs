@@ -64,6 +64,15 @@ enum Command {
     },
     /// List the rigs saved in the on-disk library.
     Rigs,
+    /// Back up the unit's whole patch library to a directory (needs `--port`).
+    Backup {
+        /// Output directory (created if missing).
+        #[arg(long, default_value = "eleven-backup")]
+        out: String,
+        /// Number of patches to read per bank (User, then Factory).
+        #[arg(long, default_value_t = 100)]
+        count: u8,
+    },
     /// List the available ALSA rawmidi ports.
     Ports,
 }
@@ -81,6 +90,7 @@ fn main() -> Result<()> {
             rigs();
             Ok(())
         }
+        Command::Backup { out, count } => backup(cli.port.as_deref(), out, *count),
         Command::Ports => list_ports(),
     }
 }
@@ -197,6 +207,77 @@ fn identity(port: Option<&str>) -> Result<()> {
 #[cfg(not(feature = "alsa"))]
 fn identity(_port: Option<&str>) -> Result<()> {
     anyhow::bail!("built without the `alsa` feature; cannot probe hardware")
+}
+
+/// Back up the unit's patch library: for each bank/patch, select it and read the
+/// full packed-patch block (`0x01`) + the name (`0x05`) to a file.
+#[cfg(feature = "alsa")]
+fn backup(port: Option<&str>, out: &str, count: u8) -> Result<()> {
+    let port = port.context("backup needs --port (a connected unit)")?;
+    let mut dev = RawMidi::open(port)?;
+    let dir = std::path::Path::new(out);
+    std::fs::create_dir_all(dir).with_context(|| format!("create {out}"))?;
+    let mut total = 0u32;
+    for (bank, label) in [(0u8, "user"), (1u8, "factory")] {
+        let mut first: Option<String> = None;
+        for pc in 0..count {
+            dev.select_rig(bank, pc)?;
+            std::thread::sleep(std::time::Duration::from_millis(60));
+            let blob = read_block_retry(&mut dev, 0x01)?;
+            let raw_name = read_block_retry(&mut dev, 0x05)?;
+            let name = String::from_utf8_lossy(&raw_name)
+                .trim_matches(|c: char| c == '\0' || c.is_whitespace())
+                .to_owned();
+            if pc > 0 && first.as_deref() == Some(name.as_str()) {
+                println!("{label}: wrapped at {pc} ({pc} patches)");
+                break;
+            }
+            first.get_or_insert_with(|| name.clone());
+            let file = dir.join(format!("{label}-{pc:03}-{}.erpatch", sanitize(&name)));
+            std::fs::write(&file, &blob).with_context(|| format!("write {}", file.display()))?;
+            println!("{label} {pc:3}: {name:?} ({} bytes)", blob.len());
+            total += 1;
+        }
+    }
+    println!("backed up {total} patches to {out}");
+    Ok(())
+}
+
+#[cfg(not(feature = "alsa"))]
+fn backup(_port: Option<&str>, _out: &str, _count: u8) -> Result<()> {
+    anyhow::bail!("built without the `alsa` feature; cannot back up hardware")
+}
+
+/// Read a block, retrying a few times — the unit occasionally misses a reply.
+#[cfg(feature = "alsa")]
+fn read_block_retry(dev: &mut RawMidi, block: u8) -> Result<Vec<u8>> {
+    let mut last = None;
+    for _ in 0..3 {
+        match dev.read_block(block) {
+            Ok(v) => return Ok(v),
+            Err(e) => {
+                last = Some(e);
+                std::thread::sleep(std::time::Duration::from_millis(120));
+            }
+        }
+    }
+    Err(last.map_or_else(|| anyhow::anyhow!("read failed"), Into::into))
+}
+
+/// Make a name safe for a filename (keep alphanumerics, space, dash, underscore).
+#[cfg(feature = "alsa")]
+fn sanitize(name: &str) -> String {
+    let s: String = name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    s.trim().to_owned()
 }
 
 /// Render bytes as space-separated uppercase hex.
