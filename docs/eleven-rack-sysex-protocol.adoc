@@ -117,7 +117,7 @@ Decoded reply: device id `0x0F`; manufacturer `0x13`; family `0x000B` (LSB-first
 | `0x01` | Read request | host -> unit: `F0 13 0B 0F 01 <addr> F7`. Ask for one address.
 | `0x12` | Read reply | unit -> host: `F0 13 0B 0F 12 <addr> <value> F7`. Solicited answer to `0x01`.
 | `0x02` | Change report | unit -> host: `F0 13 0B 0F 02 <addr> <value> F7`. Unsolicited, when a knob moves.
-| `0x00` | Write (set) | host -> unit: `F0 13 0B 0F 00 <addr> <value> F7`. Confirmed by set + read-back (amp Gain `11 21 07`).
+| `0x00` | Write (set) | host -> unit: `F0 13 0B 0F 00 <addr> <value> F7`. Writes a parameter (3-byte addr) or a whole block (1-byte addr). Confirmed by set + read-back. Affects the *edit buffer* only (see note).
 |===
 
 .Confirmed read round-trip (amp Gain)
@@ -320,7 +320,13 @@ addresses, but the chart's *parameter names, per-model structure and value seman
 
 == Open questions (tracked work)
 
-* Write opcode (`0x03`?) -- confirm by set + read-back + restore.
+* *Patch store / save — the one missing piece.* A write (`0x00`) changes the *edit
+  buffer* (the current sound) but does *not* persist to the patch slot; reselecting the
+  patch reloads the slot and discards the edit. Writing the `0x01` aggregate blob does
+  nothing (it is a read-only view); only individual blocks/params are writable, and only
+  to the edit buffer. The command that *stores* the edit buffer to a slot is *unknown*
+  (the obvious opcode guesses did not persist). This blocks library *restore*; reads,
+  per-parameter edits, and library *backup* all work without it.
 * Full block/address map beyond the amp block.
 * Per-parameter value type / range / units (int vs. float vs. packed) — the
   MIDI CC reference (above) gives names and value semantics to cross-check against.
