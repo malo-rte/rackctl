@@ -1,0 +1,104 @@
+= Avid/Digidesign Eleven Rack support — roadmap & implementation plan
+:toc: left
+:icons: font
+:source-highlighter: rouge
+
+The plan for adding the Avid (Digidesign) Eleven Rack as the third Rackctl device,
+after the US-16x08 and the GX-700. It follows the *reusable-component* goal: the
+Eleven Rack is built on the same shared libraries (`rackctl-core`, `rackctl-midi`,
+`rackctl-ui`) with a device-specific model / protocol / management / frontend split,
+so almost nothing is reimplemented.
+
+TIP: For the device-neutral model this instantiates (scene/patch/block hierarchy,
+libraries, the on-disk envelope, the device interface) see `architecture.adoc`. The
+two findings references are `eleven-rack-sysex-protocol.adoc` (live control) and
+`eleven-rack-rig-format.adoc` (`.tfx` rig files).
+
+NOTE: Eleven Rack, Digidesign and Avid are trademarks of Avid Technology, Inc. This
+is an independent, unofficial project, not affiliated with Avid.
+
+== Why this is tractable
+
+Two independent, mutually-reinforcing data sources, both already in hand:
+
+* *Live SysEx control.* Reverse-engineered against a real unit: address-mapped
+  Digidesign SysEx, with a working read path (request `0x01` -> reply `0x12`) and
+  change reports (`0x02`). We can poll any address now.
+* *A 1,243-rig `.tfx` corpus* with *self-naming* parameters (`Driv`, `Levl`,
+  `FXc1..4`, routing `Wor*`/`Wst*`, ...). It supplies the parameter vocabulary and
+  per-key value ranges.
+
+Correlating the two (load a rig, read its addresses, match to the rig file's keys)
+labels the address map and pins value encodings -- far cheaper than sweeping every
+knob blind.
+
+== Crate architecture
+
+Mirrors the GX-700 split; the shared crates carry over unchanged.
+
+[cols="1,3",options="header"]
+|===
+| Crate | Responsibility
+| `rackctl-eleven-model` | Pure data model: typed rig/blocks, address map, the 5-byte value codec, `RawRig`, shared `Error`. No I/O.
+| `rackctl-eleven` | Protocol + device adapter: Digidesign SysEx codec over `rackctl-midi`; device facade (read / report / write); mock + rawmidi transports. Re-exports the model.
+| `rackctl-eleven-lib` | Management layer on `rackctl-core`: rig libraries, `.tfx` import, on-disk envelope, `DEVICE_ID` / `LIB_VERSION`.
+| `eleven-cli` | Thin CLI frontend (binary `rackctl-eleven`).
+| `eleven-gui` | Thin egui frontend; reuses `rackctl-ui` (`ActionKind` colours, font, icons).
+|===
+
+Reused as-is: `rackctl-core` (on-disk envelope + paths + CRUD), `rackctl-midi`
+(byte-level ALSA MIDI link + `PortLock`), `rackctl-ui` (shared UI primitives).
+
+== Phases
+
+Each phase is one tracked task. Hardware-dependent phases (2, 3, 5) are time-sensitive
+while a unit is connected; the rest is mock-first and can proceed offline against
+captured fixtures.
+
+. *Scaffold + SysEx codec.* `crates/eleven*` skeletons, workspace wiring, the
+  Digidesign framer/codec (`F0 13 0B 0F <op> <addr> <val> F7`, the 5-byte 7-bit
+  value pack/unpack), identity decode. Mock transport + unit tests. Gate green.
+. *Live device facade + `scan`/`dump` CLI.* Read path over `rackctl-midi`: read one
+  address, batch-scan a range, stream change reports. A read-only `scan` command that
+  enumerates answered addresses -- immediately useful and grounded in confirmed
+  protocol.
+. *Decode value encoding + build the parameter catalog.* Resolve per-parameter
+  type/range/units by correlating live reads against the `.tfx` corpus; firm up the
+  block/address map beyond the amp block. Produce `param`-style catalog data.
+. *`.tfx` reader + on-disk rigs.* Parse the binary rig format into the typed model;
+  store rigs through the `rackctl-core` envelope; round-trip tests against corpus
+  fixtures.
+. *Write path.* Confirm the write opcode (set + read-back + restore), then per-address
+  write with read-back verify; rig load/store to the unit.
+. *Frontends.* `eleven-cli` (get/set, rig list/load/save, dump), then `eleven-gui`
+  (rig librarian, following the `device-editor-gui` patterns).
+
+== Verification strategy
+
+* *Mock-first.* Every codec/model/facade path is unit-tested on an in-memory
+  transport, like the GX-700. The gate (`run-all-checks.sh`) must stay green:
+  clippy `-D warnings` (both feature sets), fmt, tests, rustdoc.
+* *Corpus fixtures.* A handful of `.tfx` files (kept out of git) back the rig-format
+  round-trip tests; the parser is validated against the 1,243-rig diff.
+* *Hardware (user-run).* Address scans, knob-sweep correlation, and the write-opcode
+  confirmation are run against a connected unit; the GUI is verified by the user (no
+  display in the container).
+
+== Open reverse-engineering questions
+
+Carried from the two findings docs -- these gate phases 3 and 5:
+
+* Write opcode (`0x03`?) -- set + read-back + restore.
+* Full block/address map (cab, stomps, mod, delay, reverb, FX loop, master).
+* Per-parameter value type / range / units; whether `.tfx` stored words equal the
+  SysEx 32-bit words (shared decoder if so).
+* `.tfx` body layout: exact per-key offset/packing, `FXc1..4` and `Wor*`/`Wst*`
+  routing decode.
+* Rig select (Program Change?) and any whole-rig bulk read/write.
+
+== Out of scope (for now)
+
+* The Eleven Rack's USB *audio interface* side (it is not class-compliant on Linux);
+  this project controls the DSP/rig parameters over MIDI only.
+* Modelling the proprietary USB editor protocol -- unnecessary, since address-mapped
+  SysEx covers control.

@@ -1,0 +1,116 @@
+= Avid/Digidesign Eleven Rack — rig file format (.tfx / .rig)
+:toc: left
+:icons: font
+:source-highlighter: rouge
+
+The on-disk format of an Eleven Rack rig preset, as reverse-engineered from the
+Eleven Rack User Group (ERUG) rig collection. This is the basis for importing
+community/factory rigs into the planned `rackctl-eleven` library, and -- correlated
+with the live SysEx address map (`eleven-rack-sysex-protocol.adoc`) -- for building
+the parameter catalog.
+
+NOTE: Eleven Rack, Digidesign and Avid are trademarks of Avid Technology, Inc.
+This is an independent, unofficial project. No rig files are committed; only this
+derived format description.
+
+== Corpus
+
+The format below was derived by diffing a corpus of *1,243 `.tfx` rigs* (the
+"All ERUG Rigs as of 03/25/21" community collection). The corpus is *not* committed
+(third-party content, public repo); it is git-ignored under `/11/`. To reproduce,
+place a set of `.tfx` files there.
+
+== It is binary, not XML
+
+A common community claim is that rig files are "XML if you rename them to `.xml`".
+That is *not* true of these `.tfx` files -- they are a Digidesign *binary* format
+(magic `DigiElvRELVhRig`). The XML claim may apply to a different export path; treat
+it as false for `.tfx` until a real XML sample appears.
+
+== Word orientation
+
+The file is an array of *32-bit little-endian words*. Consequently four-character
+tags and embedded text read *byte-swapped per 4-byte group* when scanned linearly:
+
+[cols="2,2,3",options="header"]
+|===
+| On disk (raw) | Logical | Meaning
+| `1loV` | `Vol1` | volume 1
+| `opmT` | `Tmpo` | tempo
+| `1cXF` | `FXc1` | FX-chain slot 1
+| `.rMaelC..n` | `Mr. Clean` | rig name (text, same word-swap)
+|===
+
+The magic at the top reads as literal ASCII; the body (name, tags, values) is
+word-swapped. A parser reads u32 LE and swaps tag bytes to recover the FourCC.
+
+== Layout
+
+[cols="1,3",options="header"]
+|===
+| Region | Contents
+| word 0 | total file size in bytes (e.g. `0x00000470` = 1136)
+| header | magic `DigiElvRELVhRig`, then flag/id words
+| name | the rig name as word-swapped text
+| body | a table of *FourCC-keyed parameter entries* (`<tag> <value...>`)
+|===
+
+WARNING: The `(tag, next-word)` adjacency is *not uniform* -- some tags are section
+markers, and some values are packed or live at a small offset from their tag. Naive
+"`value = word after tag`" decoding produced garbage/NaN for several keys. The exact
+per-key layout and value type is open work; the corpus (1,243 examples giving each
+key's value range) plus live SysEx correlation is the way to resolve it.
+
+== Stable schema (key vocabulary)
+
+~78 FourCC keys appear in ~99% of rigs -- the stable parameter vocabulary. Selected
+keys with their *observed* value ranges and best-guess meaning (guesses flagged):
+
+[cols="1,2,3",options="header"]
+|===
+| Key | Range (raw) | Meaning (✓ = clear, ? = guess)
+| `RVol` | wide | master rig volume ?
+| `Vol1` / `Vol2` | wide | volume controls (rig A/B?) ?
+| `RMno` | 0..1 | mono ? (✓ boolean)
+| `Tmpo` | large | tempo ?
+| `Msyc` | 0..1 | MIDI sync on/off ?
+| `ExpT` | 0..4 | expression-pedal target/type ?
+| `PIGI` | 0..127 | input gain ? (✓ 7-bit range)
+| `FXc1`..`FXc4` | packed | the four FX-chain slots (effect id + state) ?
+| `Driv` | float-ish | amp/stomp drive ?
+| `Levl` | float-ish | level ?
+| `Tone` | float-ish | tone ?
+| `Dcay` | float-ish | decay (reverb/delay) ?
+| `Filt` | float-ish | filter ?
+| `Type` | enum | effect type selector ?
+| `PDly` | float-ish | pre-delay ?
+| `Sync` / `Tapr` | varies | delay sync / taper ?
+| `send` / `rtrn` / `wetp` / `bypa` | varies | FX-loop send / return / wet / bypass ?
+| `sld1`..`sldO` | float-ish | ~24 generic parameter "sliders" (per-effect params) ?
+| `Wor[B..L]` | 11..91 | routing-graph node (wire origin?) ?
+| `Wst[B..L]` | 0..9 | routing-graph node (wire stage/state?) ?
+|===
+
+The `Wor*`/`Wst*` pairs and `FXc1..4` together describe the *signal routing* (which
+effect occupies each chain slot and how blocks are wired) -- the Eleven Rack's
+hallmark flexible rig graph.
+
+== Correlation method (rig file ↔ live SysEx)
+
+The two reference points reinforce each other:
+
+. Load a known rig on the unit.
+. Read its parameter addresses over SysEx (`eleven-rack-sysex-protocol.adoc`).
+. Open the same rig's `.tfx` and read its keyed values.
+. Match values -> bind each SysEx address to a `.tfx` key (a real name + range).
+
+This labels the address map and pins value encodings far faster than knob-sweeping
+every parameter, and the corpus supplies each parameter's range for free.
+
+== Open questions (tracked work)
+
+* Exact per-key offset/type/packing in the body table.
+* Decode `FXc1..4` (effect id + slot state) and the `Wor*`/`Wst*` routing graph.
+* Map keys to amp/cab/stomp/mod/delay/reverb/FX-loop blocks.
+* Relationship between `.tfx` and any `.rig` variant.
+* Whether the stored values equal the SysEx 32-bit words (then both decoders share code).

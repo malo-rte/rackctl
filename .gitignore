@@ -8,3 +8,9 @@
 /result
 
 *~
+
+# Eleven Rack community rig corpus (ERUG) — third-party, do not commit
+/11/
+/All_ERUG_Rigs_as_of_032521.zip
+*.tfx
+*.rig
