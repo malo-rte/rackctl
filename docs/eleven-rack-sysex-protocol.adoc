@@ -135,19 +135,30 @@ The address is *multi-byte* (three bytes seen). It behaves like the GX-700's
 section/block/parameter scheme: a leading block selector, then a contiguous array
 of parameter offsets.
 
-Confirmed so far (firmware `0157`):
+The three bytes act as *section / block / parameter*. Mapped by scanning (firmware
+`0157`):
+
+* *Section `0x11` is the current rig's parameters.* Under it, byte1 enumerates
+  *~13 blocks* at `0x1E`..`0x2A` (the rig's effect blocks), each a 128-entry
+  parameter array (byte2 `0x00`..`0x7F`). Most entries sit at a centre default
+  (`40 00 00 00 00` = 64); the populated ones are the live parameters. Block
+  `11 21` is the densest (~20 active) and holds the amp — amp *Gain* = `11 21 0D`.
+* *Other sections carry strings/metadata* — e.g. amp/cab *model names* read as
+  ASCII in sections around `0x05` / `0x20` (`"Marshal…"`, `"DigiDy…"`), and the rig
+  name elsewhere.
 
 [cols="2,3",options="header"]
 |===
 | Address | Meaning
-| `11 21 0D` | Amp Gain (front-panel knob)
-| `11 21 00`..`11 21 7F` | The amp block -- a contiguous 128-entry parameter array (all answered a read)
+| `11 21 0D` | Amp Gain (front-panel knob) — anchor, confirmed by sweep
+| `11 1E..2A xx` | Section `0x11` rig blocks (byte1 = block, byte2 = parameter)
 |===
 
-WARNING: Only the amp block (`11 21 xx`) is mapped so far. The full block map
-(cab, stomps, mod, delay, reverb, FX loop, master) is open work -- discovered by
-sweeping front-panel controls and correlating with the `.tfx` rig schema
-(see `eleven-rack-rig-format.adoc`).
+WARNING: The block->effect assignment (which of `0x1E`..`0x2A` is amp/cab/stomp/mod/
+delay/reverb/FX-loop/master) and the per-parameter value scaling are still being
+decoded — by correlating live reads with the `.tfx` rig schema
+(`eleven-rack-rig-format.adoc`) and the User Guide's MIDI CC reference (the parameter
+names and value semantics).
 
 == Value encoding
 
