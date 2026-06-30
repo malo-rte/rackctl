@@ -332,9 +332,11 @@ also what lets two tools (CLI and GUI) share one busy MIDI port.
 
 The device-neutral _model_ — scene/patch/block, the library operations, the clipboards
 and the staging flow — is what this document specifies. The file format and the on-disk
-libraries are realised once, in `rackctl-core` + `rackctl-<device>-lib`, for both
-frontends to build on; pulling the remaining model logic (clipboards, staging) down
-into shared crates as more devices land is the continuing direction.
+libraries are realised once, in `rackctl-core` + `rackctl-<device>-lib`, and the GX-700
+CLI consumes them directly (so a patch, scene or block file round-trips between the CLI
+and the GUI); the GUI is being migrated onto the same crates next. Pulling the remaining
+model logic (clipboards, staging) down into shared crates as more devices land is the
+continuing direction.
 
 The GUIs follow an _action-collected-then-applied_ pattern: rendering pushes
 `Action` values into a list (never mutating device or model state mid-frame), which are

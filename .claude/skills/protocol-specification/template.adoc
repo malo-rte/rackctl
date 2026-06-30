@@ -1,0 +1,286 @@
+= TODO Protocol Name
+:revnumber: 0.1.0
+:revdate: TODO date
+:toc: left
+:toclevels: 3
+:sectnums:
+
+// This is a protocol specification template.
+// Replace every TODO before the document is complete.
+// The companion linter (lint_protocol.py) reports any TODO left in a
+// required field, and any required section that is missing.
+
+== Overview
+
+TODO One or two paragraphs. What the protocol is for, which two roles talk
+to each other (for example controller and node, client and server), and the
+single most important thing a reader should know before reading on.
+
+Define the role names you will use for the rest of the document here, so
+"initiator" and "responder", or "controller" and "node", mean one fixed thing.
+
+== Transport assumptions
+
+[cols="1,3"]
+|===
+| Item | Value
+
+| Medium
+| TODO for example TCP socket, UART at a fixed baud rate, CAN 2.0B
+
+| Guarantees the medium provides
+| TODO ordered or not, reliable or not, message boundaries or raw byte stream
+
+| Guarantees this protocol must add itself
+| TODO framing, ordering, retransmission, deduplication, or none
+
+| Maximum message size
+| TODO bytes
+
+| Maximum frame size
+| TODO bytes, or "same as message" if the medium does not frame
+
+| Byte order
+| TODO big endian or little endian, stated once for the whole protocol
+|===
+
+== Session lifecycle
+
+TODO Describe how a session starts, runs, and ends. If the protocol is
+connectionless and every message stands alone, say so plainly and remove the
+state diagram below.
+
+=== Open
+
+TODO The steps to bring a session up: the handshake, who speaks first, what
+must be agreed before normal messages flow.
+
+=== Keepalive
+
+TODO Heartbeat or keepalive interval, which side sends it, and what a missed
+keepalive means. Write "none" if there is no keepalive.
+
+=== Close
+
+TODO How a session closes cleanly, and how it ends on failure (timeout, reset,
+transport drop). State what each side must clean up.
+
+=== State diagram
+
+// Diagram required. See references/diagrams.md for syntax choice.
+[plantuml]
+....
+@startuml
+[*] --> Closed
+Closed --> Opening : open requested
+Opening --> Open : handshake complete
+Open --> Closed : close or failure
+@enduml
+....
+
+TODO Replace the placeholder states above with the real connection states.
+
+== Message catalog
+
+TODO One subsection per message, using the per-message block below. Copy the
+block once per message. Keep the field rows in place even when a value is
+"none", so the linter can confirm the field was considered.
+
+=== Message: TODO MessageName
+
+[cols="1,3"]
+|===
+| Field | Value
+
+| Message type
+| TODO the type code or name as it appears on the wire
+
+| Direction and initiator
+| TODO which role sends it; whether it can be sent unsolicited
+
+| Parameters
+| TODO each parameter, its type, and its meaning
+
+| Valid parameter ranges
+| TODO allowed values per parameter, and what counts as invalid
+
+| Pre-requisite
+| TODO what must be true before this message is valid (for example session
+open, prior message acknowledged); "none" if it can be sent any time
+
+| Correlation
+| TODO how a response is matched to this request: message ID, sequence
+number, or single outstanding request
+
+| Responses
+| TODO the normal response or responses to this message
+
+| Error responses
+| TODO the error replies specific to this message, separate from normal
+responses
+
+| Timeout and retry
+| TODO how long the sender waits, and how many times it resends
+
+| Idempotency
+| TODO is resending this message safe, or does it cause a duplicate effect
+|===
+
+Description::
+TODO Prose. What the message does, why it exists, and any subtlety a reader
+needs. This is the place for the detail that does not fit a table cell.
+
+Sequence::
+// Diagram required per message. See references/diagrams.md.
+[plantuml]
+....
+@startuml
+TODO -> TODO : TODO MessageName(params)
+TODO --> TODO : TODO Response
+@enduml
+....
+
+== Encoding layer
+
+=== Framing
+
+TODO How a message becomes one or more frames, when the medium needs framing.
+If the transport already delivers whole messages (for example a datagram
+medium), say "the transport delivers whole messages; no framing added" and
+keep the frame layout below as the message layout.
+
+=== Frame layout
+
+// A byte-layout picture is strongly recommended here.
+// See references/diagrams.md for the mermaid packet diagram.
+TODO Show the frame fields in order across bytes: start marker, length,
+type, payload, integrity check, end marker. Give the width of each field.
+
+[cols="1,1,3"]
+|===
+| Field | Width | Meaning
+
+| Start of frame
+| TODO | TODO the byte or pattern that marks a frame start; "none" if not used
+
+| Length
+| TODO | TODO what the length counts: header plus payload, or payload only
+
+| Payload
+| TODO | TODO the encoded message body
+
+| Integrity check
+| TODO | TODO CRC type or checksum, and exactly which bytes it covers
+
+| End of frame
+| TODO | TODO the byte or pattern that marks a frame end; "none" if not used
+|===
+
+=== Encoding rules
+
+[cols="1,3"]
+|===
+| Rule | Value
+
+| Field encoding
+| TODO how each field type maps to bytes (integers, strings, enums, flags)
+
+| Alignment and padding
+| TODO any required field alignment and any fill bytes; "none" if packed
+
+| Variable-length fields
+| TODO how their length is signalled: a length prefix, or a terminator byte
+
+| Byte stuffing or escaping
+| TODO needed when a marker byte can also appear inside the payload; the
+escape rule, or "not needed" with the reason
+|===
+
+== Error handling
+
+[cols="1,1,3"]
+|===
+| Code | Name | Meaning
+
+| TODO | TODO | TODO
+|===
+
+[cols="1,3"]
+|===
+| Situation | Receiver behaviour
+
+| Unknown message type
+| TODO what the receiver does
+
+| Malformed frame (bad length)
+| TODO what the receiver does
+
+| Failed integrity check (bad CRC)
+| TODO what the receiver does
+
+| Timeout fires
+| TODO what the waiting sender does
+|===
+
+== Versioning and negotiation
+
+[cols="1,3"]
+|===
+| Item | Value
+
+| Version field and location
+| TODO where the protocol version lives on the wire
+
+| How the two sides agree on a version
+| TODO the negotiation step, or "fixed; both sides must match"
+
+| Unknown fields or message types
+| TODO the forward-compatibility rule, so an older and a newer peer can still
+talk: ignore unknown, reject, or negotiate down
+|===
+
+== Security
+
+[cols="1,3"]
+|===
+| Item | Value
+
+| Identity
+| TODO how each side proves who it is
+
+| Authorization
+| TODO which message types require authorization, and how it is checked
+
+| Confidentiality and integrity
+| TODO from the transport (for example mTLS), or added per message; name the
+mechanism
+
+| Replay protection
+| TODO nonce, sequence number, or timestamp; "not applicable" with the reason
+if the protocol does not need it
+|===
+
+== Constants and registries
+
+=== Message type values
+
+[cols="1,1,2"]
+|===
+| Name | Value | Notes
+
+| TODO | TODO | TODO
+|===
+
+=== Other enumerations
+
+[cols="1,1,2"]
+|===
+| Name | Value | Notes
+
+| TODO | TODO | TODO
+|===
+
+=== Reserved and forbidden values
+
+TODO List ranges or specific values that must not be used, and why. Write
+"none" if there are none.

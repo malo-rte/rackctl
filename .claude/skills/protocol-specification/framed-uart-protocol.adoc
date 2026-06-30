@@ -1,0 +1,357 @@
+= Lab Register Access Protocol (LRAP)
+:revnumber: 1.0.0
+:revdate: 2026-06-30
+:toc: left
+:toclevels: 3
+:sectnums:
+
+// Worked example for the protocol-spec skill. A small request/response
+// protocol over UART, with start/end framing and a CRC. Filled in fully so it
+// passes the linter and shows what a finished spec looks like.
+
+== Overview
+
+LRAP lets a host read and write 16-bit registers on a microcontroller node
+over a UART link. One host talks to one node. The host always speaks first;
+the node only answers. There are no unsolicited messages.
+
+Two roles are used throughout this document. The *host* is the side that sends
+requests. The *node* is the side that answers them.
+
+== Transport assumptions
+
+[cols="1,3"]
+|===
+| Item | Value
+
+| Medium
+| UART, 115200 baud, 8 data bits, no parity, 1 stop bit
+
+| Guarantees the medium provides
+| A raw byte stream. No delivery guarantee, no error detection, no message
+boundaries.
+
+| Guarantees this protocol must add itself
+| Framing (so the node knows where a message starts and ends), error detection
+(a CRC), and retransmission on timeout.
+
+| Maximum message size
+| 260 bytes
+
+| Maximum frame size
+| 260 bytes (one message is one frame)
+
+| Byte order
+| Big endian for all multi-byte fields
+|===
+
+== Session lifecycle
+
+LRAP is connectionless. Each request and its response stand alone. There is no
+handshake and no session state on either side. The state diagram below shows
+the host's view of a single request.
+
+=== Open
+
+No session open. The host may send a request at any time after the link is up.
+
+=== Keepalive
+
+None. An idle link carries no traffic.
+
+=== Close
+
+No session close. Either side may stop at any time.
+
+=== State diagram
+
+[plantuml]
+....
+@startuml
+[*] --> Idle
+Idle --> Waiting : send request
+Waiting --> Idle : response received
+Waiting --> Idle : timeout, retries exhausted
+@enduml
+....
+
+== Message catalog
+
+=== Message: ReadRegister
+
+[cols="1,3"]
+|===
+| Field | Value
+
+| Message type
+| 0x01
+
+| Direction and initiator
+| Host to node. Request only. Never unsolicited.
+
+| Parameters
+| `addr` (uint16): the register address to read.
+
+| Valid parameter ranges
+| `addr` in 0x0000 to 0x00FF. An address above 0x00FF is invalid and draws
+error 0x02.
+
+| Pre-requisite
+| None.
+
+| Correlation
+| One outstanding request at a time. The node's next response belongs to the
+host's last request.
+
+| Responses
+| ReadReply (0x81) carrying the register value.
+
+| Error responses
+| Error (0xFF) with code 0x02 (bad address).
+
+| Timeout and retry
+| The host waits 100 ms. On no reply it resends, up to 3 attempts total, then
+reports failure.
+
+| Idempotency
+| Safe. A read has no side effect, so resending causes no harm.
+|===
+
+Description::
+ReadRegister fetches the current value of one register. It is the most common
+message on the link.
+
+Sequence::
+[plantuml]
+....
+@startuml
+Host -> Node : ReadRegister(addr=0x10)
+Node --> Host : ReadReply(addr=0x10, value=0x1234)
+@enduml
+....
+
+=== Message: WriteRegister
+
+[cols="1,3"]
+|===
+| Field | Value
+
+| Message type
+| 0x02
+
+| Direction and initiator
+| Host to node. Request only. Never unsolicited.
+
+| Parameters
+| `addr` (uint16): the register address. `value` (uint16): the value to write.
+
+| Valid parameter ranges
+| `addr` in 0x0000 to 0x00FF. `value` any uint16. A read-only address draws
+error 0x03.
+
+| Pre-requisite
+| None.
+
+| Correlation
+| One outstanding request at a time.
+
+| Responses
+| WriteAck (0x82).
+
+| Error responses
+| Error (0xFF) with code 0x02 (bad address) or 0x03 (read-only register).
+
+| Timeout and retry
+| The host waits 100 ms. On no reply it resends, up to 3 attempts total, then
+reports failure.
+
+| Idempotency
+| Safe for most registers, because writing the same value twice leaves the same
+result. Not safe for registers whose write triggers an action (for example a
+"clear counter" register). Such registers are marked in the register map and
+must not be written by blind retransmission.
+|===
+
+Description::
+WriteRegister sets one register. The caller must check the register map for
+action-on-write registers before relying on retransmission.
+
+Sequence::
+[plantuml]
+....
+@startuml
+Host -> Node : WriteRegister(addr=0x20, value=0x0001)
+Node --> Host : WriteAck(addr=0x20)
+@enduml
+....
+
+== Encoding layer
+
+=== Framing
+
+Each message is carried in exactly one frame. The frame uses a start byte and
+an end byte. Because those marker bytes can also appear inside the payload, the
+payload is byte-stuffed (see Encoding rules).
+
+=== Frame layout
+
+[mermaid]
+....
+packet-beta
+    0-0: "SOF (0x7E)"
+    1-1: "Type"
+    2-2: "Length (N)"
+    3-3: "Payload (N bytes, stuffed)"
+    4-5: "CRC-16"
+    6-6: "EOF (0x7E)"
+....
+
+[cols="1,1,3"]
+|===
+| Field | Width | Meaning
+
+| Start of frame
+| 1 byte | 0x7E. Marks a frame start.
+
+| Type
+| 1 byte | The message type from the catalog.
+
+| Length
+| 1 byte | The number of payload bytes before stuffing.
+
+| Payload
+| N bytes | The message parameters, big endian, then byte-stuffed.
+
+| Integrity check
+| 2 bytes | CRC-16/CCITT-FALSE over Type, Length, and the unstuffed payload.
+
+| End of frame
+| 1 byte | 0x7E. Marks a frame end.
+|===
+
+=== Encoding rules
+
+[cols="1,3"]
+|===
+| Rule | Value
+
+| Field encoding
+| uint16 fields are big endian. The Type field is a single byte. Parameters
+appear in the order listed in the message catalog.
+
+| Alignment and padding
+| None. Fields are packed with no gaps.
+
+| Variable-length fields
+| None in this version. The Length field still gives the payload size so the
+parser does not depend on the end marker alone.
+
+| Byte stuffing or escaping
+| Inside the payload, 0x7E becomes 0x7D 0x5E, and 0x7D becomes 0x7D 0x5D. The
+CRC is computed on the unstuffed payload, then the payload is stuffed. The
+receiver unstuffs first, then checks the CRC.
+|===
+
+== Error handling
+
+[cols="1,1,3"]
+|===
+| Code | Name | Meaning
+
+| 0x01 | BadCrc | The frame's CRC did not match. (Reported only if the type
+field survived; otherwise the frame is dropped.)
+| 0x02 | BadAddress | The register address is out of range.
+| 0x03 | ReadOnly | A write was attempted on a read-only register.
+|===
+
+[cols="1,3"]
+|===
+| Situation | Receiver behaviour
+
+| Unknown message type
+| The node replies with Error (0xFF), code 0x01 is not used here; it sends code
+0x02 only for address errors. For an unknown type the node drops the frame and
+sends no reply, so the host's timeout handles it.
+
+| Malformed frame (bad length)
+| The node drops the frame and sends no reply. The host's timeout handles it.
+
+| Failed integrity check (bad CRC)
+| The node drops the frame and sends no reply. The host's timeout handles it.
+
+| Timeout fires
+| The host resends the same request, up to 3 attempts total, then reports
+failure to its caller.
+|===
+
+== Versioning and negotiation
+
+[cols="1,3"]
+|===
+| Item | Value
+
+| Version field and location
+| None on the wire. The protocol version is fixed at 1.0 for this link.
+
+| How the two sides agree on a version
+| Fixed. Host and node firmware must both implement version 1.0.
+
+| Unknown fields or message types
+| A node that receives an unknown type drops the frame. This lets a future
+version add message types without breaking an older node, which simply ignores
+them.
+|===
+
+== Security
+
+[cols="1,3"]
+|===
+| Item | Value
+
+| Identity
+| None. The link is a physical wire inside one enclosure, trusted by location.
+
+| Authorization
+| None. Any host on the wire may read or write any register.
+
+| Confidentiality and integrity
+| The CRC gives integrity against line noise, not against a deliberate attacker.
+There is no confidentiality. This is acceptable only because the link is
+physically enclosed.
+
+| Replay protection
+| None. Not applicable for this link, because the wire is trusted by location.
+A future networked transport would need to add identity and replay protection.
+|===
+
+== Constants and registries
+
+=== Message type values
+
+[cols="1,1,2"]
+|===
+| Name | Value | Notes
+
+| ReadRegister | 0x01 | Request
+| WriteRegister | 0x02 | Request
+| ReadReply | 0x81 | Response to ReadRegister
+| WriteAck | 0x82 | Response to WriteRegister
+| Error | 0xFF | Error response
+|===
+
+=== Other enumerations
+
+[cols="1,1,2"]
+|===
+| Name | Value | Notes
+
+| BadCrc | 0x01 | Error code
+| BadAddress | 0x02 | Error code
+| ReadOnly | 0x03 | Error code
+|===
+
+=== Reserved and forbidden values
+
+Message types 0x03 to 0x7F are reserved for future requests. Types 0x83 to
+0xFE are reserved for future responses. 0x7E and 0x7D must not appear unstuffed
+inside a payload.
