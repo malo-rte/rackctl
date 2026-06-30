@@ -299,6 +299,10 @@ device's *protocol*, its *on-disk libraries*, and its *frontends* are separable:
 | `rackctl-ui` (`crates/ui-common`) | Cross-product UI primitives: the
   consequence-coloured button scheme, the shared embedded UI font + action icons, and
   the DSP math used by editors (EQ/biquad response, compressor transfer).
+| `rackctl-midi` (`crates/midi`) | *Byte-level MIDI link* for MIDI devices: an ALSA
+  rawmidi port (open / list / send / non-blocking receive) and the cross-process
+  advisory lock. Manufacturer-independent — a device adapter layers its own protocol on
+  top. This is where a daemon-client link will join (see below).
 | `rackctl-<device>` (`crates/<device>`) | The *device adapter* — pure protocol: the
   parameter catalog, the patch model (a byte-exact _raw_ form and a _typed_ form
   grouped by block), the transport/codec, and the device facade (read/write patch,
@@ -313,13 +317,13 @@ device's *protocol*, its *on-disk libraries*, and its *frontends* are separable:
   commands, and the tabbed graphical editor (per-block editors, clipboards, staging).
 |===
 
-*Reserved for later — the link layer.* Talking to the hardware is isolated behind the
-adapter's `Transport` trait, so it can be swapped without touching anything above it. A
-small `rackctl-midi` crate (the trait plus a direct rawmidi link and the mock) and a
-`rackctld` daemon that owns the device and serves several clients are planned: a client
-reaches the daemon through a `DaemonClient` transport, so the device facade, the
-protocol and the management layer are identical whether the link is direct or via the
-daemon. This is also what lets two tools (CLI and GUI) share one busy MIDI port.
+*The link layer.* Talking to the hardware is isolated behind the adapter's `Transport`
+trait and the byte-level `rackctl-midi` port, so it can be swapped without touching
+anything above it. Today the only link is the direct ALSA port; *reserved for later* is
+a `rackctld` daemon that owns the device and serves several clients — a client would
+reach it through a `DaemonClient` link, so the device facade, the protocol and the
+management layer are identical whether the link is direct or via the daemon. That is
+also what lets two tools (CLI and GUI) share one busy MIDI port.
 
 The device-neutral _model_ — scene/patch/block, the library operations, the clipboards
 and the staging flow — is what this document specifies. The file format and the on-disk

@@ -83,6 +83,7 @@ clippy.toml, deny.toml     # project lint / supply-chain config
 flake.nix                  # Nix flake: packages, apps, dev shell
 crates/
   core/                    # rackctl-core: device-neutral on-disk library (format + paths)
+  midi/                    # rackctl-midi: byte-level ALSA MIDI link + port lock
   ui-common/               # rackctl-ui: shared UI primitives (button colours, font/icons, DSP)
   us16x08/                 # the control-surface library (rackctl-us16x08)
   us16x08-cli/             # the `rackctl-us16x08` command-line tool
