@@ -212,12 +212,9 @@ pub(crate) fn load<B: Backend>(
     channel: Option<u32>,
 ) -> Result<()> {
     let text = fs::read_to_string(path).with_context(|| format!("reading {path:?}"))?;
-    let preset: Preset = match rackctl_core::decode_item::<Preset>(DEVICE_ID, LIB_VERSION, &text) {
-        // Newest form: the shared library envelope. A bare preset (the legacy form,
-        // or one saved by another tool) falls through to a direct parse.
-        Some(res) => res.map_err(anyhow::Error::msg)?,
-        None => serde_json::from_str(&text).with_context(|| format!("parsing {path:?}"))?,
-    };
+    let preset: Preset = rackctl_core::decode_item::<Preset>(DEVICE_ID, LIB_VERSION, &text)
+        .with_context(|| format!("{path:?} is not a rackctl us16x08 preset"))?
+        .map_err(anyhow::Error::msg)?;
     // When the udev rule fires this right after the card re-enumerates, the
     // device answers reads but silently drops writes for a moment. Wait until a
     // write round-trips, then apply with the master muted and every write

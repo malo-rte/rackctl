@@ -1125,16 +1125,12 @@ fn extract_links(value: &serde_json::Value) -> Option<[bool; 8]> {
     Some(links)
 }
 
-/// Read a preset file as a JSON value, accepting the shared library envelope or a
-/// legacy bare preset (so files saved before the envelope, or by another tool,
-/// still load).
+/// Read a preset file as the shared library envelope's payload value.
 fn read_preset_value(path: &Path) -> Result<serde_json::Value, String> {
     let text =
         config::read_text(path).ok_or_else(|| format!("could not read {}", path.display()))?;
-    match config::load_item::<serde_json::Value>(&text) {
-        Some(res) => res,
-        None => serde_json::from_str(&text).map_err(|e| e.to_string()),
-    }
+    config::load_item::<serde_json::Value>(&text)
+        .unwrap_or_else(|| Err(format!("unrecognised preset file {}", path.display())))
 }
 
 /// Read a strip preset file and resolve it to `(control, value)` pairs for the

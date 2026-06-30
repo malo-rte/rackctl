@@ -5661,14 +5661,6 @@ mod tests {
     }
 
     #[test]
-    fn parse_patch_falls_back_to_a_raw_patch() {
-        // The CLI's / older form is a bare RawPatch, converted to typed on load.
-        let raw = TypedPatch::default().to_raw();
-        let text = serde_json::to_string(&raw).unwrap();
-        assert!(parse_patch_text(&text).is_ok());
-    }
-
-    #[test]
     fn parse_patch_rejects_a_foreign_device() {
         let bare = serde_json::to_string(&TypedPatch::default()).unwrap();
         assert!(parse_patch_text(&envelope_for("us16x08", &bare)).is_err());
@@ -5680,11 +5672,12 @@ mod tests {
     }
 
     #[test]
-    fn parse_block_reads_bare_and_enveloped() {
+    fn parse_block_reads_enveloped() {
         let block = BlockData::from_patch(&TypedPatch::default(), Block::Reverb).unwrap();
         let bare = serde_json::to_string(&block).unwrap();
-        assert_eq!(parse_block_text(&bare).unwrap(), block);
         assert_eq!(parse_block_text(&envelope(&bare)).unwrap(), block);
+        // A bare (un-enveloped) block is no longer accepted.
+        assert!(parse_block_text(&bare).is_err());
     }
 
     #[test]
@@ -5700,14 +5693,17 @@ mod tests {
     }
 
     #[test]
-    fn parse_scene_reads_bare_and_enveloped() {
-        let bank = vec![TypedPatch::default(), TypedPatch::default()];
-        let bare = serde_json::to_string(&bank).unwrap();
-        // parse_scene_text returns the composer's dense USER_SLOTS vector: a 2-patch
-        // legacy list fills slots 1..=2 and the remaining slots with INIT.
-        let n = usize::from(USER_SLOTS);
-        assert_eq!(parse_scene_text(&bare).unwrap().len(), n);
-        assert_eq!(parse_scene_text(&envelope(&bare)).unwrap().len(), n);
+    fn parse_scene_reads_an_enveloped_scene() {
+        // The canonical scene: an enveloped Scene (slot -> patch).
+        let scene = compose_to_scene("gig", &[TypedPatch::default(), TypedPatch::default()]);
+        let text = rackctl_core::encode_item("gx700", 1, &scene).unwrap();
+        // parse_scene_text returns the composer's dense USER_SLOTS vector.
+        assert_eq!(
+            parse_scene_text(&text).unwrap().len(),
+            usize::from(USER_SLOTS)
+        );
+        // A non-envelope (legacy flat list) is no longer accepted.
+        assert!(parse_scene_text("[]").is_err());
     }
 
     #[test]

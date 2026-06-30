@@ -1,14 +1,14 @@
-//! Saved-file formats and multi-format parsing.
+//! Saved-file formats and parsing.
 //!
-//! New saves use the rackctl-core envelope around the typed payload (the documented
-//! format). Readers accept every shape a file has ever had, newest first, so a file
-//! written by an older tool — or by the *other* frontend — still loads.
+//! Every saved item is the rackctl-core envelope around the typed payload (the
+//! documented format), shared by the CLI and GUI. The one extra patch form
+//! accepted is a *bare* typed patch — what `dump --json` emits, for hand-editing
+//! and piping.
 
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use rackctl_gx700::RawPatch;
 use rackctl_gx700::typed::{BlockData, Patch};
 
 use crate::{DEVICE_ID, LIB_VERSION};
@@ -37,94 +37,39 @@ impl Scene {
     }
 }
 
-/// Parse a saved **patch** file, newest format first: a rackctl-core envelope around
-/// the typed patch, a bare typed patch, or the CLI's legacy bare [`RawPatch`].
-///
-/// # Errors
-/// If the text matches none of the known forms, or an envelope is from another
-/// device / a newer format.
-pub fn parse_patch(text: &str) -> Result<Patch, String> {
-    if let Some(res) = rackctl_core::decode_item::<Patch>(DEVICE_ID, LIB_VERSION, text) {
-        return res;
-    }
-    if let Ok(typed) = serde_json::from_str::<Patch>(text) {
-        return Ok(typed);
-    }
-    serde_json::from_str::<RawPatch>(text)
-        .map(|raw| Patch::from_raw(&raw))
-        .map_err(|_| "unrecognised patch file".to_owned())
-}
-
-/// Parse a saved **scene** file across every format it has used: a rackctl-core
-/// envelope (the canonical [`Scene`], or the GUI's earlier flat patch list), a bare
-/// `Scene` or list, or the CLI's legacy raw-patch scene.
-///
-/// # Errors
-/// If the text matches none of the known forms, or an envelope is from another
-/// device / a newer format.
-pub fn parse_scene(text: &str) -> Result<Scene, String> {
-    if let Some(res) = rackctl_core::decode_payload(DEVICE_ID, LIB_VERSION, text) {
-        return scene_from_value(res?);
-    }
-    if let Ok(scene) = serde_json::from_str::<Scene>(text) {
-        return Ok(scene);
-    }
-    if let Ok(list) = serde_json::from_str::<Vec<Patch>>(text) {
-        return Ok(scene_from_list(&list));
-    }
-    serde_json::from_str::<rackctl_gx700::Scene>(text)
-        .map(|old| scene_from_legacy_raw(&old))
-        .map_err(|_| "unrecognised scene file".to_owned())
-}
-
-/// A scene from an envelope payload value: the canonical struct, else the GUI's
-/// earlier flat patch list (slots assigned `1..=N`).
-fn scene_from_value(payload: serde_json::Value) -> Result<Scene, String> {
-    if let Ok(scene) = serde_json::from_value::<Scene>(payload.clone()) {
-        return Ok(scene);
-    }
-    serde_json::from_value::<Vec<Patch>>(payload)
-        .map(|list| scene_from_list(&list))
-        .map_err(|_| "unrecognised scene payload".to_owned())
-}
-
-/// A dense patch list becomes slots `1..=N`.
-fn scene_from_list(list: &[Patch]) -> Scene {
-    let patches = list
-        .iter()
-        .enumerate()
-        .map(|(i, p)| (u16::try_from(i + 1).unwrap_or(0), p.clone()))
-        .collect();
-    Scene {
-        name: String::new(),
-        patches,
-    }
-}
-
-/// The CLI's legacy raw-patch scene becomes typed.
-fn scene_from_legacy_raw(old: &rackctl_gx700::Scene) -> Scene {
-    let patches = old
-        .patches
-        .iter()
-        .map(|(&slot, raw)| (slot, Patch::from_raw(raw)))
-        .collect();
-    Scene {
-        name: old.name.clone(),
-        patches,
-    }
-}
-
-/// Parse a saved single-**block** preset file: a rackctl-core envelope around the
-/// block data, or bare [`BlockData`].
+/// Parse a saved **patch** file: a rackctl-core envelope around the typed patch,
+/// or a bare typed patch (the `dump --json` form).
 ///
 /// # Errors
 /// If the text matches neither form, or an envelope is from another device / a
 /// newer format.
-pub fn parse_block(text: &str) -> Result<BlockData, String> {
-    if let Some(res) = rackctl_core::decode_item::<BlockData>(DEVICE_ID, LIB_VERSION, text) {
+pub fn parse_patch(text: &str) -> Result<Patch, String> {
+    if let Some(res) = rackctl_core::decode_item::<Patch>(DEVICE_ID, LIB_VERSION, text) {
         return res;
     }
-    serde_json::from_str::<BlockData>(text).map_err(|_| "unrecognised block file".to_owned())
+    serde_json::from_str::<Patch>(text).map_err(|_| "unrecognised patch file".to_owned())
+}
+
+/// Parse a saved **scene** file: a rackctl-core envelope around the canonical
+/// [`Scene`].
+///
+/// # Errors
+/// If the text is not such an envelope, or it is from another device / a newer
+/// format.
+pub fn parse_scene(text: &str) -> Result<Scene, String> {
+    rackctl_core::decode_item::<Scene>(DEVICE_ID, LIB_VERSION, text)
+        .unwrap_or_else(|| Err("unrecognised scene file".to_owned()))
+}
+
+/// Parse a saved single-**block** preset file: a rackctl-core envelope around the
+/// block data.
+///
+/// # Errors
+/// If the text is not such an envelope, or it is from another device / a newer
+/// format.
+pub fn parse_block(text: &str) -> Result<BlockData, String> {
+    rackctl_core::decode_item::<BlockData>(DEVICE_ID, LIB_VERSION, text)
+        .unwrap_or_else(|| Err("unrecognised block file".to_owned()))
 }
 
 #[cfg(test)]
@@ -144,38 +89,31 @@ mod tests {
     }
 
     #[test]
-    fn patch_reads_legacy_bare_rawpatch() {
-        // What the CLI used to write: a bare RawPatch.
-        let raw = Patch::init().to_raw();
-        let text = serde_json::to_string(&raw).unwrap();
-        assert!(json_eq(
-            &parse_patch(&text).unwrap(),
-            &Patch::from_raw(&raw)
-        ));
+    fn patch_reads_bare_typed_dump_json() {
+        // The `dump --json` form: a bare typed patch (no envelope).
+        let p = Patch::init();
+        let text = serde_json::to_string(&p).unwrap();
+        assert!(json_eq(&parse_patch(&text).unwrap(), &p));
     }
 
     #[test]
-    fn scene_reads_canonical_and_both_legacies() {
-        // Canonical: enveloped Scene.
+    fn scene_envelope_round_trips() {
         let mut scene = Scene::new("gig");
         scene.patches.insert(1, Patch::init());
+        scene.patches.insert(7, Patch::init());
         let text = rackctl_core::encode_item(DEVICE_ID, LIB_VERSION, &scene).unwrap();
-        assert_eq!(parse_scene(&text).unwrap().patches.len(), 1);
-
-        // GUI legacy: a flat patch list (enveloped) -> slots 1..=N.
-        let list = vec![Patch::init(), Patch::init()];
-        let text = rackctl_core::encode_item(DEVICE_ID, LIB_VERSION, &list).unwrap();
         let got = parse_scene(&text).unwrap();
-        assert_eq!(got.patches.len(), 2);
-        assert!(got.patches.contains_key(&1) && got.patches.contains_key(&2));
+        assert_eq!(got.name, "gig");
+        assert!(got.patches.contains_key(&1) && got.patches.contains_key(&7));
+        // A non-envelope (legacy) scene is no longer accepted.
+        assert!(parse_scene("[]").is_err());
+    }
 
-        // CLI legacy: a bare raw-patch Scene.
-        let mut old = rackctl_gx700::Scene::new("old".to_owned());
-        old.patches.insert(7, Patch::init().to_raw());
-        let text = serde_json::to_string(&old).unwrap();
-        let got = parse_scene(&text).unwrap();
-        assert_eq!(got.name, "old");
-        assert!(got.patches.contains_key(&7));
+    #[test]
+    fn block_envelope_round_trips() {
+        let data = BlockData::from_patch(&Patch::init(), rackctl_gx700::Block::Reverb).unwrap();
+        let text = rackctl_core::encode_item(DEVICE_ID, LIB_VERSION, &data).unwrap();
+        assert!(json_eq(&parse_block(&text).unwrap(), &data));
     }
 
     #[test]
