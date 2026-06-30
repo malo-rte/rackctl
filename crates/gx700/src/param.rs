@@ -539,6 +539,49 @@ pub fn assign_target_range(target: i32) -> Option<(i32, i32)> {
     })
 }
 
+/// A human-readable name for a control-assign Target id, derived from the catalog
+/// (block label + parameter), e.g. `22` -> `"Distortion: Drive"`. Out-of-range or
+/// unmapped ids fall back to the number.
+#[must_use]
+pub fn assign_target_name(target: i32) -> String {
+    let Ok(idx) = usize::try_from(target) else {
+        return target.to_string();
+    };
+    match idx {
+        0 => return "Not Assign".to_owned(),
+        1 => return "Output Level".to_owned(),
+        132 => return "Bypass".to_owned(),
+        133 => return "Tuner".to_owned(),
+        _ => {}
+    }
+    let Some(&key) = ASSIGN_TARGETS.get(idx) else {
+        return target.to_string();
+    };
+    if key.is_empty() {
+        return format!("Target {idx}");
+    }
+    let Some(p) = Param::from_key(key) else {
+        return target.to_string();
+    };
+    // Strip the block prefix (`dist-`, `mod-`, …) and title-case the rest; short
+    // tokens (ps, hr, fl, …) are abbreviations, so upper-case them.
+    let suffix = key.split_once('-').map_or(key, |(_, r)| r);
+    let words: Vec<String> = suffix
+        .split('-')
+        .map(|w| {
+            if w.len() <= 2 {
+                w.to_uppercase()
+            } else {
+                let mut c = w.chars();
+                c.next().map_or_else(String::new, |f| {
+                    f.to_uppercase().collect::<String>() + c.as_str()
+                })
+            }
+        })
+        .collect();
+    format!("{}: {}", p.block().label(), words.join(" "))
+}
+
 /// One editable GX-700 parameter.
 #[derive(Debug, Clone, Copy)]
 pub struct Param {
@@ -1012,6 +1055,12 @@ mod tests {
         assert_eq!(assign_target_range(0), None); // Not Assign
         assert_eq!(assign_target_range(132), None); // Bypass
         assert!(assign_target_range(21).is_some_and(|(lo, hi)| lo == 0 && hi > 0)); // DS:TYPE (Enum)
+        // Derived names.
+        assert_eq!(assign_target_name(0), "Not Assign");
+        assert_eq!(assign_target_name(1), "Output Level");
+        assert_eq!(assign_target_name(22), "Distortion: Drive");
+        assert_eq!(assign_target_name(67), "Modulation: PS Pitch1");
+        assert_eq!(assign_target_name(133), "Tuner");
     }
 
     #[test]

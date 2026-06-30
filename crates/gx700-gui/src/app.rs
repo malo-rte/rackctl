@@ -1685,6 +1685,40 @@ fn param_combo(
     changed
 }
 
+/// A control-assign Target as a dropdown of named targets (MI Table 1.2). The value
+/// is the target id; the menu lists every assignable parameter by name. Returns
+/// whether it changed.
+fn param_target_combo(
+    ui: &mut egui::Ui,
+    slot: u16,
+    key: &'static str,
+    typed: &TypedPatch,
+    enabled: bool,
+    actions: &mut Vec<Action>,
+) -> bool {
+    let cur = match typed.get(key) {
+        Some(Value::Int(v)) => v,
+        _ => 0,
+    };
+    let mut changed = false;
+    ui.add_enabled_ui(enabled, |ui| {
+        egui::ComboBox::from_id_salt((slot, key))
+            .selected_text(rackctl_gx700::param::assign_target_name(cur))
+            .width(190.0)
+            .show_ui(ui, |ui| {
+                for id in 0..rackctl_gx700::param::ASSIGN_TARGETS.len() {
+                    let id = i32::try_from(id).unwrap_or(0);
+                    let name = rackctl_gx700::param::assign_target_name(id);
+                    if ui.selectable_label(id == cur, name).clicked() {
+                        actions.push(Action::SetParam(slot, key, Value::Int(id)));
+                        changed = true;
+                    }
+                }
+            });
+    });
+    changed
+}
+
 /// Format a raw drag-value in `p`'s display units (the dB string).
 #[allow(clippy::cast_possible_truncation)]
 fn display_raw(p: Param, n: f64) -> String {
@@ -3330,7 +3364,9 @@ impl App {
                 for (label, keys) in ASSIGN_ROWS {
                     ui.label(label);
                     for (col, key) in keys.into_iter().enumerate() {
-                        let changed = if key.ends_with("-mode") {
+                        let changed = if key.ends_with("-target") {
+                            param_target_combo(ui, slot, key, typed, enabled, actions)
+                        } else if key.ends_with("-mode") {
                             param_combo(ui, slot, key, typed, enabled, actions)
                         } else {
                             param_drag(ui, slot, key, typed, enabled, actions)
