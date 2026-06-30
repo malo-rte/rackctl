@@ -56,6 +56,16 @@ impl<T: Transport> Eleven<T> {
         self.transport.write(addr, value)
     }
 
+    /// Read a batch of addresses, returning one `(address, value)` pair for each
+    /// that answered (non-answering addresses are omitted). Over hardware this is
+    /// a single batched request/collect — the basis for a `scan`/`dump`.
+    ///
+    /// # Errors
+    /// Propagates the transport's error.
+    pub fn scan(&mut self, addrs: &[Vec<u8>]) -> Result<Vec<(Vec<u8>, RawValue)>> {
+        self.transport.scan(addrs)
+    }
+
     /// Consume the facade and return the underlying transport.
     pub fn into_transport(self) -> T {
         self.transport
@@ -75,5 +85,21 @@ mod tests {
         dev.write(&addr, 0x6D).unwrap();
         assert_eq!(dev.read(&addr).unwrap(), 0x6D);
         assert_eq!(dev.read_raw(&addr).unwrap().as_bytes(), &[0x6D, 0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn scan_returns_written_addresses() {
+        let mut dev = Eleven::new(MockTransport::new());
+        dev.write(&[0x11, 0x21, 0x00], 0x40).unwrap();
+        dev.write(&[0x11, 0x21, 0x0D], 0x6D).unwrap();
+        let addrs = vec![vec![0x11, 0x21, 0x00], vec![0x11, 0x21, 0x0D]];
+        let got = dev.scan(&addrs).unwrap();
+        assert_eq!(
+            got,
+            vec![
+                (vec![0x11, 0x21, 0x00], RawValue::encode(0x40)),
+                (vec![0x11, 0x21, 0x0D], RawValue::encode(0x6D)),
+            ]
+        );
     }
 }

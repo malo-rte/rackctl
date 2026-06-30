@@ -32,6 +32,26 @@ pub trait Transport {
     /// CAUTION: the Eleven Rack write opcode is *unconfirmed*; on hardware this
     /// should be used only as set + read-back + restore until verified.
     fn write(&mut self, addr: &[u8], value: &RawValue) -> Result<()>;
+
+    /// Read a batch of addresses, returning one `(address, value)` pair for each
+    /// that answered. Addresses that do not reply are omitted (so the result also
+    /// *enumerates* which addresses are populated).
+    ///
+    /// The default reads each address in turn; a real transport overrides this
+    /// with a batched request/collect that is far faster over MIDI.
+    ///
+    /// # Errors
+    /// Propagates a transport error. A non-answering address is not an error — it
+    /// is simply absent from the result.
+    fn scan(&mut self, addrs: &[Vec<u8>]) -> Result<Vec<(Vec<u8>, RawValue)>> {
+        let mut out = Vec::with_capacity(addrs.len());
+        for addr in addrs {
+            if let Ok(value) = self.read(addr) {
+                out.push((addr.clone(), value));
+            }
+        }
+        Ok(out)
+    }
 }
 
 /// Lets an `Eleven<Box<dyn Transport>>` hold either transport chosen at runtime
@@ -43,5 +63,8 @@ impl<T: Transport + ?Sized> Transport for Box<T> {
     }
     fn write(&mut self, addr: &[u8], value: &RawValue) -> Result<()> {
         (**self).write(addr, value)
+    }
+    fn scan(&mut self, addrs: &[Vec<u8>]) -> Result<Vec<(Vec<u8>, RawValue)>> {
+        (**self).scan(addrs)
     }
 }

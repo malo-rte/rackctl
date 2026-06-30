@@ -14,9 +14,9 @@ use std::time::Duration;
 use rackctl_midi::MidiPort;
 
 use super::Transport;
-use crate::sysex::{self, Framer, READ_REPLY};
+use crate::sysex::{self, CHANGE_REPORT, Framer, Identity, READ_REPLY};
 use rackctl_eleven_model::error::{Error, Result};
-use rackctl_eleven_model::value::RawValue;
+use rackctl_eleven_model::value::{RawValue, VALUE_LEN};
 
 /// Pause between non-blocking read polls while waiting for a reply.
 const POLL_INTERVAL: Duration = Duration::from_millis(1);
@@ -28,6 +28,10 @@ const REPLY_POLLS: u32 = 500;
 /// Consecutive silent [`POLL_INTERVAL`] polls that end an input drain (~20 ms).
 const DRAIN_QUIET_POLLS: u32 = 20;
 
+/// Silence (~50 ms) that ends collecting a batch scan's replies, once at least
+/// one has arrived. Comfortably longer than the gap between streamed replies.
+const SCAN_QUIET_POLLS: u32 = 50;
+
 /// Fold a byte-level link error into this crate's [`Error`]. (The shared `Error`
 /// lives in `rackctl-eleven-model`, so a blanket `From<MidiError>` would be an
 /// orphan impl; map it here at the protocol edge instead.)
@@ -37,6 +41,27 @@ fn midi_err(e: rackctl_midi::MidiError) -> Error {
         rackctl_midi::MidiError::PortNotFound(p) => Error::PortNotFound(p),
         rackctl_midi::MidiError::Io(s) => Error::Transport(s),
     }
+}
+
+/// Format a change-report payload as `<addr> -> <value>  (word 0x..)`, or as raw
+/// hex when it is too short to carry a value (some status reports do).
+fn format_report(payload: &[u8]) -> String {
+    let hex = |bytes: &[u8]| -> String {
+        bytes
+            .iter()
+            .map(|b| format!("{b:02X}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    if payload.len() >= VALUE_LEN {
+        let split = payload.len() - VALUE_LEN;
+        let (addr, value) = payload.split_at(split);
+        if let Ok(bytes) = <[u8; VALUE_LEN]>::try_from(value) {
+            let v = RawValue::from_bytes(bytes);
+            return format!("{} -> {}  (word {:#x})", hex(addr), hex(value), v.decode());
+        }
+    }
+    format!("(raw) {}", hex(payload))
 }
 
 /// A live connection to an Eleven Rack: the Digidesign protocol over a
@@ -93,6 +118,105 @@ impl RawMidi {
         }
     }
 
+    /// Probe the unit's identity (Universal Identity Request) and decode the
+    /// reply: manufacturer, family, model and firmware version.
+    ///
+    /// # Errors
+    /// [`Error::Timeout`] if the unit does not answer; [`Error::Transport`] on a
+    /// link failure.
+    pub fn identity(&mut self) -> Result<Identity> {
+        self.drain_input();
+        self.port
+            .write_all(&sysex::build_identity_request())
+            .map_err(midi_err)?;
+        let mut framer = Framer::new();
+        let mut buf = [0u8; 256];
+        for _ in 0..REPLY_POLLS {
+            match self.port.read(&mut buf).map_err(midi_err)? {
+                0 => sleep(POLL_INTERVAL),
+                n => {
+                    for msg in framer.push(buf.get(..n).unwrap_or(&[])) {
+                        if let Ok(id) = sysex::parse_identity_reply(&msg) {
+                            return Ok(id);
+                        }
+                    }
+                }
+            }
+        }
+        Err(Error::Timeout)
+    }
+
+    /// Stream the unit's unsolicited change reports, one decoded line per moved
+    /// parameter, until interrupted. This is the knob-sweep aid for mapping which
+    /// address a front-panel control drives. Each line is `<addr> -> <value>`.
+    ///
+    /// # Errors
+    /// [`Error::Transport`] if a read fails for a reason other than no data yet.
+    pub fn monitor(&mut self) -> Result<()> {
+        let mut framer = Framer::new();
+        let mut buf = [0u8; 256];
+        loop {
+            match self.port.read(&mut buf).map_err(midi_err)? {
+                0 => sleep(POLL_INTERVAL),
+                n => {
+                    for msg in framer.push(buf.get(..n).unwrap_or(&[])) {
+                        let Ok(parsed) = sysex::parse(&msg) else {
+                            continue;
+                        };
+                        if parsed.opcode != CHANGE_REPORT {
+                            continue;
+                        }
+                        println!("{}", format_report(&parsed.payload));
+                    }
+                }
+            }
+        }
+    }
+
+    /// Collect every read reply the unit streams in response to a batch of
+    /// requests, until the input falls silent. Each reply's payload is split into
+    /// its address (all but the trailing [`VALUE_LEN`] bytes) and value. An empty
+    /// result simply means nothing answered — not an error.
+    fn collect_replies(&mut self) -> Vec<(Vec<u8>, RawValue)> {
+        let mut framer = Framer::new();
+        let mut buf = [0u8; 512];
+        let mut out: Vec<(Vec<u8>, RawValue)> = Vec::new();
+        let mut quiet = 0u32;
+        let mut waited = 0u32;
+        loop {
+            match self.port.read(&mut buf) {
+                Ok(n) if n > 0 => {
+                    quiet = 0;
+                    for msg in framer.push(buf.get(..n).unwrap_or(&[])) {
+                        let Ok(parsed) = sysex::parse(&msg) else {
+                            continue;
+                        };
+                        if parsed.opcode != READ_REPLY || parsed.payload.len() < VALUE_LEN {
+                            continue;
+                        }
+                        let split = parsed.payload.len() - VALUE_LEN;
+                        let (addr, value) = parsed.payload.split_at(split);
+                        if let Ok(bytes) = <[u8; VALUE_LEN]>::try_from(value) {
+                            out.push((addr.to_vec(), RawValue::from_bytes(bytes)));
+                        }
+                    }
+                }
+                _ => {
+                    quiet = quiet.saturating_add(1);
+                    waited = waited.saturating_add(1);
+                    if !out.is_empty() && quiet >= SCAN_QUIET_POLLS {
+                        break;
+                    }
+                    if out.is_empty() && waited >= REPLY_POLLS {
+                        break;
+                    }
+                    sleep(POLL_INTERVAL);
+                }
+            }
+        }
+        out
+    }
+
     /// Discard any pending input, so a stale reply cannot be mistaken for the
     /// answer to the next request.
     fn drain_input(&mut self) {
@@ -143,5 +267,17 @@ impl Transport for RawMidi {
         let msg = sysex::build_write(self.device_id, addr, value);
         self.port.write_all(&msg).map_err(midi_err)?;
         Ok(())
+    }
+
+    fn scan(&mut self, addrs: &[Vec<u8>]) -> Result<Vec<(Vec<u8>, RawValue)>> {
+        self.drain_input();
+        // Send every read request back-to-back, then collect the replies that
+        // stream back; far faster than a request/await round trip per address.
+        let mut batch = Vec::new();
+        for addr in addrs {
+            batch.extend_from_slice(&sysex::build_read_request(self.device_id, addr));
+        }
+        self.port.write_all(&batch).map_err(midi_err)?;
+        Ok(self.collect_replies())
     }
 }
