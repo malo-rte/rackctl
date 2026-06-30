@@ -10,6 +10,7 @@ authors.workspace = true
 publish = false             # internal support crate (path dependency), not for crates.io
 
 [dependencies]
+rackctl-core.workspace = true
 rackctl-eleven = { workspace = true }
 
 [lints]

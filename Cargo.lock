@@ -2773,6 +2773,7 @@ dependencies = [
 name = "rackctl-eleven-lib"
 version = "0.8.0"
 dependencies = [
+ "rackctl-core",
  "rackctl-eleven",
 ]
 
@@ -2780,6 +2781,7 @@ dependencies = [
 name = "rackctl-eleven-model"
 version = "0.8.0"
 dependencies = [
+ "serde",
  "thiserror 2.0.18",
 ]
 

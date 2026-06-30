@@ -22,9 +22,11 @@
 #![forbid(unsafe_code)]
 
 pub mod error;
+pub mod tfx;
 pub mod value;
 
 pub use error::{Error, Result};
+pub use tfx::{Block, Param, Rig};
 pub use value::{RawValue, VALUE_LEN};
 
 /// A confirmed parameter address: the amp **Gain** knob.

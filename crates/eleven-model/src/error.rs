@@ -41,4 +41,8 @@ pub enum Error {
     /// A reply was expected from the device but none arrived in time.
     #[error("timed out waiting for a device reply")]
     Timeout,
+
+    /// A rig (`.tfx`) file was malformed: too short, or a bad block header.
+    #[error("tfx error: {0}")]
+    Tfx(String),
 }
