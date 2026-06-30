@@ -2767,6 +2767,7 @@ dependencies = [
  "anyhow",
  "clap",
  "rackctl-eleven",
+ "rackctl-eleven-lib",
 ]
 
 [[package]]

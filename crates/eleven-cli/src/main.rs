@@ -1,8 +1,8 @@
 //! `rackctl-eleven` — command-line control for the Avid/Digidesign Eleven Rack.
 //!
-//! Scaffold: it can read a parameter by raw address (over the mock, or over a
-//! connected unit with `--port`) and list the rawmidi ports. The full scan / dump
-//! / rig commands land with the read-path work (see `docs/eleven-rack-roadmap.adoc`).
+//! It reads parameters by raw address (`read`/`scan`), streams change reports
+//! (`monitor`), probes the unit (`identity`/`ports`), and imports `.tfx` rig files
+//! into the on-disk rig library (`import`/`rigs`). See `docs/eleven-rack-roadmap.adoc`.
 #![forbid(unsafe_code)]
 
 use anyhow::{Context, Result};
@@ -47,6 +47,16 @@ enum Command {
     Monitor,
     /// Probe and print the unit's identity (needs `--port`).
     Identity,
+    /// Import a `.tfx` rig file into the on-disk rig library.
+    Import {
+        /// Path to the `.tfx` file.
+        file: String,
+        /// Save under this name (default: the rig's own name).
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// List the rigs saved in the on-disk library.
+    Rigs,
     /// List the available ALSA rawmidi ports.
     Ports,
 }
@@ -58,7 +68,34 @@ fn main() -> Result<()> {
         Command::Scan { prefix, from, to } => scan(cli.port.as_deref(), prefix, from, to),
         Command::Monitor => monitor(cli.port.as_deref()),
         Command::Identity => identity(cli.port.as_deref()),
+        Command::Import { file, name } => import(file, name.as_deref()),
+        Command::Rigs => {
+            rigs();
+            Ok(())
+        }
         Command::Ports => list_ports(),
+    }
+}
+
+/// Parse a `.tfx` rig file and save it to the on-disk rig library.
+fn import(file: &str, name: Option<&str>) -> Result<()> {
+    let rig =
+        rackctl_eleven_lib::import_tfx(std::path::Path::new(file)).map_err(anyhow::Error::msg)?;
+    let save_as = name.unwrap_or(&rig.name);
+    let path = rackctl_eleven_lib::save_rig(save_as, &rig).map_err(anyhow::Error::msg)?;
+    println!(
+        "imported {:?} ({} blocks) -> {}",
+        rig.name,
+        rig.blocks.len(),
+        path.display()
+    );
+    Ok(())
+}
+
+/// List rigs saved in the on-disk library.
+fn rigs() {
+    for name in rackctl_eleven_lib::list_rigs() {
+        println!("{name}");
     }
 }
 

@@ -21,6 +21,7 @@ alsa = ["rackctl-eleven/alsa"]
 
 [dependencies]
 rackctl-eleven = { workspace = true }
+rackctl-eleven-lib = { workspace = true }
 clap.workspace = true
 anyhow.workspace = true
 
