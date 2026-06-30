@@ -154,6 +154,13 @@ whole patch without per-parameter polling. Other blocks seen on one patch: `0x05
 `0x08` FX-chain routing, `0x07` a small config word, `0x01` the packed blob, and several
 single-value blocks (per-slot model ids / settings).
 
+IMPORTANT: these blocks reflect the *currently selected* patch — they are not addressed
+by patch number. The name at `01 05` follows a Program Change (`"A is A 800"` ->
+`"Diezel  Einstein"` after `C0 0A`), and the `01 01` blob changes size per patch. So the
+*whole patch library* is backed up by *iterating Program Change over every patch and
+dumping each* (read `01 01` + `01 05` per patch) — the "dump them one at a time" method.
+Rig selection is `CC 32` bank (`1`=Factory, `0`=User) then Program Change.
+
 Batching many `0x01` requests then collecting the `0x12` replies enumerates an
 address range in one pass -- the basis for a `scan`/`dump` command.
 
