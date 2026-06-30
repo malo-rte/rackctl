@@ -1,8 +1,18 @@
 = Packaging and desktop integration
 
-Distribution assets for the Tascam US-16x08 mixer tools and notes on installing
-them by hand. The Nix flake (`../flake.nix`) wires all of this up automatically;
-the steps here are for packagers and for a manual install.
+Distribution assets for the Rackctl suite and notes on installing them by hand.
+The suite ships two devices, each with a CLI and a GUI:
+
+[cols="1,1,2",options="header"]
+|===
+| Device | Binaries | What it controls
+| Tascam US-16x08 | `rackctl-us16x08`, `rackctl-us16x08-gui` | The USB interface's built-in DSP mixer (ALSA)
+| BOSS GX-700 | `rackctl-gx700`, `rackctl-gx700-gui` | Guitar-effects patches over MIDI SysEx
+|===
+
+The Nix flake (`../flake.nix`) wires all of this up automatically — `nix profile
+install github:malo-rte/rackctl` gives you every binary, both desktop entries, and
+all shell completions. The steps below are for packagers and for a manual install.
 
 == Binaries
 
@@ -11,42 +21,43 @@ Build the release binaries and copy them onto the `PATH`:
 [source,bash]
 ----
 cargo build --release --workspace
-sudo install -Dm755 target/release/rackctl-us16x08    /usr/bin/rackctl-us16x08
-sudo install -Dm755 target/release/rackctl-us16x08-gui  /usr/bin/rackctl-us16x08-gui
+for bin in rackctl-us16x08 rackctl-us16x08-gui rackctl-gx700 rackctl-gx700-gui; do
+  sudo install -Dm755 "target/release/$bin" "/usr/bin/$bin"
+done
 ----
 
-== Desktop entry
+== Desktop entries
 
-`rackctl-us16x08-gui.desktop` launches the GUI from a desktop menu or launcher. Its
-`StartupWMClass` matches the GUI's Wayland `app_id` (`rackctl-us16x08-gui`), so
+Each GUI has a `.desktop` entry that launches it from a desktop menu or launcher.
+Its `StartupWMClass` matches the GUI's Wayland `app_id` (the binary name), so
 compositors associate the window with the entry.
 
 [source,bash]
 ----
-sudo install -Dm644 packaging/rackctl-us16x08-gui.desktop \
-  /usr/share/applications/rackctl-us16x08-gui.desktop
+sudo install -Dm644 -t /usr/share/applications packaging/*.desktop
 ----
 
-The entry references an icon named `rackctl-us16x08-gui`. Until an icon ships, launchers
-fall back to a generic one; installing a `rackctl-us16x08-gui.png`/`.svg` into the
-hicolor icon theme (for example
-`/usr/share/icons/hicolor/scalable/apps/rackctl-us16x08-gui.svg`) makes it appear.
+Each entry references an icon named after its binary (`rackctl-us16x08-gui`,
+`rackctl-gx700-gui`). Until icons ship, launchers fall back to a generic one;
+installing a matching `.png`/`.svg` into the hicolor icon theme (for example
+`/usr/share/icons/hicolor/scalable/apps/rackctl-gx700-gui.svg`) makes it appear.
 
 == Shell completions
 
-`rackctl-us16x08` generates its own completion scripts, so they always match the
-current commands and flags. Generate and install them for the shells you want:
+Each CLI generates its own completion scripts, so they always match the current
+commands and flags. Generate and install them for the shells you want — the
+example does both CLIs:
 
 [source,bash]
 ----
-# bash
-rackctl-us16x08 completions bash | sudo tee /usr/share/bash-completion/completions/rackctl-us16x08 >/dev/null
-
-# zsh  (a directory on your $fpath)
-rackctl-us16x08 completions zsh  | sudo tee /usr/share/zsh/site-functions/_rackctl-us16x08 >/dev/null
-
-# fish
-rackctl-us16x08 completions fish > ~/.config/fish/completions/rackctl-us16x08.fish
+for cli in rackctl-us16x08 rackctl-gx700; do
+  # bash
+  "$cli" completions bash | sudo tee "/usr/share/bash-completion/completions/$cli" >/dev/null
+  # zsh  (a directory on your $fpath)
+  "$cli" completions zsh  | sudo tee "/usr/share/zsh/site-functions/_$cli" >/dev/null
+  # fish
+  "$cli" completions fish > "$HOME/.config/fish/completions/$cli.fish"
+done
 ----
 
 Supported shells: `bash`, `zsh`, `fish`, `elvish`, `powershell`.

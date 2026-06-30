@@ -7,6 +7,16 @@ version.
 
 ## [Unreleased]
 
+### Changed
+
+- **Packaging** — packaging now covers the whole suite, not just the US-16x08.
+  The release archive is one `rackctl-<version>-x86_64-linux.tar.gz` carrying all
+  four binaries (`rackctl-us16x08`, `rackctl-us16x08-gui`, `rackctl-gx700`,
+  `rackctl-gx700-gui`) plus both desktop entries; the Nix flake builds a single
+  `rackctl` package that installs every binary, both `.desktop` files, and both
+  CLIs' shell completions, wrapping each GUI for its run-time libraries. A
+  `rackctl-gx700-gui.desktop` entry ships for the GX-700 patch editor.
+
 ## [0.7.3] - 2026-06-25
 
 ### Fixed
