@@ -1,0 +1,27 @@
+[package]
+name = "rackctl-eleven"
+version.workspace = true
+description = "Control-surface library for the Avid/Digidesign Eleven Rack guitar amp/effects processor, driven over MIDI System Exclusive."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+# Not for crates.io: it depends on internal `rackctl-*` path crates. The suite
+# ships as a whole (release archives + Nix), not as individual crates.io packages.
+publish = false
+
+[features]
+# `alsa` pulls in the real rawmidi transport (via `rackctl-midi`, the byte-level
+# ALSA link); without it only the in-memory mock transport is available, so the
+# library still builds and tests with no sound card or libasound (CI, dev without
+# hardware).
+default = ["alsa"]
+alsa = ["dep:rackctl-midi"]
+
+[dependencies]
+rackctl-eleven-model = { workspace = true }
+rackctl-midi = { workspace = true, optional = true }
+
+[lints]
+workspace = true

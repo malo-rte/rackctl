@@ -1,0 +1,16 @@
+[package]
+name = "rackctl-eleven-model"
+version.workspace = true
+description = "Avid/Digidesign Eleven Rack data model: the typed rig representation, the address-mapped parameter value codec, and the shared error vocabulary. Pure data — no MIDI, no I/O — so any tool can read, edit and validate Eleven Rack rigs without the device layer."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false             # internal support crate (path dependency), not for crates.io
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true
