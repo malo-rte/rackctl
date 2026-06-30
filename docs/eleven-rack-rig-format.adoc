@@ -49,17 +49,56 @@ word-swapped. A parser reads u32 LE and swaps tag bytes to recover the FourCC.
 [cols="1,3",options="header"]
 |===
 | Region | Contents
-| word 0 | total file size in bytes (e.g. `0x00000470` = 1136)
-| header | magic `DigiElvRELVhRig`, then flag/id words
-| name | the rig name as word-swapped text
-| body | a table of *FourCC-keyed parameter entries* (`<tag> <value...>`)
+| word 0 | total file size in bytes, *big-endian* (e.g. `00 00 03 E8` = 1000)
+| header | magic `DigiElvRELVhRig` (literal ASCII), then flag words
+| name | the rig name as word-swapped text, from offset 64
+| body | from offset 92: a sequence of *blocks*, one per signal-chain slot
 |===
 
-WARNING: The `(tag, next-word)` adjacency is *not uniform* -- some tags are section
-markers, and some values are packed or live at a small offset from their tag. Naive
-"`value = word after tag`" decoding produced garbage/NaN for several keys. The exact
-per-key layout and value type is open work; the corpus (1,243 examples giving each
-key's value range) plus live SysEx correlation is the way to resolve it.
+=== Block structure (cracked; validated across all 1,243 rigs)
+
+The body is a sequence of blocks. Each is a *header word* followed by its parameter
+entries:
+
+----
+header word, little-endian bytes:  <size_lo> <size_hi> 0x20 <block_id>
+   block_id : the signal-chain slot (fixed; see table)
+   0x20     : constant marker
+   size     : payload size in bytes = (number of params) * 8
+then size/8 entries, each 8 bytes:  <FourCC tag, LE> <32-bit value>
+----
+
+Tags are 4 chars, possibly space-padded (`Vol `, `Min `). Every rig carries the same
+11 blocks:
+
+[cols="1,2,4",options="header"]
+|===
+| Block id | Slot | Example params
+| `0x41` | Global (rig) | RVol, Vol1/2, RMno, Tmpo (µs/beat), Msyc, ExpT, PIGI, FXc1..4, Wor*/Wst* routing
+| `0x43` | Volume pedal | bypa, `Vol `, `Min `, Tapr
+| `0x44` | Wah | bypa, Filt, VxCr
+| `0x45` | Distortion / stomp | bypa, Driv, Tone, Levl
+| `0x46` | EQ | bypa, LwSh, LMGn, MGn, HMGn, HiSh, Out
+| `0x47` | Modulation | bypa, Sped, Dpth, Fdbk, PDly, Sync
+| `0x48` | Modulation 2 / tremolo | bypa, Sped, Sync
+| `0x49` | *Amp* | sld1..sldO (the amp model's knobs as generic slider slots)
+| `0x4A` | FX loop | bypa, send, rtrn, wetp
+| `0x4B` | Delay | bypa, `Vol `, Sust, EDly, Sync, Rec, Wow, Tilt
+| `0x4C` | Reverb | bypa, Dcay, Tone, RMix, Type, PDly
+|===
+
+NOTE: `.tfx` block ids are *fixed signal-chain slots* (amp is always `0x49`), whereas
+the *live SysEx* block id is *model-dependent* (the amp's DC Modern model answered at
+SysEx block `0x3D`). The two are parallel views, correlated via the knob sweeps.
+
+=== Value encoding
+
+Global-block (`0x41`) values are *integers* and decode directly: `Tmpo` = 500000
+(µs/beat = 120 BPM), `PIGI` = 0..127, `Msyc`/`RMno` = 0/1, the `Wor*`/`Wst*` routing
+are small ints. Effect-block values are *32-bit floats*; an unset/default parameter
+holds a sentinel (`0x7FFFFFFF` or `0x80000000`). The amp's knobs live in block `0x49`
+as `sld1..sldO`; which slider is which knob is model-specific, matched from the live
+SysEx sweep + the manual's per-model knob list.
 
 == Stable schema (key vocabulary)
 
@@ -109,8 +148,12 @@ every parameter, and the corpus supplies each parameter's range for free.
 
 == Open questions (tracked work)
 
-* Exact per-key offset/type/packing in the body table.
+* The effect-block *float* value scaling (ranges, units) and the meaning of the
+  `0x7FFFFFFF`/`0x80000000` sentinels.
+* Which `sld1..sldO` slot is which knob, per amp model (matched from the live sweep).
 * Decode `FXc1..4` (effect id + slot state) and the `Wor*`/`Wst*` routing graph.
-* Map keys to amp/cab/stomp/mod/delay/reverb/FX-loop blocks.
 * Relationship between `.tfx` and any `.rig` variant.
-* Whether the stored values equal the SysEx 32-bit words (then both decoders share code).
+* Whether the stored effect floats equal the live SysEx 32-bit words.
+
+(The body block structure and the global-block integer values are *solved* — see
+*Block structure* above, validated across all 1,243 rigs.)
