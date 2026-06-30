@@ -32,6 +32,10 @@ const DRAIN_QUIET_POLLS: u32 = 20;
 /// one has arrived. Comfortably longer than the gap between streamed replies.
 const SCAN_QUIET_POLLS: u32 = 50;
 
+/// Gap left after each message of the store sequence, so the unit processes each
+/// directory/commit write before the next.
+const STORE_PACE: Duration = Duration::from_millis(40);
+
 /// Fold a byte-level link error into this crate's [`Error`]. (The shared `Error`
 /// lives in `rackctl-eleven-model`, so a blanket `From<MidiError>` would be an
 /// orphan impl; map it here at the protocol edge instead.)
@@ -158,6 +162,53 @@ impl RawMidi {
         self.port
             .write_all(&[0xC0, program & 0x7f])
             .map_err(midi_err)?;
+        Ok(())
+    }
+
+    /// Store the current edit buffer to a patch `slot`, naming it `name`.
+    ///
+    /// The captured editor save sequence (hardware-confirmed): set the edit-buffer
+    /// name (block `0x05`), then `00 03 <hi> <lo>` / `00 04 <hi> <lo> <name>` /
+    /// `00 02 <hi> <lo>`, where the slot is the two-byte (`hi`,`lo`) directory index.
+    /// This *persists* the current sound to the slot; it writes only that slot.
+    ///
+    /// # Errors
+    /// [`Error::Transport`] on a link failure.
+    pub fn store(&mut self, slot: u16, name: &str) -> Result<()> {
+        let hi = u8::try_from((slot >> 7) & 0x7f).unwrap_or(0);
+        let lo = u8::try_from(slot & 0x7f).unwrap_or(0);
+        // Name: printable ASCII, capped to a slot-name length, NUL-terminated.
+        let nm: Vec<u8> = name
+            .bytes()
+            .filter(|b| (0x20..0x7f).contains(b))
+            .take(16)
+            .collect();
+        let dev = self.device_id;
+        let send = |port: &mut MidiPort, msg: &[u8]| -> Result<()> {
+            port.write_all(msg).map_err(midi_err)?;
+            sleep(STORE_PACE);
+            Ok(())
+        };
+        // 00 05 <name> 00 : set edit-buffer name
+        let mut m = vec![0xF0, 0x13, 0x0B, dev, 0x00, 0x05];
+        m.extend_from_slice(&nm);
+        m.extend_from_slice(&[0x00, 0xF7]);
+        send(&mut self.port, &m)?;
+        // 00 03 <hi> <lo> : begin
+        send(
+            &mut self.port,
+            &[0xF0, 0x13, 0x0B, dev, 0x00, 0x03, hi, lo, 0xF7],
+        )?;
+        // 00 04 <hi> <lo> <name> 00 : directory entry for the slot
+        let mut m = vec![0xF0, 0x13, 0x0B, dev, 0x00, 0x04, hi, lo];
+        m.extend_from_slice(&nm);
+        m.extend_from_slice(&[0x00, 0xF7]);
+        send(&mut self.port, &m)?;
+        // 00 02 <hi> <lo> : commit
+        send(
+            &mut self.port,
+            &[0xF0, 0x13, 0x0B, dev, 0x00, 0x02, hi, lo, 0xF7],
+        )?;
         Ok(())
     }
 

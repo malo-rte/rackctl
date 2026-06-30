@@ -64,6 +64,20 @@ enum Command {
     },
     /// List the rigs saved in the on-disk library.
     Rigs,
+    /// Save the current edit buffer to a User slot, with a name (needs `--port`).
+    Save {
+        /// User slot number (0-based).
+        slot: u8,
+        /// Name for the saved rig.
+        name: String,
+    },
+    /// Rename a User slot, preserving its patch data (needs `--port`).
+    Rename {
+        /// User slot number (0-based).
+        slot: u8,
+        /// New name.
+        name: String,
+    },
     /// Back up the unit's whole patch library to a directory (needs `--port`).
     Backup {
         /// Output directory (created if missing).
@@ -90,6 +104,8 @@ fn main() -> Result<()> {
             rigs();
             Ok(())
         }
+        Command::Save { slot, name } => save(cli.port.as_deref(), *slot, name),
+        Command::Rename { slot, name } => rename(cli.port.as_deref(), *slot, name),
         Command::Backup { out, count } => backup(cli.port.as_deref(), out, *count),
         Command::Ports => list_ports(),
     }
@@ -207,6 +223,38 @@ fn identity(port: Option<&str>) -> Result<()> {
 #[cfg(not(feature = "alsa"))]
 fn identity(_port: Option<&str>) -> Result<()> {
     anyhow::bail!("built without the `alsa` feature; cannot probe hardware")
+}
+
+/// Save the current edit buffer to a User slot, with a name.
+#[cfg(feature = "alsa")]
+fn save(port: Option<&str>, slot: u8, name: &str) -> Result<()> {
+    let port = port.context("save needs --port (a connected unit)")?;
+    let mut dev = RawMidi::open(port)?;
+    dev.store(u16::from(slot), name)?;
+    println!("saved the current edit buffer to User slot {slot} as {name:?}");
+    Ok(())
+}
+
+#[cfg(not(feature = "alsa"))]
+fn save(_port: Option<&str>, _slot: u8, _name: &str) -> Result<()> {
+    anyhow::bail!("built without the `alsa` feature; cannot save to hardware")
+}
+
+/// Rename a User slot, preserving its patch data (select it, then store it back).
+#[cfg(feature = "alsa")]
+fn rename(port: Option<&str>, slot: u8, name: &str) -> Result<()> {
+    let port = port.context("rename needs --port (a connected unit)")?;
+    let mut dev = RawMidi::open(port)?;
+    dev.select_rig(0, slot)?; // User bank, load the slot into the edit buffer
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    dev.store(u16::from(slot), name)?;
+    println!("renamed User slot {slot} to {name:?}");
+    Ok(())
+}
+
+#[cfg(not(feature = "alsa"))]
+fn rename(_port: Option<&str>, _slot: u8, _name: &str) -> Result<()> {
+    anyhow::bail!("built without the `alsa` feature; cannot rename on hardware")
 }
 
 /// Back up the unit's patch library: for each bank/patch, select it and read the
