@@ -153,11 +153,23 @@ This is the "index into a table that points at the real parameter" the device us
 — it is reassigned on every reload, so it must be read live. Address a parameter by its
 stable `target`: read the table block (`01 21`), find the record with that target, and
 use its current `index`. The CLI does exactly this — `scan amp` dumps the table
-(target / value / live index) and `get <target>` reads a value. Note two limits found
-on this unit: a *single-parameter* read `01 11 21 <index>` gets *no reply* (only the
-whole-table read `01 21` answers), and a *per-parameter write* `00 11 21 <index> <v>` is
-*not applied* (the value does not change) — so live amp editing goes through MIDI CC
-(`Bn <cc> <v>`), and a full patch change goes through the aggregate `0x01` write.
+(target / value / live index) and `get <target>` reads a value.
+
+*Parameter-change opcode.* A parameter change is opcode `0x02` (not the block-write
+`0x00`) — captured from the unit: turning the amp *Gain* knob emits
+`02 11 3D 07 <value> 00 00 00 10` (this rig's amp sits at block `0x3D`; the value word
+is `<v> 00 00 00 10`, as elsewhere). `0x02` is bidirectional — the unit *reports*
+changes with it and (per the editor) the host *sets* with it.
+
+*Open: host-initiated parameter set.* Sending that `02 11 <block> <index> <v>` from the
+host does *not* change the value on the tested patches — tried the live table block
+`0x21` (whose `index` is volatile — an indirection table, not a set address) and swept
+the `0x2E..0x3F` model range with no effect. The per-knob captures we could read are
+`aseqdump` of the unit's *own* port, i.e. the unit's change *reports* from physical
+knob turns — so they give the read/report address but do not prove the host can set the
+same way. Resolving this needs the editor→unit direction from the USB capture
+(`11/*.pcapng`). For now, live amp editing goes through MIDI CC (`Bn <cc> <v>`), and a
+full patch change goes through the aggregate `0x01` write.
 
 Requesting every populated block id (a *small paced batch* — not a flood) reads the
 whole patch without per-parameter polling. Other blocks seen on one patch: `0x05` name,

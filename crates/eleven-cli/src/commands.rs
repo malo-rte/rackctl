@@ -113,8 +113,9 @@ fn set_amp(port: Option<&str>, target: u8, value: u8) -> Result<()> {
     );
     if !ok {
         println!(
-            "note: the unit did not apply the write. Per-parameter amp writes are not \
-             accepted on this firmware — use `cc <name> <value>` for live amp control."
+            "note: the unit did not apply the change. Host-initiated per-parameter sets \
+             are unresolved (see eleven-rack-sysex-protocol.adoc) — use `cc <name> \
+             <value>` for live amp control."
         );
     }
     Ok(())

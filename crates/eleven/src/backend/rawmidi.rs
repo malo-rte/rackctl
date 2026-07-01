@@ -317,15 +317,19 @@ impl RawMidi {
         Ok(())
     }
 
-    /// Write a knob value (`0..=127`) to a live parameter slot: `00 11 <block>
-    /// <index> <value>`. `index` is the *live* table index (read fresh from the
-    /// block, since it is reassigned on reload). Affects the edit buffer only.
+    /// Set a live parameter to a knob value (`0..=127`): the *parameter-change*
+    /// message `02 11 <block> <index> <value> 00 00 00 10` — the same form the
+    /// official editor sends when a knob moves. `index` is the *live* table index
+    /// (read fresh from the block, since it is reassigned on reload). Affects the
+    /// edit buffer only; a store persists it. Note: a `0x00` block write does *not*
+    /// set a parameter (that was the earlier "writes don't take" bug).
     ///
     /// # Errors
     /// [`Error::Transport`] on a link failure.
     pub fn write_param(&mut self, block: u8, index: u8, value: u8) -> Result<()> {
         let word = RawValue::from_bytes([value, 0, 0, 0, 0x10]);
-        self.write(&[0x11, block, index], &word)
+        let msg = sysex::build_param_set(self.device_id, &[0x11, block, index], &word);
+        self.port.write_all(&msg).map_err(midi_err)
     }
 
     /// Capture the *currently selected* patch as a device-faithful [`PatchBackup`]:

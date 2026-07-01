@@ -54,10 +54,21 @@ pub fn build_read_request(device_id: u8, addr: &[u8]) -> Vec<u8> {
     build(device_id, READ_REQUEST, addr, &[])
 }
 
-/// Build a write/set: `F0 13 0B <dev> 00 <addr> <value> F7`.
+/// Build a block write: `F0 13 0B <dev> 00 <addr> <value> F7`. Opcode `0x00`
+/// writes a whole block (name, aggregate, …).
 #[must_use]
 pub fn build_write(device_id: u8, addr: &[u8], value: &RawValue) -> Vec<u8> {
     build(device_id, WRITE, addr, value.as_bytes())
+}
+
+/// Build a *parameter change*: `F0 13 0B <dev> 02 <addr> <value> F7`. Opcode `0x02`
+/// sets a single live parameter — this is what the official editor sends when a knob
+/// moves (captured, e.g. amp Gain = `02 11 3D 07 <v> 00 00 00 10`), and it shares the
+/// opcode with the unit's own change *report*. A `0x00` block write does *not* set a
+/// parameter.
+#[must_use]
+pub fn build_param_set(device_id: u8, addr: &[u8], value: &RawValue) -> Vec<u8> {
+    build(device_id, CHANGE_REPORT, addr, value.as_bytes())
 }
 
 /// Shared body of the frame builders.
