@@ -103,10 +103,16 @@ pub fn scan(mock: bool, port: Option<&str>, prefix: &str, from: &str, to: &str) 
 
 // ---- disk commands (no device) ----
 
-/// Parse a `.tfx` patch file and save it to the on-disk patch library.
-pub fn import(file: &str, name: Option<&str>) -> Result<()> {
+/// Parse a `.tfx` patch file and save it to the on-disk patch library — or, with
+/// `json`, print the converted patch as JSON to stdout instead.
+pub fn import(tfx: &str, name: Option<&str>, json: bool) -> Result<()> {
     let patch =
-        rackctl_eleven_lib::import_tfx(std::path::Path::new(file)).map_err(anyhow::Error::msg)?;
+        rackctl_eleven_lib::import_tfx(std::path::Path::new(tfx)).map_err(anyhow::Error::msg)?;
+    if json {
+        let text = rackctl_eleven_lib::patch_to_json(&patch).map_err(anyhow::Error::msg)?;
+        println!("{text}");
+        return Ok(());
+    }
     let save_as = name.unwrap_or(&patch.name);
     let file = rackctl_eleven_lib::save_patch(save_as, &patch).map_err(anyhow::Error::msg)?;
     println!(

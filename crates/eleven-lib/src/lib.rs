@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 
 use rackctl_eleven::{Patch, PatchBackup};
 
-pub use format::{Scene, parse_scene};
+pub use format::{Scene, parse_scene, patch_to_json};
 // Re-export the protocol crate so a frontend can depend on this one crate.
 pub use rackctl_eleven as device;
 

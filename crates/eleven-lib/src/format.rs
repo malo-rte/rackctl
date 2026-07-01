@@ -8,9 +8,18 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use rackctl_eleven::PatchBackup;
+use rackctl_eleven::{Patch, PatchBackup};
 
 use crate::{DEVICE_ID, LIB_VERSION};
+
+/// Serialise a typed [`Patch`] (e.g. from `.tfx` import) to *bare* pretty JSON —
+/// just the patch, without the rackctl-core envelope — for a portable file / pipe.
+///
+/// # Errors
+/// If serialisation fails (should not, for the plain data model).
+pub fn patch_to_json(patch: &Patch) -> Result<String, String> {
+    serde_json::to_string_pretty(patch).map_err(|e| format!("serialising patch to JSON: {e}"))
+}
 
 /// A whole-device **scene**: the User patch bank as `slot -> `[`PatchBackup`]. The
 /// map is sparse, so a partial capture (a read failed, or the bank wrapped early)

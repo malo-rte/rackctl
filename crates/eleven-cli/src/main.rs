@@ -161,6 +161,9 @@ enum Command {
         /// Save under this name (default: the patch's own name).
         #[arg(long)]
         name: Option<String>,
+        /// Print the converted patch as JSON to stdout instead of saving.
+        #[arg(long)]
+        json: bool,
     },
     /// List the `.tfx` patches saved in the on-disk library.
     Imports,
@@ -252,7 +255,7 @@ fn main() -> Result<()> {
                 Ok(())
             }
         },
-        Command::Import { file, name } => commands::import(&file, name.as_deref()),
+        Command::Import { file, name, json } => commands::import(&file, name.as_deref(), json),
         Command::Imports => {
             commands::imports();
             Ok(())
