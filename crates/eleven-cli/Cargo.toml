@@ -17,7 +17,7 @@ path = "src/main.rs"
 # Mirror the library: the real ALSA rawmidi transport is on by default; build
 # with `--no-default-features` for a mock-only binary that needs no MIDI port.
 default = ["alsa"]
-alsa = ["rackctl-eleven/alsa"]
+alsa = ["rackctl-eleven/alsa", "rackctl-eleven-lib/alsa"]
 
 [dependencies]
 rackctl-eleven = { workspace = true }

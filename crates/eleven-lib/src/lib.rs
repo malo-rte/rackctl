@@ -5,21 +5,33 @@
 //! lands, on `rackctl-core` (the device-neutral on-disk library), providing what
 //! both a CLI and a GUI need but neither should own privately.
 //!
-//! It provides `.tfx` rig import, the named on-disk rig library (save / load /
-//! list, via `rackctl-core`), and the device-faithful **patch backup** library
-//! ([`save_backup`] / [`load_backup`] / [`list_backups`]) that the MIDI
-//! capture/restore round-trip uses.
+//! It provides `.tfx` rig import; the named on-disk libraries (rigs, device-faithful
+//! **patch backups**, and whole-bank **scenes**, all via `rackctl-core`); and — with
+//! the `alsa` feature — the device-touching [`manage`] operations (capture / restore
+//! / bank backup / scene capture+restore / preset copy / named MIDI-CC) the CLI and
+//! GUI share.
 //!
 //! NOTE: Eleven Rack, Digidesign and Avid are trademarks of Avid Technology, Inc.
 //! This is an independent, unofficial project.
 #![forbid(unsafe_code)]
 
+pub mod format;
+#[cfg(feature = "alsa")]
+pub mod manage;
+
 use std::path::{Path, PathBuf};
 
 use rackctl_eleven::{PatchBackup, Rig};
 
+pub use format::{Scene, parse_scene};
 // Re-export the protocol crate so a frontend can depend on this one crate.
 pub use rackctl_eleven as device;
+
+/// A User patch slot as a stable library name: slot `0` -> `"U000"`.
+#[must_use]
+pub fn slot_label(slot: u8) -> String {
+    format!("U{slot:03}")
+}
 
 /// This device's stable id, stamped into every saved library item (the
 /// rackctl-core envelope) so a file is matched to the Eleven Rack on load.
@@ -35,6 +47,9 @@ const RIGS: &str = "rigs";
 /// On-disk library subdirectory for device-faithful patch backups (the MIDI
 /// snapshot form, distinct from interchange `.tfx` rigs).
 const BACKUPS: &str = "backups";
+
+/// On-disk library subdirectory for whole-bank scenes.
+const SCENES: &str = "scenes";
 
 fn no_dir() -> String {
     "no config directory available".to_owned()
@@ -103,4 +118,31 @@ pub fn load_backup(name: &str) -> Result<PatchBackup, String> {
 #[must_use]
 pub fn list_backups() -> Vec<String> {
     rackctl_core::list_stems(DEVICE_ID, BACKUPS)
+}
+
+/// Save a whole-bank [`Scene`] to the scene library (its own `name`).
+///
+/// # Errors
+/// If no config directory is available, or the write fails.
+pub fn save_scene(scene: &Scene) -> Result<PathBuf, String> {
+    let file = rackctl_core::item_path(DEVICE_ID, SCENES, &scene.name).ok_or_else(no_dir)?;
+    rackctl_core::save_item(&file, DEVICE_ID, LIB_VERSION, scene)?;
+    Ok(file)
+}
+
+/// Load the named [`Scene`] from the scene library.
+///
+/// # Errors
+/// If the file is missing/unreadable, or matches no known format.
+pub fn load_scene(name: &str) -> Result<Scene, String> {
+    let file = rackctl_core::item_path(DEVICE_ID, SCENES, name).ok_or_else(no_dir)?;
+    let text = rackctl_core::read_text(&file)
+        .ok_or_else(|| format!("could not read {}", file.display()))?;
+    parse_scene(&text)
+}
+
+/// The names of saved scenes, sorted.
+#[must_use]
+pub fn list_scenes() -> Vec<String> {
+    rackctl_core::list_stems(DEVICE_ID, SCENES)
 }

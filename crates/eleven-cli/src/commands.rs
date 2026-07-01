@@ -1,9 +1,11 @@
 //! Implementations of the `rackctl-eleven` subcommands.
 //!
 //! Mirrors `rackctl-gx700`'s split: the CLI definition and dispatch live in
-//! `main.rs`, the work lives here. Parameter-level commands (`get`/`set`/`scan`)
-//! run on the mock or real hardware; the patch/slot commands need a connected
-//! unit (`--port`).
+//! `main.rs`, and these are thin adapters that print. The device-touching work
+//! (capture / save / load / copy / bank backup / scenes / named CC) lives in
+//! `rackctl-eleven-lib`'s `manage` module, so a GUI shares one implementation.
+//! Parameter-level commands (`get`/`set`/`scan`) run on the mock or hardware; the
+//! rig/slot commands need a connected unit (`--port`).
 
 use anyhow::{Context, Result};
 
@@ -265,11 +267,14 @@ fn describe_kind(kind: rackctl_eleven::param::Kind) {
 
 // ---- hardware-only commands ----
 
-/// Select a User patch slot (Program Change).
+/// Select a rig (Program Change), from the User or Factory bank.
 #[cfg(feature = "alsa")]
-pub fn select(port: Option<&str>, slot: u8) -> Result<()> {
-    open_rawmidi(port)?.select_rig(0, slot)?;
-    println!("selected User slot {slot}");
+pub fn select(port: Option<&str>, slot: u8, factory: bool) -> Result<()> {
+    use rackctl_eleven_lib::manage::{FACTORY_BANK, USER_BANK};
+    let bank = if factory { FACTORY_BANK } else { USER_BANK };
+    open_rawmidi(port)?.select_rig(bank, slot)?;
+    let label = if factory { "Factory" } else { "User" };
+    println!("selected {label} slot {slot}");
     Ok(())
 }
 
@@ -313,27 +318,12 @@ pub fn cc(
     slot: Option<&str>,
     channel: u8,
 ) -> Result<()> {
-    use rackctl_eleven::param;
-    // Resolve the effect slot (default to the effect's first slot if unspecified).
-    let fx_ctx = match fx {
-        Some(fx_name) => {
-            let e = param::effect(fx_name)
-                .with_context(|| format!("no effect named {fx_name:?}; try `list`"))?;
-            let s = match slot {
-                Some(s) => parse_slot(s)?,
-                None => *e.slots.first().context("effect has no slots")?,
-            };
-            Some((fx_name, s))
-        }
-        None => None,
-    };
-    let (cc_num, kind) = param::resolve_cc(name, amp, fx_ctx).with_context(|| {
-        format!("could not resolve {name:?}; give --amp <model> or --fx <effect> [--slot], or see `list`")
-    })?;
     let v = parse_cc_value(value)?;
-
+    let slot = slot.map(parse_slot).transpose()?;
     let mut dev = open_rawmidi(port)?;
-    dev.send_cc(channel, cc_num, v)?;
+    let (cc_num, kind) =
+        rackctl_eleven_lib::manage::send_named_cc(&mut dev, name, v, amp, fx, slot, channel)
+            .map_err(anyhow::Error::msg)?;
     println!(
         "sent CC {cc_num} = {v} (ch {channel}) for {name:?}  [{}]",
         kind_summary(kind)
@@ -353,17 +343,16 @@ fn kind_summary(kind: rackctl_eleven::param::Kind) -> &'static str {
     }
 }
 
-/// List the unit's patch names from the on-device directory (block `0x04`).
+/// List the on-device bank's rig names from the directory (block `0x04`).
 #[cfg(feature = "alsa")]
-pub fn patches(port: Option<&str>, count: u8) -> Result<()> {
+pub fn patches(port: Option<&str>, count: u8, factory: bool) -> Result<()> {
+    use rackctl_eleven_lib::manage::{self, FACTORY_BANK, USER_BANK};
+    let bank = if factory { FACTORY_BANK } else { USER_BANK };
     let mut dev = open_rawmidi(port)?;
-    for slot in 0..count {
-        let hi = (slot >> 7) & 0x7f;
-        let lo = slot & 0x7f;
-        match dev.read_block(&[0x04, hi, lo]) {
-            Ok(payload) => println!("{slot:3}  {}", trailing_name(&payload)),
-            Err(_) => println!("{slot:3}  (no reply)"),
-        }
+    for (slot, name) in
+        manage::patch_directory(&mut dev, bank, count).map_err(anyhow::Error::msg)?
+    {
+        println!("{slot:3}  {name}");
     }
     Ok(())
 }
@@ -386,19 +375,65 @@ pub fn dump(port: Option<&str>, slot: Option<u8>) -> Result<()> {
     Ok(())
 }
 
-/// Save the current sound (or a slot) to a disk file (the raw packed patch).
+/// Save the current sound (or a slot) to the library as `name`.
 #[cfg(feature = "alsa")]
 pub fn save(port: Option<&str>, name: &str, slot: Option<u8>) -> Result<()> {
     let mut dev = open_rawmidi(port)?;
-    if let Some(s) = slot {
-        dev.select_rig(0, s)?;
-        std::thread::sleep(std::time::Duration::from_millis(300));
-    }
-    let blob = dev.read_block(&[0x01])?;
-    let file = std::path::PathBuf::from(format!("{}.erpatch", sanitize(name)));
-    std::fs::write(&file, &blob).with_context(|| format!("write {}", file.display()))?;
-    println!("saved {} bytes -> {}", blob.len(), file.display());
+    let patch = rackctl_eleven_lib::manage::capture_to_library(&mut dev, name, slot)
+        .map_err(anyhow::Error::msg)?;
+    println!(
+        "saved {:?} ({} blocks) to the library as {name:?}",
+        patch.name,
+        patch.blocks.len()
+    );
     Ok(())
+}
+
+/// Load a saved rig from the library onto User `slot`, verifying.
+#[cfg(feature = "alsa")]
+pub fn load(port: Option<&str>, name: &str, slot: u8) -> Result<()> {
+    let mut dev = open_rawmidi(port)?;
+    let (patch, report) = rackctl_eleven_lib::manage::restore_from_library(&mut dev, name, slot)
+        .map_err(anyhow::Error::msg)?;
+    println!("loaded {:?} onto User slot {slot}: {report}", patch.name);
+    if !report.ok() {
+        anyhow::bail!("load verify failed: {report}");
+    }
+    Ok(())
+}
+
+/// Copy a rig from one slot to a User slot (e.g. a Factory preset), verifying.
+#[cfg(feature = "alsa")]
+pub fn copy(port: Option<&str>, from: u8, to: u8, factory: bool) -> Result<()> {
+    use rackctl_eleven_lib::manage::{self, FACTORY_BANK, USER_BANK};
+    let bank = if factory { FACTORY_BANK } else { USER_BANK };
+    let src = if factory { "Factory" } else { "User" };
+    let mut dev = open_rawmidi(port)?;
+    let report = manage::copy_slot(&mut dev, bank, from, to).map_err(anyhow::Error::msg)?;
+    println!("copied {src} slot {from} -> User slot {to}: {report}");
+    if !report.ok() {
+        anyhow::bail!("copy verify failed: {report}");
+    }
+    Ok(())
+}
+
+/// Back up the whole User bank to the library (one saved rig per slot).
+#[cfg(feature = "alsa")]
+pub fn backup(port: Option<&str>, count: u8) -> Result<()> {
+    let mut dev = open_rawmidi(port)?;
+    let n = rackctl_eleven_lib::manage::backup_bank(&mut dev, count, |slot, name| {
+        println!("U{slot:03}: {name:?}");
+    })
+    .map_err(anyhow::Error::msg)?;
+    println!("backed up {n} User rigs to the library");
+    Ok(())
+}
+
+/// List the saved rigs in the library.
+pub fn library() {
+    for name in rackctl_eleven_lib::list_backups() {
+        println!("{name}");
+    }
 }
 
 /// Store the current edit buffer to a User slot, with a name.
@@ -409,83 +444,7 @@ pub fn store(port: Option<&str>, slot: u8, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Capture the current sound (or User slot `slot`) to the on-disk backup library.
-#[cfg(feature = "alsa")]
-pub fn capture(port: Option<&str>, name: &str, slot: Option<u8>) -> Result<()> {
-    let mut dev = open_rawmidi(port)?;
-    if let Some(s) = slot {
-        dev.select_rig(0, s)?;
-        std::thread::sleep(std::time::Duration::from_millis(300));
-    }
-    let patch = dev.capture_patch()?;
-    let file = rackctl_eleven_lib::save_backup(name, &patch).map_err(anyhow::Error::msg)?;
-    println!(
-        "captured {:?} ({} blocks) -> {}",
-        patch.name,
-        patch.blocks.len(),
-        file.display()
-    );
-    Ok(())
-}
-
-/// Restore a saved backup into User `slot`: select it, write the captured blocks
-/// into the edit buffer, run the store sequence, then verify by re-reading.
-#[cfg(feature = "alsa")]
-pub fn restore(port: Option<&str>, name: &str, slot: u8) -> Result<()> {
-    let patch = rackctl_eleven_lib::load_backup(name).map_err(anyhow::Error::msg)?;
-    let mut dev = open_rawmidi(port)?;
-    dev.select_rig(0, slot)?;
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    let written: Vec<&rackctl_eleven::BlockData> = patch
-        .blocks
-        .iter()
-        .filter(|b| b.restore_action() != rackctl_eleven::RestoreAction::Skip)
-        .collect();
-    dev.restore_patch(u16::from(slot), &patch)?;
-    let skipped = patch.blocks.len() - written.len();
-    println!(
-        "restored {:?} ({} blocks written, {skipped} system/metadata blocks skipped) to User slot {slot}; verifying…",
-        patch.name,
-        written.len()
-    );
-
-    // Verify: re-select the slot and re-capture, then compare only the blocks we wrote.
-    dev.select_rig(0, slot)?;
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    let after = dev.capture_patch()?;
-    let (mut ok, mut bad) = (0u32, 0u32);
-    for b in written {
-        let after_b = after.blocks.iter().find(|x| x.id == b.id);
-        // Parameter-table blocks: compare values keyed by the stable `target`, since
-        // the physical index is reassigned on reload. Flat blocks: byte-exact.
-        let matched = if let Some(want) = b.param_values_by_target() {
-            after_b.and_then(rackctl_eleven::BlockData::param_values_by_target) == Some(want)
-        } else {
-            after_b.map(|x| x.bytes.as_slice()) == Some(b.bytes.as_slice())
-        };
-        if matched {
-            ok += 1;
-        } else {
-            bad += 1;
-            println!("  block {:#04X}: MISMATCH", b.id);
-        }
-    }
-    if bad == 0 {
-        println!("verified: all {ok} blocks match");
-    } else {
-        anyhow::bail!("restore verify failed: {bad} block(s) differ ({ok} matched)");
-    }
-    Ok(())
-}
-
-/// List the saved patch backups.
-pub fn backups() {
-    for name in rackctl_eleven_lib::list_backups() {
-        println!("{name}");
-    }
-}
-
-/// Rename a User slot, preserving its patch data (select it, then store it back).
+/// Rename a User slot, preserving its rig data (select it, then store it back).
 #[cfg(feature = "alsa")]
 pub fn rename(port: Option<&str>, slot: u8, name: &str) -> Result<()> {
     let mut dev = open_rawmidi(port)?;
@@ -496,33 +455,40 @@ pub fn rename(port: Option<&str>, slot: u8, name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Back up the unit's patch library: each patch's packed block (`0x01`) + name.
+/// Capture the whole User bank into a named scene.
 #[cfg(feature = "alsa")]
-pub fn backup(port: Option<&str>, out: &str, count: u8) -> Result<()> {
+pub fn scene_save(port: Option<&str>, name: &str, count: u8) -> Result<()> {
     let mut dev = open_rawmidi(port)?;
-    let dir = std::path::Path::new(out);
-    std::fs::create_dir_all(dir).with_context(|| format!("create {out}"))?;
-    let mut total = 0u32;
-    for (bank, label) in [(0u8, "user"), (1u8, "factory")] {
-        let mut first: Option<String> = None;
-        for pc in 0..count {
-            dev.select_rig(bank, pc)?;
-            std::thread::sleep(std::time::Duration::from_millis(60));
-            let blob = read_block_retry(&mut dev, &[0x01])?;
-            let name = trailing_name(&read_block_retry(&mut dev, &[0x05])?);
-            if pc > 0 && first.as_deref() == Some(name.as_str()) {
-                println!("{label}: wrapped at {pc} ({pc} patches)");
-                break;
-            }
-            first.get_or_insert_with(|| name.clone());
-            let file = dir.join(format!("{label}-{pc:03}-{}.erpatch", sanitize(&name)));
-            std::fs::write(&file, &blob).with_context(|| format!("write {}", file.display()))?;
-            println!("{label} {pc:3}: {name:?} ({} bytes)", blob.len());
-            total += 1;
-        }
-    }
-    println!("backed up {total} patches to {out}");
+    let scene = rackctl_eleven_lib::manage::capture_scene(&mut dev, name, count, |slot, n| {
+        println!("U{slot:03}: {n:?}");
+    })
+    .map_err(anyhow::Error::msg)?;
+    rackctl_eleven_lib::save_scene(&scene).map_err(anyhow::Error::msg)?;
+    println!("saved scene {name:?} ({} rigs)", scene.patches.len());
     Ok(())
+}
+
+/// Restore a saved scene to the device.
+#[cfg(feature = "alsa")]
+pub fn scene_restore(port: Option<&str>, name: &str) -> Result<()> {
+    let scene = rackctl_eleven_lib::load_scene(name).map_err(anyhow::Error::msg)?;
+    let mut dev = open_rawmidi(port)?;
+    let report = rackctl_eleven_lib::manage::restore_scene(&mut dev, &scene, |slot, n| {
+        println!("U{slot:03}: {n:?}");
+    })
+    .map_err(anyhow::Error::msg)?;
+    println!("restored scene {name:?}: {report}");
+    if !report.ok() {
+        anyhow::bail!("scene restore verify failed: {report}");
+    }
+    Ok(())
+}
+
+/// List the saved scenes.
+pub fn scene_list() {
+    for name in rackctl_eleven_lib::list_scenes() {
+        println!("{name}");
+    }
 }
 
 /// Stream the unit's change reports until interrupted.
@@ -555,22 +521,6 @@ pub fn ports() -> Result<()> {
     Ok(())
 }
 
-/// Read a block, retrying a few times — the unit occasionally misses a reply.
-#[cfg(feature = "alsa")]
-fn read_block_retry(dev: &mut RawMidi, addr: &[u8]) -> Result<Vec<u8>> {
-    let mut last = None;
-    for _ in 0..3 {
-        match dev.read_block(addr) {
-            Ok(v) => return Ok(v),
-            Err(e) => {
-                last = Some(e);
-                std::thread::sleep(std::time::Duration::from_millis(120));
-            }
-        }
-    }
-    Err(last.map_or_else(|| anyhow::anyhow!("read failed"), Into::into))
-}
-
 // ---- `alsa`-less stubs ----
 
 #[cfg(not(feature = "alsa"))]
@@ -583,16 +533,18 @@ macro_rules! no_alsa {
 }
 #[cfg(not(feature = "alsa"))]
 no_alsa! {
-    select(port: Option<&str>, slot: u8);
+    select(port: Option<&str>, slot: u8, factory: bool);
     cc(port: Option<&str>, name: &str, value: &str, amp: Option<&str>, fx: Option<&str>, slot: Option<&str>, channel: u8);
-    patches(port: Option<&str>, count: u8);
+    patches(port: Option<&str>, count: u8, factory: bool);
     dump(port: Option<&str>, slot: Option<u8>);
     save(port: Option<&str>, name: &str, slot: Option<u8>);
+    load(port: Option<&str>, name: &str, slot: u8);
+    copy(port: Option<&str>, from: u8, to: u8, factory: bool);
+    backup(port: Option<&str>, count: u8);
     store(port: Option<&str>, slot: u8, name: &str);
-    capture(port: Option<&str>, name: &str, slot: Option<u8>);
-    restore(port: Option<&str>, name: &str, slot: u8);
     rename(port: Option<&str>, slot: u8, name: &str);
-    backup(port: Option<&str>, out: &str, count: u8);
+    scene_save(port: Option<&str>, name: &str, count: u8);
+    scene_restore(port: Option<&str>, name: &str);
     monitor(port: Option<&str>);
     identity(port: Option<&str>);
     ports();
@@ -646,20 +598,4 @@ fn trailing_name(payload: &[u8]) -> String {
     }
     run.reverse();
     String::from_utf8_lossy(&run).into_owned()
-}
-
-/// Make a name safe for a filename (keep alphanumerics, space, dash, underscore).
-#[cfg(feature = "alsa")]
-fn sanitize(name: &str) -> String {
-    name.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_') {
-                c
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>()
-        .trim()
-        .to_owned()
 }

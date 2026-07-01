@@ -1,13 +1,12 @@
 //! `rackctl-eleven` — command-line control for the Avid/Digidesign Eleven Rack.
 //!
-//! Mirrors the `rackctl-gx700` CLI structure: global `--mock`/`--port`, a
-//! `commands` module for the implementations, and a `completions` command.
-//! Parameter-level commands (`get`/`set`/`scan`) run on the mock or hardware; the
-//! patch/slot commands need a connected unit (`--port`).
-//!
-//! `list`/`info` browse the parameter catalog (offline, no device). The remaining
-//! GX-700 commands without an Eleven Rack equivalent yet are `load`/`copy`, which
-//! await library restore.
+//! Mirrors the `rackctl-gx700` CLI: global `--mock`/`--port`, a thin `commands`
+//! module that dispatches to the shared `rackctl-eleven-lib` management layer (so a
+//! GUI reuses the same implementations), and matching terminology — `save` /
+//! `load` (a captured sound to/from the library), `backup` (the whole User bank),
+//! `scene save/restore/list` (a whole-bank snapshot), `copy` (slot to slot),
+//! `patches` (the on-device bank). Parameter-level `get`/`set`/`scan` run on the
+//! mock or hardware; `list`/`info` browse the catalog offline.
 #![forbid(unsafe_code)]
 
 mod commands;
@@ -59,10 +58,13 @@ enum Command {
         #[arg(long, default_value = "7f")]
         to: String,
     },
-    /// Select a User patch slot (Program Change).
+    /// Select a rig (Program Change); Factory bank with `--factory`.
     Select {
-        /// User slot number (0-based).
+        /// Slot number (0-based).
         slot: u8,
+        /// Select from the Factory bank instead of User.
+        #[arg(long)]
+        factory: bool,
     },
     /// Move a named parameter over MIDI CC (the native remote-control path).
     Cc {
@@ -83,26 +85,56 @@ enum Command {
         #[arg(long, default_value_t = 1)]
         channel: u8,
     },
-    /// List the unit's patch names from the on-device directory.
+    /// List the on-device bank's rig names (User, or Factory with `--factory`).
     Patches {
         /// How many slots to read.
         #[arg(long, default_value_t = 128)]
         count: u8,
+        /// List the Factory bank instead of User.
+        #[arg(long)]
+        factory: bool,
     },
-    /// Show the current patch (or a slot): its name and packed size.
+    /// Show the current sound (or a slot): its name and packed size.
     Dump {
         /// Show User slot N instead of the current sound.
         #[arg(long)]
         slot: Option<u8>,
     },
-    /// Save the current sound (or a slot) to a disk file (`<name>.erpatch`).
+    /// Save the current sound (or a slot) to the library as `name`.
     Save {
-        /// File name to save under (`.erpatch` is appended).
+        /// Name to save under, in the library.
         name: String,
         /// Save User slot N instead of the current sound.
         #[arg(long)]
         slot: Option<u8>,
     },
+    /// Load a saved rig from the library onto a User slot (verified).
+    Load {
+        /// Saved rig name (see `library`).
+        name: String,
+        /// Target User slot number (0-based).
+        #[arg(long)]
+        slot: u8,
+    },
+    /// Copy a rig from one slot to a User slot (e.g. a Factory preset).
+    Copy {
+        /// Source slot number (0-based).
+        from: u8,
+        /// Destination User slot number (0-based).
+        #[arg(long)]
+        to: u8,
+        /// Take the source from the Factory bank.
+        #[arg(long)]
+        factory: bool,
+    },
+    /// Back up the whole User bank to the library (one saved rig per slot).
+    Backup {
+        /// Number of User slots to read.
+        #[arg(long, default_value_t = 128)]
+        count: u8,
+    },
+    /// List the saved rigs in the library.
+    Library,
     /// Store the current edit buffer to a User slot, with a name (persists).
     Store {
         /// User slot number (0-based).
@@ -110,30 +142,17 @@ enum Command {
         /// Name for the stored rig.
         name: String,
     },
-    /// Capture the current sound (or a slot) to the on-disk backup library.
-    Capture {
-        /// Name to save the backup under.
-        name: String,
-        /// Capture User slot N instead of the current sound.
-        #[arg(long)]
-        slot: Option<u8>,
-    },
-    /// Restore a saved backup into a User slot (writes the edit buffer, then stores).
-    Restore {
-        /// Name of the saved backup (see `backups`).
-        name: String,
-        /// Target User slot number (0-based).
-        #[arg(long)]
-        slot: u8,
-    },
-    /// List the saved patch backups.
-    Backups,
-    /// Rename a User slot, preserving its patch data.
+    /// Rename a User slot, preserving its rig data.
     Rename {
         /// User slot number (0-based).
         slot: u8,
         /// New name.
         name: String,
+    },
+    /// Whole-bank scenes: capture / restore / list the User bank as one file.
+    Scene {
+        #[command(subcommand)]
+        cmd: SceneCommand,
     },
     /// Import a `.tfx` rig file into the on-disk rig library.
     Import {
@@ -143,26 +162,17 @@ enum Command {
         #[arg(long)]
         name: Option<String>,
     },
-    /// List the rigs saved in the on-disk library.
+    /// List the `.tfx` rigs saved in the on-disk library.
     Rigs,
     /// List the parameter catalog (amp models and effects); optionally filtered.
     List {
         /// Only show amps/effects whose name contains this text.
         filter: Option<String>,
     },
-    /// Show one parameter's CC/index, wire address and value semantics.
+    /// Show one parameter's MIDI CC(s) and value semantics.
     Info {
         /// Parameter name, e.g. `presence` or `decay`.
         name: String,
-    },
-    /// Back up the unit's whole patch library to a directory.
-    Backup {
-        /// Output directory (created if missing).
-        #[arg(long, default_value = "eleven-backup")]
-        out: String,
-        /// Number of patches to read per bank (User, then Factory).
-        #[arg(long, default_value_t = 100)]
-        count: u8,
     },
     /// Stream the unit's change reports as you turn knobs.
     Monitor,
@@ -176,6 +186,26 @@ enum Command {
     },
 }
 
+/// `scene` subcommands (a whole User bank as one library file).
+#[derive(Subcommand)]
+enum SceneCommand {
+    /// Capture the whole User bank into a named scene.
+    Save {
+        /// Name to save the scene under.
+        name: String,
+        /// Number of User slots to read.
+        #[arg(long, default_value_t = 128)]
+        count: u8,
+    },
+    /// Restore a saved scene to the device (overwrites each captured slot).
+    Restore {
+        /// Scene name to restore.
+        name: String,
+    },
+    /// List the saved scenes.
+    List,
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let mock = cli.mock;
@@ -185,7 +215,7 @@ fn main() -> Result<()> {
         Command::Get { addr } => commands::get(mock, port, &addr),
         Command::Set { addr, value } => commands::set(mock, port, &addr, &value),
         Command::Scan { prefix, from, to } => commands::scan(mock, port, &prefix, &from, &to),
-        Command::Select { slot } => commands::select(port, slot),
+        Command::Select { slot, factory } => commands::select(port, slot, factory),
         Command::Cc {
             name,
             value,
@@ -202,17 +232,26 @@ fn main() -> Result<()> {
             slot.as_deref(),
             channel,
         ),
-        Command::Patches { count } => commands::patches(port, count),
+        Command::Patches { count, factory } => commands::patches(port, count, factory),
         Command::Dump { slot } => commands::dump(port, slot),
         Command::Save { name, slot } => commands::save(port, &name, slot),
-        Command::Store { slot, name } => commands::store(port, slot, &name),
-        Command::Capture { name, slot } => commands::capture(port, &name, slot),
-        Command::Restore { name, slot } => commands::restore(port, &name, slot),
-        Command::Backups => {
-            commands::backups();
+        Command::Load { name, slot } => commands::load(port, &name, slot),
+        Command::Copy { from, to, factory } => commands::copy(port, from, to, factory),
+        Command::Backup { count } => commands::backup(port, count),
+        Command::Library => {
+            commands::library();
             Ok(())
         }
+        Command::Store { slot, name } => commands::store(port, slot, &name),
         Command::Rename { slot, name } => commands::rename(port, slot, &name),
+        Command::Scene { cmd } => match cmd {
+            SceneCommand::Save { name, count } => commands::scene_save(port, &name, count),
+            SceneCommand::Restore { name } => commands::scene_restore(port, &name),
+            SceneCommand::List => {
+                commands::scene_list();
+                Ok(())
+            }
+        },
         Command::Import { file, name } => commands::import(&file, name.as_deref()),
         Command::Rigs => {
             commands::rigs();
@@ -223,7 +262,6 @@ fn main() -> Result<()> {
             Ok(())
         }
         Command::Info { name } => commands::info(&name),
-        Command::Backup { out, count } => commands::backup(port, &out, count),
         Command::Monitor => commands::monitor(port),
         Command::Identity => commands::identity(port),
         Command::Completions { shell } => {

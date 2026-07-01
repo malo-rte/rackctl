@@ -2778,6 +2778,8 @@ version = "0.8.0"
 dependencies = [
  "rackctl-core",
  "rackctl-eleven",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

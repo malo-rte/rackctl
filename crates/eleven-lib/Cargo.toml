@@ -1,7 +1,7 @@
 [package]
 name = "rackctl-eleven-lib"
 version.workspace = true
-description = "Eleven Rack library and rig-management layer: on-disk rig libraries, .tfx import, and (later) device-touching management, atop rackctl-eleven + rackctl-core. Scaffold — most functionality lands with the rig-format and catalog work."
+description = "Eleven Rack library and management layer: on-disk libraries (rigs, patch backups, scenes), .tfx import, and device-touching management (capture / restore / bank backup / scenes / presets), atop rackctl-eleven + rackctl-core. Shared by the CLI and GUI frontends."
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
@@ -9,9 +9,18 @@ repository.workspace = true
 authors.workspace = true
 publish = false             # internal support crate (path dependency), not for crates.io
 
+[features]
+# Device-touching management (`manage` module) needs the real MIDI transport.
+# On by default (frontends want it); build `--no-default-features` for the
+# file-only library layer (rig/backup/scene on-disk + parsing), no ALSA.
+default = ["alsa"]
+alsa = ["rackctl-eleven/alsa"]
+
 [dependencies]
 rackctl-core.workspace = true
 rackctl-eleven = { workspace = true }
+serde = { workspace = true }
+serde_json.workspace = true
 
 [lints]
 workspace = true

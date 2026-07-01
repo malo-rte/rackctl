@@ -19,7 +19,7 @@ rackctl-gx700 = { path = "crates/gx700", default-features = false }
 rackctl-gx700-lib = { path = "crates/gx700-lib" }
 rackctl-eleven-model = { path = "crates/eleven-model" }
 rackctl-eleven = { path = "crates/eleven", default-features = false }
-rackctl-eleven-lib = { path = "crates/eleven-lib" }
+rackctl-eleven-lib = { path = "crates/eleven-lib", default-features = false }
 thiserror = "2"
 alsa = "0.9"
 serde = { version = "1", features = ["derive"] }
