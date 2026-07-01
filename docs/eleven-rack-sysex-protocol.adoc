@@ -357,24 +357,30 @@ whole-rig *bulk* read/write exists over the editor SysEx is still open.
 == Storing a patch (save the edit buffer to a slot)
 
 A write (`0x00`) changes the *edit buffer* — the current sound — but does not persist;
-reselecting the patch reloads the slot. To *save* to a slot, the Windows editor issues
-three further `0x00` writes to the *directory/commit* blocks `0x03`, `0x04`, `0x02`
-(these never appear in a normal read dump). Captured sequence (editor saving the current
-rig as `"ABCDE"` to slot A1):
+reselecting the patch reloads the slot. To *save* to a slot, issue three further `0x00`
+writes to the *directory/commit* blocks `0x03`, `0x04`, `0x02` (these never appear in a
+normal read dump). Sequence saving the current rig as `"ABCDE"` to slot 6:
 
 ----
 00 05 41 42 43 44 45 00            ; set edit-buffer name (block 0x05), NUL-terminated
-00 03 <hi> <lo>                    ; store: begin, slot = <hi><lo> (2x 7-bit)
-00 04 <hi> <lo> 41 42 43 44 45 00  ; store: directory entry for the slot + name
-00 02 <hi> <lo>                    ; store: commit
+00 03 <lo> <hi>                    ; save the edit-buffer CONTENT to the slot (LITTLE-endian!)
+00 04 <hi> <lo> 41 42 43 44 45 00  ; directory entry (name) for the slot (big-endian)
+00 02 <hi> <lo>                    ; commit
 ----
 
-The slot is a *two-byte* number (`<hi> <lo>`, 7 bits each) — the same addressing as the
-directory read `01 04 <hi> <lo>`. A1 = `00 00`; User slot 7 = `00 07`. *Hardware-confirmed*
-from Linux: this sequence stores to exactly the target slot (neighbours untouched) and the
-patch persists across a reselect. So *restore* = select the slot, write the patch's
-blocks/params to the edit buffer, then run this store sequence with that slot. (The unit
-echoes each write as a `0x02` report; the editor then reads back to verify.)
+CAUTION: the two slot-address bytes are ordered *differently per message*. The content
+save `00 03` takes the slot *low byte first* (`<lo> <hi>`); the directory `00 04` and
+commit `00 02` take it *high byte first* (`<hi> <lo>`). This was found the hard way:
+sending `00 03` big-endian (`00 03 00 06` for slot 6) made the unit read the slot as
+*0* and write *truncated* content there — so **every store silently overwrote User
+slot 0**. Hardware-verified across slots 0/4/6: with `00 03 <lo> <hi>` the store writes
+exactly the target slot (slot 0 untouched) and persists the *full* 1235-byte content
+across a reselect.
+
+The `0x00` writes affect the edit buffer; the store commits it. So a *full* patch copy is
+simply: get the source into the edit buffer (select a slot, or write its blocks), then run
+this sequence for the target slot — no per-block reconstruction needed. (The unit echoes
+each write as a `0x02` report; read back to verify.)
 
 == Restoring a patch (write the edit buffer, then store)
 

@@ -211,10 +211,16 @@ impl RawMidi {
 
     /// Store the current edit buffer to a patch `slot`, naming it `name`.
     ///
-    /// The captured editor save sequence (hardware-confirmed): set the edit-buffer
-    /// name (block `0x05`), then `00 03 <hi> <lo>` / `00 04 <hi> <lo> <name>` /
-    /// `00 02 <hi> <lo>`, where the slot is the two-byte (`hi`,`lo`) directory index.
-    /// This *persists* the current sound to the slot; it writes only that slot.
+    /// The save sequence (hardware-confirmed): set the edit-buffer name (block
+    /// `0x05`), then `00 03 <lo> <hi>` (save content) / `00 04 <hi> <lo> <name>`
+    /// (directory name) / `00 02 <hi> <lo>` (commit). This *persists* the current
+    /// sound to the slot and writes only that slot.
+    ///
+    /// The two slot-address bytes are ordered **differently per message**: the
+    /// content save `00 03` takes the slot low-byte first, while the directory and
+    /// commit take it high-byte first. Getting `00 03` wrong (big-endian) made every
+    /// store also clobber slot 0 with truncated content — see the byte-order note in
+    /// the body; verified against hardware across slots 0/4/6.
     ///
     /// # Errors
     /// [`Error::Transport`] on a link failure.
@@ -233,22 +239,26 @@ impl RawMidi {
             sleep(STORE_PACE);
             Ok(())
         };
-        // 00 05 <name> 00 : set edit-buffer name
+        // 00 05 <name> 00 : set edit-buffer name.
         let mut m = vec![0xF0, 0x13, 0x0B, dev, 0x00, 0x05];
         m.extend_from_slice(&nm);
         m.extend_from_slice(&[0x00, 0xF7]);
         send(&mut self.port, &m)?;
-        // 00 03 <hi> <lo> : begin
+        // 00 03 <lo> <hi> : save the edit buffer's content to the slot. The slot is
+        // addressed **little-endian** here (low 7 bits first) — hardware-verified: a
+        // big-endian `<hi> <lo>` made `00 03 00 06` read as slot 0, so every store
+        // silently overwrote slot 0 with truncated content. (The `00 04` directory
+        // write below addresses the slot the other way round, `<hi> <lo>`.)
         send(
             &mut self.port,
-            &[0xF0, 0x13, 0x0B, dev, 0x00, 0x03, hi, lo, 0xF7],
+            &[0xF0, 0x13, 0x0B, dev, 0x00, 0x03, lo, hi, 0xF7],
         )?;
-        // 00 04 <hi> <lo> <name> 00 : directory entry for the slot
+        // 00 04 <hi> <lo> <name> 00 : directory entry (name) for the slot.
         let mut m = vec![0xF0, 0x13, 0x0B, dev, 0x00, 0x04, hi, lo];
         m.extend_from_slice(&nm);
         m.extend_from_slice(&[0x00, 0xF7]);
         send(&mut self.port, &m)?;
-        // 00 02 <hi> <lo> : commit
+        // 00 02 <hi> <lo> : commit.
         send(
             &mut self.port,
             &[0xF0, 0x13, 0x0B, dev, 0x00, 0x02, hi, lo, 0xF7],
