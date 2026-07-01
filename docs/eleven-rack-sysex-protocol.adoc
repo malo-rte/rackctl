@@ -481,19 +481,31 @@ The internal ids like `DigiDstrTS8u`, `DigiSprnSpru` disambiguate them.)
 == MIDI CC reference (foot-controller control)
 
 Separately from the editor's address-mapped SysEx, the unit exposes many parameters
-as MIDI Continuous Controllers for real-time/foot-controller use. The User Guide's
-Chapter 11 is the full chart: block *bypass* CCs (DIST 25, MOD 50, DELAY 28, REVERB
-36, FX LOOP 107, WAH 43, AMP 111, FX1 63, FX2 86), global controls (Volume Pedal 7,
-Wah Position 4, Multi-FX 11, Tap Tempo 64), and per-amp-model and per-effect parameter
-CCs. Notably an effect's parameter CCs *differ by slot* (its "as MOD / as FX1 / as
-FX2" columns) — every slot effect shares the *same positional CC table per slot*, so
-the CC is a function of `(slot, parameter position)`. These CC numbers are a
-*different* addressing scheme from the SysEx addresses (see *Parameter catalog*
-above), but the chart's *parameter names, per-model structure and value semantics*
-(e.g. bypass `0-63 = Off, 64-127 = On`) are authoritative. This chart is fully
-transcribed into `crates/eleven-model/src/param.rs` (the `param` module) and exposed
-by the CLI `list` / `info` commands. (See `eleven-rack-rig-format.adoc` for the
-rig-file keys, and `docs/external-specs/README.adoc` for the manual.)
+as MIDI Continuous Controllers for real-time/foot-controller use. *Sending* a channel
+message `Bn <cc> <value>` (channel `n`) moves the mapped parameter in the edit buffer —
+this is the safe, native remote-control path, and what the CLI `cc` command / the
+`rackctl-eleven` `send_cc` use. Block *bypass* CCs: DIST 25, MOD 50, DELAY 28, REVERB
+36, FX LOOP 107, WAH 43, AMP 111, FX1 63, FX2 86; globals: Volume Pedal 7, Wah Position
+4, Multi-FX 11, Tap Tempo 64.
+
+*Source.* The base User Guide's Chapter 11 chart is *incomplete* — it predates the
+Expansion Pack. The authoritative full chart is the unit's own *on-device "MIDI CC
+Reference"* screen (User Options), which is firmware-generated and includes the
+Expansion amps/effects; it was photographed and transcribed into
+`crates/eleven-model/src/param.rs` (the `param` module), surfaced by the CLI `list` /
+`info`.
+
+*Per-slot, not positional.* An effect's parameter CCs *differ by slot* (its "as MOD /
+as FX1 / as FX2" columns), and the mapping is **not** a positional formula — Parametric
+EQ skips a slot position, and Multi Chorus's `Lo Cut`/`Width` share one CC across all
+slots. So each `param::FxParam` stores an explicit CC per slot (aligned to
+`Effect::slots`, resolved by `Effect::cc_in`), taken verbatim from the on-device chart.
+
+These CC numbers are a *different* namespace from the internal SysEx addresses (see
+*Parameter catalog* above); the chart's names, per-model structure and value semantics
+(e.g. bypass `0-63 = Off, 64-127 = On`) are authoritative. (See
+`eleven-rack-rig-format.adoc` for the rig-file keys, and `docs/external-specs/README.adoc`
+for the manual.)
 
 == Open questions (tracked work)
 
@@ -503,12 +515,15 @@ rig-file keys, and `docs/external-specs/README.adoc` for the manual.)
   Writing the `0x01` aggregate blob still does nothing; a plain edit-buffer write still
   does not persist without this sequence.
 * Full block/address map beyond the amp block.
-* *Named parameter catalog — DONE.* The User Guide's Chapter 11 MIDI CC chart is
-  fully transcribed into the `param` module (`crates/eleven-model/src/param.rs`):
-  per-model/per-effect names, CCs and value semantics (knob / switch / stepped),
-  surfaced by the CLI `list` / `info`. Remaining is *binding* each CC/name to its
-  internal SysEx `<block> <index>` per model (a hardware-capture pass), since the
-  two namespaces are unrelated.
+* *Named parameter catalog — DONE (complete).* Transcribed from the *on-device* MIDI
+  CC Reference (the firmware-generated chart, which includes the Expansion Pack content
+  the base manual omits): 26 amp models, 7 cabinets, 7 microphones, ~22 effects with a
+  CC *per slot*, plus value semantics (knob / switch / stepped). In `param`
+  (`crates/eleven-model/src/param.rs`), kebab-cased, surfaced by the CLI `list` / `info`
+  and driveable by `cc`. Remaining is *binding* each CC/name to its internal SysEx
+  `<block> <index>` per model — a passive knob-sweep pass — since the CC and the SysEx
+  index are unrelated namespaces (needed only for named *wire* get/set, not for CC
+  control).
 * *Whole-patch bulk dump — SOLVED.* It is a read request with a *1-byte block
   address*: `01 <block_id>` returns `12 <block_id> <whole-block payload>` (see
   *Block dumps* under Opcodes). Request each populated block to read the full patch,
