@@ -35,21 +35,25 @@ struct Cli {
 enum Command {
     /// List the available ALSA rawmidi ports.
     Ports,
-    /// Read a parameter's value at a hex address, e.g. `get "11 21 0D"`.
+    /// Read a value: a single-byte amp-parameter `target` (e.g. `get 0B`, resolved
+    /// via the live table — see `scan amp`), or a raw 3-byte address (`get "11 21 0D"`).
     Get {
-        /// Address bytes in hex, space- or comma-separated.
+        /// Amp-parameter target (1 byte) or a raw address (hex, space/comma-separated).
         addr: String,
     },
-    /// Write a knob value byte at a hex address, then read it back to verify.
+    /// Write a knob value, then read back to verify: an amp `target` (`set 0B 40`) or
+    /// a raw 3-byte address. NOTE: per-parameter amp writes are not accepted on the
+    /// tested firmware — use `cc` for live amp control.
     Set {
-        /// Address bytes in hex.
+        /// Amp-parameter target (1 byte) or a raw address (hex).
         addr: String,
         /// New value byte `b0` in hex (0..7F for a knob).
         value: String,
     },
-    /// Scan a block: read `<prefix> 00`..`<prefix> 7F` and print the answers.
+    /// Scan a block: read `<prefix> 00`..`<prefix> 7F`. The special prefix `amp`
+    /// instead dumps the current sound's live amp parameter table.
     Scan {
-        /// Leading address bytes in hex, e.g. `"11 21"`.
+        /// Leading address bytes in hex (e.g. `"11 21"`), or `amp` for the amp table.
         prefix: String,
         /// First value of the trailing byte (hex).
         #[arg(long, default_value = "00")]

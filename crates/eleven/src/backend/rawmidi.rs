@@ -317,6 +317,17 @@ impl RawMidi {
         Ok(())
     }
 
+    /// Write a knob value (`0..=127`) to a live parameter slot: `00 11 <block>
+    /// <index> <value>`. `index` is the *live* table index (read fresh from the
+    /// block, since it is reassigned on reload). Affects the edit buffer only.
+    ///
+    /// # Errors
+    /// [`Error::Transport`] on a link failure.
+    pub fn write_param(&mut self, block: u8, index: u8, value: u8) -> Result<()> {
+        let word = RawValue::from_bytes([value, 0, 0, 0, 0x10]);
+        self.write(&[0x11, block, index], &word)
+    }
+
     /// Capture the *currently selected* patch as a device-faithful [`PatchBackup`]:
     /// read each candidate block (`0x01`, `0x05`, `0x07`, `0x08`, `0x1E..=0x3F`) and
     /// keep the ones that answer with a payload. Reads are paced so the sweep never

@@ -45,6 +45,11 @@ fn open_rawmidi(port: Option<&str>) -> Result<RawMidi> {
 /// Read one parameter and print its raw bytes and decoded word.
 pub fn get(mock: bool, port: Option<&str>, addr: &str) -> Result<()> {
     let bytes = parse_addr(addr)?;
+    // A single byte is a stable amp-parameter `target`: resolve its live index from
+    // the unit and read the value. A 3-byte address is a raw read.
+    if let [target] = bytes.as_slice() {
+        return get_amp(port, *target);
+    }
     let mut dev = open_device(mock, port)?;
     let raw = dev.read_raw(&bytes)?;
     let word = raw.decode();
@@ -60,6 +65,10 @@ pub fn get(mock: bool, port: Option<&str>, addr: &str) -> Result<()> {
 pub fn set(mock: bool, port: Option<&str>, addr: &str, value: &str) -> Result<()> {
     let bytes = parse_addr(addr)?;
     let b0 = parse_byte(value)?;
+    // A single byte is a stable amp-parameter `target` (see `get`); 3 bytes is raw.
+    if let [target] = bytes.as_slice() {
+        return set_amp(port, *target, b0);
+    }
     let mut dev = open_device(mock, port)?;
     // Knob-parameter value form: b0 in the low byte, with the 0x10 type tag.
     let want = RawValue::from_bytes([b0, 0, 0, 0, 0x10]);
@@ -75,8 +84,58 @@ pub fn set(mock: bool, port: Option<&str>, addr: &str, value: &str) -> Result<()
     Ok(())
 }
 
-/// Scan `<prefix> from`..`<prefix> to`, printing each address that answered.
+/// Read the live amp parameter table (`get_amp_param` resolves the target's index).
+#[cfg(feature = "alsa")]
+fn get_amp(port: Option<&str>, target: u8) -> Result<()> {
+    let mut dev = open_rawmidi(port)?;
+    let (block, rec) =
+        rackctl_eleven_lib::manage::get_amp_param(&mut dev, target).map_err(anyhow::Error::msg)?;
+    println!(
+        "amp param target {:#04X} = {}  (block {block:#04X}, live index {:#04X})",
+        rec.target, rec.value, rec.index
+    );
+    Ok(())
+}
+
+/// Write an amp parameter by stable target, resolving its live index first.
+#[cfg(feature = "alsa")]
+fn set_amp(port: Option<&str>, target: u8, value: u8) -> Result<()> {
+    let mut dev = open_rawmidi(port)?;
+    let (block, rec) = rackctl_eleven_lib::manage::set_amp_param(&mut dev, target, value)
+        .map_err(anyhow::Error::msg)?;
+    let ok = rec.value == value;
+    println!(
+        "set amp param target {:#04X} = {value} -> read back {}  (block {block:#04X} index {:#04X})  [{}]",
+        target,
+        rec.value,
+        rec.index,
+        if ok { "verified" } else { "MISMATCH" }
+    );
+    if !ok {
+        println!(
+            "note: the unit did not apply the write. Per-parameter amp writes are not \
+             accepted on this firmware — use `cc <name> <value>` for live amp control."
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "alsa"))]
+fn get_amp(_port: Option<&str>, _target: u8) -> Result<()> {
+    anyhow::bail!("amp-parameter addressing needs the `alsa` feature and a connected unit")
+}
+
+#[cfg(not(feature = "alsa"))]
+fn set_amp(_port: Option<&str>, _target: u8, _value: u8) -> Result<()> {
+    anyhow::bail!("amp-parameter addressing needs the `alsa` feature and a connected unit")
+}
+
+/// Scan `<prefix> from`..`<prefix> to`, printing each address that answered. The
+/// special prefix `amp` instead dumps the live amp parameter table.
 pub fn scan(mock: bool, port: Option<&str>, prefix: &str, from: &str, to: &str) -> Result<()> {
+    if prefix.eq_ignore_ascii_case("amp") {
+        return scan_amp(port);
+    }
     let base = parse_addr(prefix)?;
     let from = parse_byte(from)?;
     let to = parse_byte(to)?;
@@ -99,6 +158,31 @@ pub fn scan(mock: bool, port: Option<&str>, prefix: &str, from: &str, to: &str) 
         );
     }
     Ok(())
+}
+
+/// Dump the current sound's live amp parameter table (target / value / live index).
+#[cfg(feature = "alsa")]
+fn scan_amp(port: Option<&str>) -> Result<()> {
+    let mut dev = open_rawmidi(port)?;
+    let (block, recs) =
+        rackctl_eleven_lib::manage::amp_param_table(&mut dev).map_err(anyhow::Error::msg)?;
+    println!(
+        "amp parameter table: block {block:#04X}, {} params (address a param by its target)",
+        recs.len()
+    );
+    println!("  target  value  live-index");
+    for r in &recs {
+        println!(
+            "  {:#04X}      {:>3}    {:#04X}",
+            r.target, r.value, r.index
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(feature = "alsa"))]
+fn scan_amp(_port: Option<&str>) -> Result<()> {
+    anyhow::bail!("`scan amp` needs the `alsa` feature and a connected unit")
 }
 
 // ---- disk commands (no device) ----

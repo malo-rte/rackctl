@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use rackctl_eleven::backup::AGGREGATE_BLOCK;
 use rackctl_eleven::param::{self, Kind, Slot};
-use rackctl_eleven::{BlockData, PatchBackup, RawMidi, RestoreAction};
+use rackctl_eleven::{BlockData, ParamRecord, PatchBackup, RawMidi, RestoreAction};
 
 use crate::format::Scene;
 use crate::slot_label;
@@ -326,6 +326,69 @@ fn read_name(dev: &mut RawMidi) -> Result<String, String> {
 /// Read the current edit buffer's full packed patch image (aggregate block `0x01`).
 fn read_aggregate(dev: &mut RawMidi) -> Result<Vec<u8>, String> {
     read_block_retry(dev, &[AGGREGATE_BLOCK], "aggregate block")
+}
+
+/// The current sound's live **amp parameter table**: its block id and records
+/// (value / index / target). Addressing an amp parameter needs this live read
+/// because the physical `index` is reassigned on every reload; the stable handle
+/// is [`ParamRecord::target`]. The table has been block `0x21` on every model seen,
+/// so try that first, else fall back to the densest parameter-table block.
+///
+/// # Errors
+/// If no parameter-table block can be read from the unit.
+pub fn amp_param_table(dev: &mut RawMidi) -> Result<(u8, Vec<ParamRecord>), String> {
+    if let Ok(bytes) = read_block_retry(dev, &[0x21], "amp table")
+        && let Some(recs) = (BlockData { id: 0x21, bytes }).param_records()
+    {
+        return Ok((0x21, recs));
+    }
+    let mut best: Option<(u8, Vec<ParamRecord>)> = None;
+    for id in 0x1E..=0x3F_u8 {
+        if let Ok(bytes) = dev.read_block(&[id])
+            && let Some(recs) = (BlockData { id, bytes }).param_records()
+            && best
+                .as_ref()
+                .is_none_or(|(_, prev)| recs.len() > prev.len())
+        {
+            best = Some((id, recs));
+        }
+    }
+    best.ok_or_else(|| "no amp parameter table found on the unit".to_owned())
+}
+
+/// Resolve the amp parameter with stable `target` to its live record + block.
+///
+/// # Errors
+/// If the table cannot be read, or no parameter has that target.
+pub fn get_amp_param(dev: &mut RawMidi, target: u8) -> Result<(u8, ParamRecord), String> {
+    let (block, recs) = amp_param_table(dev)?;
+    recs.into_iter()
+        .find(|r| r.target == target)
+        .map(|r| (block, r))
+        .ok_or_else(|| format!("no amp parameter with target {target:#04X} (see `scan amp`)"))
+}
+
+/// Write `value` to the amp parameter with stable `target`: read the live table to
+/// resolve its current index, write there, then re-read and return the record.
+/// This targets the edit buffer; a store is needed to persist it.
+///
+/// # Errors
+/// If the table cannot be read, no parameter has that target, or the write fails.
+pub fn set_amp_param(
+    dev: &mut RawMidi,
+    target: u8,
+    value: u8,
+) -> Result<(u8, ParamRecord), String> {
+    let (block, recs) = amp_param_table(dev)?;
+    let index = recs
+        .iter()
+        .find(|r| r.target == target)
+        .map(|r| r.index)
+        .ok_or_else(|| format!("no amp parameter with target {target:#04X} (see `scan amp`)"))?;
+    dev.write_param(block, index, value)
+        .map_err(|e| format!("writing amp param: {e}"))?;
+    sleep(BANK_PACE);
+    get_amp_param(dev, target)
 }
 
 /// Verify a native full-buffer copy: the target's packed image (`0x01`) must match

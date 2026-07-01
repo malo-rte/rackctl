@@ -149,6 +149,16 @@ id (the byte2 of a live `11 <model> <index>` read), and *`target` is the indirec
 pointer* — it identifies the actual parameter slot in the patch the index resolves to.
 This is the "index into a table that points at the real parameter" the device uses.
 
+*Addressing amp parameters (hardware-verified, fw `0157`).* The `index` is *unstable*
+— it is reassigned on every reload, so it must be read live. Address a parameter by its
+stable `target`: read the table block (`01 21`), find the record with that target, and
+use its current `index`. The CLI does exactly this — `scan amp` dumps the table
+(target / value / live index) and `get <target>` reads a value. Note two limits found
+on this unit: a *single-parameter* read `01 11 21 <index>` gets *no reply* (only the
+whole-table read `01 21` answers), and a *per-parameter write* `00 11 21 <index> <v>` is
+*not applied* (the value does not change) — so live amp editing goes through MIDI CC
+(`Bn <cc> <v>`), and a full patch change goes through the aggregate `0x01` write.
+
 Requesting every populated block id (a *small paced batch* — not a flood) reads the
 whole patch without per-parameter polling. Other blocks seen on one patch: `0x05` name,
 `0x08` FX-chain routing, `0x07` a small config word, `0x01` the packed blob, and several
