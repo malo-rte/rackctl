@@ -298,17 +298,34 @@ pub fn copy_slot(
     Ok(verify_aggregate(&source, &after))
 }
 
+/// How many times to retry a required single-block read. The unit occasionally
+/// drops one reply; a whole-bank capture tolerates that (it skips the block), but
+/// a single *required* read (name, aggregate) would otherwise abort the operation.
+const READ_TRIES: u32 = 4;
+
+/// Read one block, retrying on a dropped reply. `label` names it for the error.
+fn read_block_retry(dev: &mut RawMidi, addr: &[u8], label: &str) -> Result<Vec<u8>, String> {
+    let mut last = String::new();
+    for _ in 0..READ_TRIES {
+        match dev.read_block(addr) {
+            Ok(bytes) => return Ok(bytes),
+            Err(e) => {
+                last = e.to_string();
+                sleep(BANK_PACE);
+            }
+        }
+    }
+    Err(format!("reading {label}: {last}"))
+}
+
 /// Read the current edit buffer's name (block `0x05`).
 fn read_name(dev: &mut RawMidi) -> Result<String, String> {
-    dev.read_block(&[NAME_BLOCK])
-        .map(|b| block_name(&b))
-        .map_err(|e| format!("reading name block: {e}"))
+    read_block_retry(dev, &[NAME_BLOCK], "name block").map(|b| block_name(&b))
 }
 
 /// Read the current edit buffer's full packed patch image (aggregate block `0x01`).
 fn read_aggregate(dev: &mut RawMidi) -> Result<Vec<u8>, String> {
-    dev.read_block(&[AGGREGATE_BLOCK])
-        .map_err(|e| format!("reading aggregate block: {e}"))
+    read_block_retry(dev, &[AGGREGATE_BLOCK], "aggregate block")
 }
 
 /// Verify a native full-buffer copy: the target's packed image (`0x01`) must match
