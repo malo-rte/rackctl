@@ -261,7 +261,7 @@ The Eleven Rack has *two* parameter namespaces, and the catalog spans both:
 . *MIDI CC numbers* (remote control) — the authoritative *names, per-model
   structure and value semantics* of every control, transcribed from the User
   Guide's Chapter 11 into `crates/eleven-model/src/param.rs` (the `param` module:
-  22 amp models, ~22 effects, the shared stepped-value tables, the `General`/`Misc`
+  26 amp models, ~22 effects, the shared stepped-value tables, the `General`/`Misc`
   controls, plus the amp section's 7 cabinet and 7 microphone models and the mic
   on/off-axis position from chapter 3). This is the canonical parameter list and
   drives the CLI `list` / `info` commands. See *MIDI CC reference* below.
@@ -275,10 +275,11 @@ are fully catalogued with a **CC per slot** (the mapping is not a positional for
 — Parametric EQ skips a slot and Multi Chorus's `Lo Cut`/`Width` share one CC across
 slots — so [`FxParam`] stores the CC for each of an effect's [`Effect::slots`]). The
 Expansion *amp* models are added too (J45, Black SR, Black Vib, Blue Line Bass, MS-30,
-RB-01b). The on-device CC Reference groups amps by shared-CC *family* (e.g.
-`PLEXIGLAS/J45`, `DC MOD/VIN/BASS`) rather than listing every individual model, so a
-few ambiguous family members (Plexiglas Vari/50w, a possible DC Bass / Lux Mini) are
-left for confirmation against the device's amp-select list.
+RB-01b, plus the family members Plexiglas Vari, Plexiglas 50W, DC Bass, Lux Mini). The
+on-device CC Reference groups amps by shared-CC *family* (e.g. `PLEXIGLAS/J45`, `DC
+MOD/VIN/BASS`) rather than listing every individual model, so those last four names are
+*inferred from the family groupings* and each reuses its family's CC layout — worth a
+final check against the device's amp-select list.
 . *SysEx addresses* (`11 <block> <index>`) — what the editor actually reads/writes.
   The block byte is *model/slot-specific* and the index is a small *sequential*
   offset; these are mapped by live capture (below), **not** derivable from the CC

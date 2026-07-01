@@ -559,6 +559,67 @@ pub const AMPS: &[Amp] = &[
             knob("noise-gate-release", 24),
         ],
     },
+    // Remaining Expansion family members — same CC layout as their family (device
+    // groups them as PLEXIGLAS/J45, DC MOD/VIN/BASS, LUX VIB/NORM/MINI). Names
+    // inferred from those groupings; confirm against the amp-select list.
+    Amp {
+        name: "plexiglas-vari",
+        params: &[
+            knob("presence", 13),
+            knob("bass", 14),
+            knob("middle", 15),
+            knob("treble", 16),
+            knob("volume-1", 21),
+            knob("volume-2", 10),
+            knob("noise-gate-threshold", 112),
+            knob("noise-gate-release", 3),
+        ],
+    },
+    Amp {
+        name: "plexiglas-50w",
+        params: &[
+            knob("presence", 13),
+            knob("bass", 14),
+            knob("middle", 15),
+            knob("treble", 16),
+            knob("volume-1", 21),
+            knob("volume-2", 10),
+            knob("noise-gate-threshold", 112),
+            knob("noise-gate-release", 3),
+        ],
+    },
+    Amp {
+        name: "dc-bass",
+        params: &[
+            knob("gain", 13),
+            knob("bass", 14),
+            knob("middle", 15),
+            knob("treble", 16),
+            knob("presence", 21),
+            knob("master", 10),
+            onoff("bright", 112),
+            knob("tremolo-speed", 3),
+            knob("tremolo-sync", 84),
+            knob("tremolo-depth", 24),
+            onoff("tremolo-on-off", 45),
+            knob("noise-gate-threshold", 23),
+            knob("noise-gate-release", 22),
+        ],
+    },
+    Amp {
+        name: "black-panel-lux-mini",
+        params: &[
+            knob("volume", 13),
+            knob("treble", 14),
+            knob("bass", 15),
+            knob("vibrato-speed", 16),
+            knob("vibrato-sync", 21),
+            knob("vibrato-intensity", 10),
+            onoff("vibrato-on-off", 112),
+            knob("noise-gate-threshold", 3),
+            knob("noise-gate-release", 84),
+        ],
+    },
 ];
 
 /// The speaker-cabinet models (User Guide ch.3, "The Speaker Cabinets"), as
