@@ -46,7 +46,7 @@ pub mod sysex;
 // public surface carries the shared `Error`/`Result` and the value codec.
 pub use rackctl_eleven_model::{
     AMP_GAIN, Block, BlockData, Error, Param, ParamRecord, Patch, PatchBackup, RawValue,
-    RestoreAction, Result, backup, error, param, tfx, value,
+    RestoreAction, Result, backup, error, param, patch, tfx, value,
 };
 
 #[cfg(feature = "alsa")]

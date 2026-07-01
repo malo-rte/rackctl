@@ -61,7 +61,8 @@ fn no_dir() -> String {
 /// If the file cannot be read, or its contents are not a valid `.tfx` patch.
 pub fn import_tfx(path: &Path) -> Result<Patch, String> {
     let bytes = std::fs::read(path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    rackctl_eleven::tfx::parse(&bytes).map_err(|e| e.to_string())
+    let raw = rackctl_eleven::tfx::parse(&bytes).map_err(|e| e.to_string())?;
+    Ok(Patch::from_tfx(&raw))
 }
 
 /// Save `patch` to the patch library as `name`, returning the file path.

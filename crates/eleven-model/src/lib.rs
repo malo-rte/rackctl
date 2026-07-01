@@ -17,9 +17,11 @@
 //!   stepped), transcribed from the User Guide's MIDI chapter. The amp section's
 //!   wire addressing (`11 21 <cc>`) is hardware-confirmed; see [`param`].
 //!
-//! The typed per-block patch model lands in a later step (see
-//! `docs/eleven-rack-roadmap.adoc`); for now this crate carries the value codec,
-//! the `.tfx` reader and the parameter catalog.
+//! * [`patch`] — the **typed, block-structured patch model** ([`patch::Patch`]):
+//!   a struct-per-block, named-field view built from a parsed `.tfx` file, grouped
+//!   the same way as the GX-700's `typed::Patch` so both products present a patch
+//!   identically. Effect values stay raw floats until their unit scaling is
+//!   decoded; see the module and `docs/eleven-rack-rig-format.adoc`.
 //!
 //! NOTE: Eleven Rack, Digidesign and Avid are trademarks of Avid Technology, Inc.
 //! This is an independent, unofficial project; the names identify the hardware.
@@ -28,12 +30,16 @@
 pub mod backup;
 pub mod error;
 pub mod param;
+pub mod patch;
 pub mod tfx;
 pub mod value;
 
 pub use backup::{BlockData, ParamRecord, PatchBackup, RestoreAction};
 pub use error::{Error, Result};
-pub use tfx::{Block, Param, Patch};
+/// The public `Patch` is the **typed, block-structured** model ([`patch::Patch`]);
+/// the raw `.tfx` file form remains available as [`tfx::Patch`].
+pub use patch::Patch;
+pub use tfx::{Block, Param};
 pub use value::{RawValue, VALUE_LEN};
 
 /// A confirmed `SysEx` parameter address: the amp **Gain** knob, on the one amp

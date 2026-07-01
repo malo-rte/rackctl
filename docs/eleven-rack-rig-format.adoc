@@ -100,6 +100,50 @@ holds a sentinel (`0x7FFFFFFF` or `0x80000000`). The amp's knobs live in block `
 as `sld1..sldO`; which slider is which knob is model-specific, matched from the live
 SysEx sweep + the manual's per-model knob list.
 
+NOTE: the *same two sentinels* appear in the global block too (e.g. an unused
+`RVol`/`Vol1`/`Vol2` reads `0x7FFFFFFF`/`0x80000000`), so "integers decode directly"
+holds *except* for those unset words. The typed model (below) surfaces every unset
+value — global or effect — uniformly as JSON `null`.
+
+== Typed patch model
+
+The library exposes a **typed, block-structured** patch
+(`rackctl-eleven-model::patch::Patch`) built from a parsed `.tfx` file, grouped the
+same way as the GX-700's `typed::Patch` so both products present a patch identically.
+It is the on-disk form saved by `import` and printed by `import --json`:
+
+[source,json]
+----
+{
+  "name": "Marshall JCM 800",
+  "global":      { "master_volume": null, "tempo_us": 497930, "input_gain": 5, ... },
+  "distortion":  { "bypass": false, "drive": 0.75, "tone": null, "level": 0.5 },
+  "amp":         { "sliders": { "sld1": 0.25, "sld2": null, ... } },
+  "delay":       { "bypass": true, "time": 0.4, ... },
+  "reverb":      { "bypass": false, "decay": 0.6, "mix": 0.3, ... }
+}
+----
+
+Mapping rules, chosen to stay *honest about what is decoded*:
+
+* Each of the eleven fixed blocks becomes a named struct (`global`, `volume_pedal`,
+  `wah`, `distortion`, `eq`, `modulation`, `modulation2`, `amp`, `fx_loop`, `delay`,
+  `reverb`); block order is the signal-chain order.
+* The stable `FourCC` vocabulary is exposed as **named fields**; any other tag a
+  patch carries is preserved verbatim under the block's `extra` map (or, for the
+  global block, `routing`), so a round trip never drops a parameter.
+* An **unset sentinel** decodes to `null` everywhere (`Option<i64>` for the global
+  ints, `Option<f32>` for the effect floats).
+* Effect values remain **raw 32-bit floats**: their scaling into display units
+  (dB, %, ms) is the open item below, so the JSON is faithful-but-raw, not yet in
+  human units. When that scaling is solved, only the field *values* change — the
+  shape stays the same.
+
+CAUTION: a `.tfx`-imported typed patch *cannot yet be written to the hardware*. The
+`.tfx` block ids and float values are a different namespace from the live SysEx
+address map (see below and `eleven-rack-sysex-protocol.adoc`); only a
+device-*captured* `PatchBackup` can be restored to a slot today.
+
 == Stable schema (key vocabulary)
 
 ~78 FourCC keys appear in ~99% of rigs -- the stable parameter vocabulary. Selected

@@ -115,10 +115,23 @@ pub fn import(tfx: &str, name: Option<&str>, json: bool) -> Result<()> {
     }
     let save_as = name.unwrap_or(&patch.name);
     let file = rackctl_eleven_lib::save_patch(save_as, &patch).map_err(anyhow::Error::msg)?;
+    let active = [
+        patch.volume_pedal.bypass,
+        patch.wah.bypass,
+        patch.distortion.bypass,
+        patch.eq.bypass,
+        patch.modulation.bypass,
+        patch.modulation2.bypass,
+        patch.fx_loop.bypass,
+        patch.delay.bypass,
+        patch.reverb.bypass,
+    ]
+    .iter()
+    .filter(|bypassed| !**bypassed)
+    .count();
     println!(
-        "imported {:?} ({} blocks) -> {}",
+        "imported {:?} ({active} effects active) -> {}",
         patch.name,
-        patch.blocks.len(),
         file.display()
     );
     Ok(())
