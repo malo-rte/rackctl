@@ -26,13 +26,14 @@
 //!   `TONE` on Tweed Lux but `PRESENCE` on Tweed Bass). Each [`Amp`] lists its
 //!   `(name, cc)` pairs; the amp-section globals (bypass, output, cab/mic) are in
 //!   [`AMP_GLOBAL`].
-//! * **Effects** — an effect's CCs depend on *where it sits in the chain*. The
-//!   dedicated-block effects (distortion, wah, delay, reverb, FX loop) have fixed
-//!   CCs; the modulation-type effects can occupy the **Mod / FX1 / FX2** slots and
-//!   take a slot-dependent CC. Every slot effect shares the *same positional CC
-//!   table per slot* ([`MOD_SLOT_CC`] / [`FX1_SLOT_CC`] / [`FX2_SLOT_CC`]): the CC
-//!   is a function of `(slot, parameter position)`, not of the effect. See
-//!   [`slot_cc`].
+//! * **Effects** — an effect's CCs depend on *where it sits in the chain*: a
+//!   [`Slot::Fixed`] dedicated-block effect (distortion, wah, delay, reverb, FX
+//!   loop) has one CC set, while a modulation-type effect occupying **Mod / FX1 /
+//!   FX2** has a different CC per slot. Each [`FxParam`] carries a `cc` array
+//!   aligned with its [`Effect::slots`]; use [`Effect::cc_in`]. (The per-slot CCs
+//!   are transcribed from the unit's on-device MIDI CC Reference — they are *not* a
+//!   positional formula: Parametric EQ skips a slot and Multi Chorus's `Lo Cut` /
+//!   `Width` share one CC across slots.)
 //!
 //! Values are **raw 7-bit device units** (`0..=127`). A [`Kind`] says how to read a
 //! value: a continuous [`Kind::Knob`], a [`Kind::Switch`] split at 64, or a
@@ -92,9 +93,9 @@ impl Step {
     }
 }
 
-/// One catalogued parameter: a display `name`, its MIDI `cc` (the remote-control
-/// continuous-controller number — *not* a `SysEx` address; for slot effects it is
-/// the primary-slot CC, see [`slot_cc`]), and its value [`Kind`].
+/// One catalogued amp/global parameter: a display `name`, its MIDI `cc` (the
+/// remote-control continuous-controller number — *not* a `SysEx` address), and its
+/// value [`Kind`]. (Effects use [`FxParam`], which carries a CC per slot.)
 #[derive(Debug, Clone, Copy)]
 pub struct Param {
     /// Human-readable control name as printed in the User Guide (e.g. `"PRESENCE"`).
@@ -131,14 +132,6 @@ const fn sw(name: &'static str, cc: u8, off: &'static str, on: &'static str) -> 
         name,
         cc,
         kind: Kind::Switch { off, on },
-    }
-}
-
-const fn stepped(name: &'static str, cc: u8, steps: &'static [Step]) -> Param {
-    Param {
-        name,
-        cc,
-        kind: Kind::Stepped(steps),
     }
 }
 
@@ -516,23 +509,8 @@ pub const MIC_POSITION: &[&str] = &["On-axis", "Off-axis"];
 // Effects.
 // ----------------------------------------------------------------------------
 
-/// Where an effect sits in the signal chain, which determines how its CCs are
-/// assigned.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Placement {
-    /// A dedicated block (distortion, wah, delay, reverb, FX loop): the [`Param`]
-    /// CCs are the real, fixed CCs.
-    Fixed,
-    /// A modulation-type effect that can occupy **Mod / FX1 / FX2**. The [`Param`]
-    /// `cc` is the *Mod-slot* CC; the FX1/FX2 CCs come from [`slot_cc`] by position.
-    ModFx,
-    /// An effect that can occupy **FX1 / FX2** only (graphic EQ, gray compressor).
-    /// The [`Param`] `cc` is the *FX1-slot* CC; the FX2 CC comes from [`slot_cc`].
-    Fx12,
-}
-
-/// A chain slot a slot-based effect can occupy.
+/// A chain slot an effect can occupy, or its dedicated block. An effect's CCs
+/// differ per slot; [`Slot::Fixed`] is a dedicated-block effect with one CC set.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Slot {
@@ -542,313 +520,402 @@ pub enum Slot {
     Fx1,
     /// General-purpose effect slot 2.
     Fx2,
+    /// A dedicated block (distortion, wah, delay, reverb, FX loop): one CC set.
+    Fixed,
 }
 
-/// CC numbers by parameter position when a slot effect sits in the **Mod** slot.
-pub const MOD_SLOT_CC: &[u8] = &[50, 61, 52, 53, 54, 57];
-/// CC numbers by parameter position when a slot effect sits in the **FX1** slot.
-pub const FX1_SLOT_CC: &[u8] = &[63, 20, 42, 60, 77, 116, 117];
-/// CC numbers by parameter position when a slot effect sits in the **FX2** slot.
-pub const FX2_SLOT_CC: &[u8] = &[86, 113, 114, 115, 96, 97, 98];
-
-/// The CC number for a slot effect's parameter at `position`, in the given `slot`.
-/// Returns `None` if the slot has no CC for that position.
-#[must_use]
-pub fn slot_cc(slot: Slot, position: usize) -> Option<u8> {
-    let table = match slot {
-        Slot::Mod => MOD_SLOT_CC,
-        Slot::Fx1 => FX1_SLOT_CC,
-        Slot::Fx2 => FX2_SLOT_CC,
-    };
-    table.get(position).copied()
+impl Slot {
+    /// Short label for listings.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Slot::Mod => "MOD",
+            Slot::Fx1 => "FX1",
+            Slot::Fx2 => "FX2",
+            Slot::Fixed => "fixed",
+        }
+    }
 }
 
-/// One effect and its parameters. For [`Placement::Fixed`] the [`Param`] CCs are
-/// final; for slot effects use [`slot_cc`] with the parameter's position to get the
-/// CC in a given [`Slot`].
+/// One effect parameter: its display `name`, value [`Kind`], and MIDI CC in each
+/// slot the effect can occupy — `cc` is aligned position-for-position with the
+/// owning [`Effect::slots`]. The Eleven Rack assigns a *different* CC to a control
+/// depending on whether the effect sits in Mod / FX1 / FX2 (and the mapping is not
+/// a simple positional formula — e.g. Parametric EQ skips a slot, and Multi
+/// Chorus's `Lo Cut`/`Width` share one CC across slots), so these come straight
+/// from the unit's on-device MIDI CC Reference.
+#[derive(Debug, Clone, Copy)]
+pub struct FxParam {
+    /// Control name as shown on the unit (e.g. `"Pre-Delay"`, `"Lo Cut"`).
+    pub name: &'static str,
+    /// Value kind (knob / switch / stepped).
+    pub kind: Kind,
+    /// MIDI CC per slot, aligned with [`Effect::slots`].
+    pub cc: &'static [u8],
+}
+
+const fn fk(name: &'static str, cc: &'static [u8]) -> FxParam {
+    FxParam {
+        name,
+        kind: Kind::Knob,
+        cc,
+    }
+}
+const fn fon(name: &'static str, cc: &'static [u8]) -> FxParam {
+    FxParam {
+        name,
+        kind: Kind::Switch {
+            off: "Off",
+            on: "On",
+        },
+        cc,
+    }
+}
+const fn fsw(
+    name: &'static str,
+    off: &'static str,
+    on: &'static str,
+    cc: &'static [u8],
+) -> FxParam {
+    FxParam {
+        name,
+        kind: Kind::Switch { off, on },
+        cc,
+    }
+}
+const fn fst(name: &'static str, steps: &'static [Step], cc: &'static [u8]) -> FxParam {
+    FxParam {
+        name,
+        kind: Kind::Stepped(steps),
+        cc,
+    }
+}
+
+/// One effect: the slots it can occupy and its parameters (each carrying a CC per
+/// slot). Transcribed from the on-device MIDI CC Reference (which, being firmware-
+/// generated, includes the Expansion Pack effects the base User Guide lacks).
 #[derive(Debug, Clone, Copy)]
 pub struct Effect {
-    /// Effect name as in the User Guide.
+    /// Effect name.
     pub name: &'static str,
-    /// How the effect is placed in the chain.
-    pub placement: Placement,
-    /// The effect's parameters, in chart order (the index is the slot position).
-    pub params: &'static [Param],
+    /// The slots this effect occupies, in the order its [`FxParam::cc`] arrays use.
+    pub slots: &'static [Slot],
+    /// The effect's parameters.
+    pub params: &'static [FxParam],
 }
 
 impl Effect {
     /// Find a parameter by case-insensitive name.
     #[must_use]
-    pub fn param(&self, name: &str) -> Option<&Param> {
+    pub fn param(&self, name: &str) -> Option<&FxParam> {
         self.params
             .iter()
             .find(|p| p.name.eq_ignore_ascii_case(name))
     }
+
+    /// The CC of parameter `p` when this effect sits in `slot`, if it can.
+    #[must_use]
+    pub fn cc_in(&self, p: &FxParam, slot: Slot) -> Option<u8> {
+        let i = self.slots.iter().position(|&s| s == slot)?;
+        p.cc.get(i).copied()
+    }
 }
 
-/// All catalogued effects (User Guide Ch.11).
+const MOD_FX: &[Slot] = &[Slot::Mod, Slot::Fx1, Slot::Fx2];
+const FX12: &[Slot] = &[Slot::Fx1, Slot::Fx2];
+const FIXED: &[Slot] = &[Slot::Fixed];
+
+/// All catalogued effects, with per-slot CCs (base User Guide Ch.11 plus the
+/// Expansion Pack effects, all from the on-device MIDI CC Reference).
 pub const EFFECTS: &[Effect] = &[
-    // --- Distortion block (BYPASS 25) ---
+    // --- Distortion block (Bypass 25) ---
     Effect {
         name: "Black Op Distortion",
-        placement: Placement::Fixed,
+        slots: FIXED,
         params: &[
-            onoff("BYPASS", 25),
-            knob("DISTORTION", 27),
-            knob("CUT", 78),
-            knob("VOLUME", 79),
+            fon("Bypass", &[25]),
+            fk("Distortion", &[27]),
+            fk("Cut", &[78]),
+            fk("Volume", &[79]),
         ],
     },
     Effect {
         name: "Green JRC Overdrive",
-        placement: Placement::Fixed,
+        slots: FIXED,
         params: &[
-            onoff("BYPASS", 25),
-            knob("DRIVE", 27),
-            knob("TONE", 78),
-            knob("LEVEL", 79),
+            fon("Bypass", &[25]),
+            fk("Drive", &[27]),
+            fk("Tone", &[78]),
+            fk("Level", &[79]),
         ],
     },
     Effect {
         name: "Tri-Knob Fuzz",
-        placement: Placement::Fixed,
+        slots: FIXED,
         params: &[
-            onoff("BYPASS", 25),
-            knob("VOLUME", 27),
-            knob("SUSTAIN", 78),
-            knob("TONE", 79),
+            fon("Bypass", &[25]),
+            fk("Volume", &[27]),
+            fk("Sustain", &[78]),
+            fk("Tone", &[79]),
         ],
     },
-    // --- Wah block (BYPASS 43) ---
+    Effect {
+        name: "White Boost",
+        slots: FIXED,
+        params: &[
+            fon("Bypass", &[25]),
+            fk("Gain", &[27]),
+            fk("Treble", &[78]),
+            fk("Bass", &[79]),
+            fk("Volume", &[80]),
+        ],
+    },
+    Effect {
+        name: "DC Distortion",
+        slots: FIXED,
+        params: &[
+            fon("Bypass", &[25]),
+            fk("Gain", &[27]),
+            fk("Treble", &[78]),
+            fk("Bass", &[79]),
+            fk("Volume", &[80]),
+        ],
+    },
+    // --- Wah / Volume pedal ---
     Effect {
         name: "Black Wah",
-        placement: Placement::Fixed,
-        params: &[onoff("BYPASS", 43), knob("POSITION", 4)],
+        slots: FIXED,
+        params: &[fon("Bypass", &[43]), fk("Position", &[4])],
     },
     Effect {
         name: "Shine Wah",
-        placement: Placement::Fixed,
-        params: &[onoff("BYPASS", 43), knob("POSITION", 4)],
+        slots: FIXED,
+        params: &[fon("Bypass", &[43]), fk("Position", &[4])],
     },
-    // --- Delay block (BYPASS 28) ---
+    Effect {
+        name: "Volume Pedal",
+        slots: FIXED,
+        params: &[fon("Bypass", &[75]), fk("Position", &[7])],
+    },
+    Effect {
+        name: "Tuner",
+        slots: FIXED,
+        params: &[fon("Bypass", &[69])],
+    },
+    // --- Delay block (Bypass 28) ---
     Effect {
         name: "BBD Delay",
-        placement: Placement::Fixed,
+        slots: FIXED,
         params: &[
-            onoff("BYPASS", 28),
-            knob("DELAY", 62),
-            stepped("SYNC", 33, FX_SYNC_STEPS),
-            knob("MIX", 85),
-            knob("FEEDBACK", 35),
-            knob("INPUT LEVEL", 87),
-            sw("MOD", 34, "Chorus", "Vibrato"),
-            knob("DEPTH", 48),
-            onoff("NOISE", 55),
-            onoff("EXPANDED DELAY", 49),
+            fon("Bypass", &[28]),
+            fk("Delay", &[62]),
+            fst("Sync", FX_SYNC_STEPS, &[33]),
+            fk("Mix", &[85]),
+            fk("Feedback", &[35]),
+            fk("Input Level", &[87]),
+            fsw("Mod", "Chorus", "Vibrato", &[34]),
+            fk("Depth", &[48]),
+            fon("Noise", &[55]),
+            fon("Expanded Delay", &[49]),
         ],
     },
     Effect {
         name: "Tape Echo",
-        placement: Placement::Fixed,
+        slots: FIXED,
         params: &[
-            onoff("BYPASS", 28),
-            knob("DELAY", 62),
-            stepped("SYNC", 33, FX_SYNC_STEPS),
-            knob("MIX", 85),
-            knob("FEEDBACK", 35),
-            knob("REC LEVEL", 87),
-            knob("HEAD", 34),
-            knob("WOW", 48),
-            onoff("HISS", 55),
-            onoff("EXPANDED DELAY", 49),
+            fon("Bypass", &[28]),
+            fk("Delay", &[62]),
+            fst("Sync", FX_SYNC_STEPS, &[33]),
+            fk("Mix", &[85]),
+            fk("Feedback", &[35]),
+            fk("Rec Level", &[87]),
+            fk("Head", &[34]),
+            fk("Wow", &[48]),
+            fon("Hiss", &[55]),
+            fon("Expanded Delay", &[49]),
         ],
     },
-    // --- Reverb block (BYPASS 36) ---
+    Effect {
+        name: "Dyn Delay",
+        slots: FIXED,
+        params: &[
+            fon("Bypass", &[28]),
+            fk("Delay", &[62]),
+            fst("Sync", FX_SYNC_STEPS, &[33]),
+            fk("Mix", &[85]),
+            fk("Feedback", &[35]),
+            fk("Mode", &[87]),
+            fk("Ratio", &[34]),
+            fk("Hi Cut", &[48]),
+            fk("Lo Cut", &[49]),
+            fk("Width", &[55]),
+            fk("EM Rate", &[59]),
+            fk("EM Feedback", &[72]),
+            fk("EM Mix", &[73]),
+        ],
+    },
+    // --- Reverb block (Bypass 36) / FX Loop ---
     Effect {
         name: "Blackpanel Spring Reverb",
-        placement: Placement::Fixed,
+        slots: FIXED,
         params: &[
-            onoff("BYPASS", 36),
-            knob("MIX", 18),
-            knob("DECAY", 38),
-            knob("TONE", 40),
+            fon("Bypass", &[36]),
+            fk("Mix", &[18]),
+            fk("Decay", &[38]),
+            fk("Tone", &[40]),
         ],
     },
     Effect {
         name: "Eleven SR (Stereo Reverb)",
-        placement: Placement::Fixed,
+        slots: FIXED,
         params: &[
-            onoff("BYPASS", 36),
-            knob("MIX", 18),
-            knob("DECAY", 38),
-            knob("TONE", 40),
-            knob("PRE-DELAY", 39),
-            stepped("TYPE", 76, REVERB_TYPE_STEPS),
+            fon("Bypass", &[36]),
+            fk("Mix", &[18]),
+            fk("Decay", &[38]),
+            fk("Tone", &[40]),
+            fk("Pre-Delay", &[39]),
+            fst("Type", REVERB_TYPE_STEPS, &[76]),
         ],
     },
-    // --- FX Loop block ---
     Effect {
         name: "FX Loop",
-        placement: Placement::Fixed,
+        slots: FIXED,
         params: &[
-            onoff("BYPASS", 107),
-            knob("SEND", 19),
-            knob("RETURN", 108),
-            knob("MIX", 88),
+            fon("Bypass", &[107]),
+            fk("Send", &[19]),
+            fk("Return", &[108]),
+            fk("Mix", &[88]),
         ],
     },
-    // --- Misc single-CC effects ---
-    Effect {
-        name: "Tuner",
-        placement: Placement::Fixed,
-        params: &[onoff("BYPASS", 69)],
-    },
-    Effect {
-        name: "Tap Tempo",
-        placement: Placement::Fixed,
-        params: &[knob("TAP", 64)],
-    },
-    Effect {
-        name: "Volume Pedal",
-        placement: Placement::Fixed,
-        params: &[onoff("BYPASS", 75), knob("POSITION", 7)],
-    },
-    // --- Mod/FX1/FX2 slot effects (cc = Mod-slot CC; use slot_cc for FX1/FX2) ---
+    // --- Mod/FX1/FX2 slot effects (cc = [Mod, FX1, FX2]) ---
     Effect {
         name: "C1 Chorus/Vibrato",
-        placement: Placement::ModFx,
+        slots: MOD_FX,
         params: &[
-            onoff("BYPASS", 50),
-            knob("CHORUS", 61),
-            knob("RATE", 52),
-            stepped("SYNC", 53, FX_SYNC_STEPS),
-            knob("DEPTH", 54),
-            sw("CHORUS/VIBRATO", 57, "Chorus", "Vibrato"),
+            fon("Bypass", &[50, 63, 86]),
+            fk("Chorus", &[61, 20, 113]),
+            fk("Rate", &[52, 42, 114]),
+            fst("Sync", FX_SYNC_STEPS, &[53, 60, 115]),
+            fk("Depth", &[54, 77, 96]),
+            fsw("Chorus/Vibrato", "Chorus", "Vibrato", &[57, 116, 97]),
         ],
     },
     Effect {
         name: "Flanger",
-        placement: Placement::ModFx,
+        slots: MOD_FX,
         params: &[
-            onoff("BYPASS", 50),
-            knob("PRE-DELAY", 61),
-            knob("DEPTH", 52),
-            knob("RATE", 53),
-            stepped("SYNC", 54, FX_SYNC_STEPS),
-            knob("FEEDBACK", 57),
+            fon("Bypass", &[50, 63, 86]),
+            fk("Pre-Delay", &[61, 20, 113]),
+            fk("Depth", &[52, 42, 114]),
+            fk("Rate", &[53, 60, 115]),
+            fst("Sync", FX_SYNC_STEPS, &[54, 77, 96]),
+            fk("Feedback", &[57, 116, 97]),
         ],
     },
     Effect {
         name: "Orange Phaser",
-        placement: Placement::ModFx,
+        slots: MOD_FX,
         params: &[
-            onoff("BYPASS", 50),
-            knob("RATE", 61),
-            stepped("SYNC", 52, FX_SYNC_STEPS),
+            fon("Bypass", &[50, 63, 86]),
+            fk("Rate", &[61, 20, 113]),
+            fst("Sync", FX_SYNC_STEPS, &[52, 42, 114]),
         ],
     },
     Effect {
         name: "Roto Speaker",
-        placement: Placement::ModFx,
+        slots: MOD_FX,
         params: &[
-            onoff("BYPASS", 50),
-            stepped("SPEED", 61, ROTO_SPEED_STEPS),
-            knob("BALANCE", 52),
-            stepped("TYPE", 53, ROTO_TYPE_STEPS),
+            fon("Bypass", &[50, 63, 86]),
+            fst("Speed", ROTO_SPEED_STEPS, &[61, 20, 113]),
+            fk("Balance", &[52, 42, 114]),
+            fst("Type", ROTO_TYPE_STEPS, &[53, 60, 115]),
         ],
     },
     Effect {
         name: "Vibe Phaser",
-        placement: Placement::ModFx,
+        slots: MOD_FX,
         params: &[
-            onoff("BYPASS", 50),
-            knob("VOLUME", 61),
-            knob("DEPTH", 52),
-            knob("RATE", 53),
-            stepped("SYNC", 54, FX_SYNC_STEPS),
-            sw("CHORUS/VIBRATO", 57, "Chorus", "Vibrato"),
+            fon("Bypass", &[50, 63, 86]),
+            fk("Volume", &[61, 20, 113]),
+            fk("Depth", &[52, 42, 114]),
+            fk("Rate", &[53, 60, 115]),
+            fst("Sync", FX_SYNC_STEPS, &[54, 77, 96]),
+            fsw("Chorus/Vibrato", "Chorus", "Vibrato", &[57, 116, 97]),
         ],
     },
-    // --- FX1/FX2-only slot effects (cc = FX1-slot CC; use slot_cc for FX2) ---
+    Effect {
+        name: "Multi Chorus",
+        slots: MOD_FX,
+        params: &[
+            fon("Bypass", &[50, 63, 86]),
+            fk("Rate", &[61, 20, 113]),
+            fst("Sync", FX_SYNC_STEPS, &[52, 42, 114]),
+            fk("Depth", &[53, 60, 115]),
+            fk("Pre-Delay", &[54, 77, 96]),
+            fk("Mix", &[57, 116, 97]),
+            fsw("Triangle/Sine", "Triangle", "Sine", &[51, 117, 98]),
+            fk("Voices", &[56, 118, 99]),
+            fk("Lo Cut", &[89, 89, 89]),
+            fk("Width", &[90, 90, 90]),
+        ],
+    },
+    // --- FX1/FX2 slot effects (cc = [FX1, FX2]) ---
     Effect {
         name: "Graphic EQ",
-        placement: Placement::Fx12,
+        slots: FX12,
         params: &[
-            onoff("BYPASS", 63),
-            knob("100 Hz", 20),
-            knob("370 Hz", 42),
-            knob("800 Hz", 60),
-            knob("2 kHz", 77),
-            knob("3.25 kHz", 116),
-            knob("OUTPUT", 117),
+            fon("Bypass", &[63, 86]),
+            fk("100 Hz", &[20, 113]),
+            fk("370 Hz", &[42, 114]),
+            fk("800 Hz", &[60, 115]),
+            fk("2 kHz", &[77, 96]),
+            fk("3.25 kHz", &[116, 97]),
+            fk("Output", &[117, 98]),
+        ],
+    },
+    Effect {
+        name: "Parametric EQ",
+        slots: FX12,
+        params: &[
+            fon("Bypass", &[63, 86]),
+            fk("L Gain", &[20, 113]),
+            fk("LM Gain", &[42, 114]),
+            fk("HM Gain", &[77, 96]),
+            fk("H Gain", &[116, 97]),
+            fk("Output", &[117, 98]),
+            fk("L Freq", &[118, 99]),
+            fk("L Q", &[5, 37]),
+            fk("LM Freq", &[119, 46]),
+            fk("LM Q", &[9, 47]),
+            fk("HM Freq", &[12, 58]),
+            fk("HM Q", &[26, 109]),
+            fk("H Freq", &[29, 110]),
+            fk("H Q", &[30, 70]),
         ],
     },
     Effect {
         name: "Gray Compressor",
-        placement: Placement::Fx12,
-        params: &[onoff("BYPASS", 63), knob("SUSTAIN", 20), knob("LEVEL", 42)],
-    },
-    // --- Expansion Pack effects (firmware 2.x) ---
-    // Names are the device's own (block 0x20 model catalog). Their full parameter
-    // lists await the Expansion Pack documentation (the base User Guide v8.0.4
-    // predates them); only BYPASS is known, from the block/slot CC scheme. These
-    // names appear in [`PARAMS_PENDING`].
-    Effect {
-        name: "Multi Chorus",
-        placement: Placement::ModFx,
-        params: &[onoff("BYPASS", 50)],
-    },
-    Effect {
-        name: "Parametric EQ",
-        placement: Placement::Fx12,
-        params: &[onoff("BYPASS", 63)],
+        slots: FX12,
+        params: &[
+            fon("Bypass", &[63, 86]),
+            fk("Sustain", &[20, 113]),
+            fk("Level", &[42, 114]),
+        ],
     },
     Effect {
         name: "Dyn3 Compressor",
-        placement: Placement::Fx12,
-        params: &[onoff("BYPASS", 63)],
-    },
-    Effect {
-        name: "White Boost",
-        placement: Placement::Fixed,
-        params: &[onoff("BYPASS", 25)],
-    },
-    Effect {
-        name: "DC Distortion",
-        placement: Placement::Fixed,
-        params: &[onoff("BYPASS", 25)],
-    },
-    Effect {
-        name: "Dyn Delay",
-        placement: Placement::Fixed,
-        params: &[onoff("BYPASS", 28)],
-    },
-    Effect {
-        name: "EP Tape Echo",
-        placement: Placement::Fixed,
-        params: &[onoff("BYPASS", 28)],
+        slots: FX12,
+        params: &[
+            fon("Bypass", &[63, 86]),
+            fk("Threshold", &[20, 113]),
+            fk("Attack", &[42, 114]),
+            fk("Release", &[60, 115]),
+            fk("Gain", &[77, 96]),
+            fk("Ratio", &[116, 97]),
+            fk("Knee", &[117, 98]),
+        ],
     },
 ];
-
-/// Effects whose full parameter set is *not yet catalogued* — the Expansion Pack
-/// additions, present in [`EFFECTS`] by name (and BYPASS) but awaiting the
-/// Expansion Pack CC chart for the rest of their parameters.
-pub const PARAMS_PENDING: &[&str] = &[
-    "Multi Chorus",
-    "Parametric EQ",
-    "Dyn3 Compressor",
-    "White Boost",
-    "DC Distortion",
-    "Dyn Delay",
-    "EP Tape Echo",
-];
-
-/// Whether `name` is an effect present by name but with parameters still pending
-/// (see [`PARAMS_PENDING`]).
-#[must_use]
-pub fn params_pending(name: &str) -> bool {
-    PARAMS_PENDING.iter().any(|p| p.eq_ignore_ascii_case(name))
-}
 
 // ----------------------------------------------------------------------------
 // General / frequently-used and miscellaneous controls.
@@ -918,45 +985,58 @@ mod tests {
     }
 
     #[test]
-    fn slot_cc_tables_align_with_modfx_primary_cc() {
-        // For a ModFx effect, each param's stored cc is the Mod-slot CC at its
-        // position, and FX1/FX2 come from the slot tables.
+    fn effect_per_slot_cc_and_alignment() {
+        // Every FxParam's cc array length matches its effect's slot count, and all
+        // CCs are valid 7-bit values.
+        for e in EFFECTS {
+            for p in e.params {
+                assert_eq!(
+                    p.cc.len(),
+                    e.slots.len(),
+                    "{} / {} slot/cc mismatch",
+                    e.name,
+                    p.name
+                );
+                for &c in p.cc {
+                    assert!(c <= 127, "{} / {} cc {c} out of range", e.name, p.name);
+                }
+            }
+        }
+        // cc_in resolves the right per-slot CC (C1 Chorus Bypass: Mod 50 / FX1 63 / FX2 86).
         let c1 = effect("C1 Chorus/Vibrato").unwrap();
-        for (pos, p) in c1.params.iter().enumerate() {
-            assert_eq!(slot_cc(Slot::Mod, pos), Some(p.cc));
-            assert_eq!(slot_cc(Slot::Fx1, pos), FX1_SLOT_CC.get(pos).copied());
-            assert_eq!(slot_cc(Slot::Fx2, pos), FX2_SLOT_CC.get(pos).copied());
-        }
-    }
-
-    #[test]
-    fn fx12_primary_cc_is_fx1_slot() {
-        let eq = effect("Graphic EQ").unwrap();
-        for (pos, p) in eq.params.iter().enumerate() {
-            assert_eq!(slot_cc(Slot::Fx1, pos), Some(p.cc));
-        }
+        let byp = c1.param("Bypass").unwrap();
+        assert_eq!(c1.cc_in(byp, Slot::Mod), Some(50));
+        assert_eq!(c1.cc_in(byp, Slot::Fx1), Some(63));
+        assert_eq!(c1.cc_in(byp, Slot::Fx2), Some(86));
     }
 
     #[test]
     fn stepped_describe_picks_the_right_label() {
         let rev = effect("Eleven SR (Stereo Reverb)").unwrap();
-        let ty = rev.param("TYPE").unwrap();
+        let ty = rev.param("Type").unwrap();
         assert_eq!(ty.kind.describe(70), "Concert Hall");
         assert_eq!(ty.kind.describe(0), "Echo Room");
         assert_eq!(ty.kind.describe(127), "Early Reflect 2");
     }
 
     #[test]
-    fn expansion_pack_effects_present_but_flagged_pending() {
-        for name in PARAMS_PENDING {
-            let fx = effect(name).unwrap_or_else(|| panic!("{name} in EFFECTS"));
-            // Present with at least a BYPASS, and flagged as parameters-pending.
-            assert!(fx.param("BYPASS").is_some(), "{name} has BYPASS");
-            assert!(params_pending(name));
-        }
-        // A fully-catalogued effect is not flagged pending.
-        assert!(!params_pending("Graphic EQ"));
-        assert_eq!(PARAMS_PENDING.len(), 7);
+    fn expansion_effects_now_fully_catalogued() {
+        // The Expansion Pack effects are present with their full parameters.
+        let peq = effect("Parametric EQ").unwrap();
+        assert_eq!(peq.slots, [Slot::Fx1, Slot::Fx2]);
+        assert_eq!(peq.params.len(), 14);
+        assert_eq!(peq.cc_in(peq.param("H Q").unwrap(), Slot::Fx2), Some(70));
+        // Multi Chorus: Lo Cut/Width share one CC across all slots.
+        let mc = effect("Multi Chorus").unwrap();
+        let lo = mc.param("Lo Cut").unwrap();
+        assert_eq!(mc.cc_in(lo, Slot::Mod), Some(89));
+        assert_eq!(mc.cc_in(lo, Slot::Fx2), Some(89));
+        // White Boost / DC Distortion are fixed-block, 5 params.
+        assert_eq!(effect("DC Distortion").unwrap().slots, [Slot::Fixed]);
+        assert_eq!(
+            effect("White Boost").unwrap().param("Volume").unwrap().cc,
+            [80]
+        );
     }
 
     #[test]

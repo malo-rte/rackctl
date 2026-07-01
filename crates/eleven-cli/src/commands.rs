@@ -125,16 +125,42 @@ pub fn rigs() {
 
 // ---- parameter catalog (offline; no device) ----
 
-/// Print one `param::Param` as a catalog row: name, MIDI CC and value kind.
-fn print_param(p: &rackctl_eleven::param::Param) {
+/// A short label for a value kind.
+fn kind_label(kind: rackctl_eleven::param::Kind) -> String {
     use rackctl_eleven::param::Kind;
-    let kind = match p.kind {
+    match kind {
         Kind::Knob => "knob 0-127".to_string(),
         Kind::Switch { off, on } => format!("switch <64={off} >=64={on}"),
         Kind::Stepped(steps) => format!("stepped ({} positions)", steps.len()),
         _ => "?".to_string(),
-    };
-    println!("  {:<22} CC {:>3}   {kind}", p.name, p.cc);
+    }
+}
+
+/// Print one amp/global `param::Param` as a catalog row: name, MIDI CC and kind.
+fn print_param(p: &rackctl_eleven::param::Param) {
+    println!("  {:<22} CC {:>3}   {}", p.name, p.cc, kind_label(p.kind));
+}
+
+/// Print one effect `param::FxParam` row: name, per-slot CCs, and kind.
+fn print_fx_param(fx: &rackctl_eleven::param::Effect, p: &rackctl_eleven::param::FxParam) {
+    let ccs: Vec<String> = fx
+        .slots
+        .iter()
+        .zip(p.cc)
+        .map(|(s, c)| {
+            if fx.slots.len() == 1 {
+                format!("CC {c}")
+            } else {
+                format!("{}:{c}", s.label())
+            }
+        })
+        .collect();
+    println!(
+        "  {:<16} {:<26} {}",
+        p.name,
+        ccs.join(" "),
+        kind_label(p.kind)
+    );
 }
 
 /// List the parameter catalog: amp models and effects (User Guide Ch.11). With an
@@ -169,14 +195,10 @@ pub fn list(filter: Option<&str>) {
     }
     for fx in param::EFFECTS {
         if matches(fx.name) {
-            let pending = if param::params_pending(fx.name) {
-                "   [Expansion Pack — parameters pending]"
-            } else {
-                ""
-            };
-            println!("\nEffect: {}   ({:?}){pending}", fx.name, fx.placement);
+            let slots: Vec<&str> = fx.slots.iter().map(|s| s.label()).collect();
+            println!("\nEffect: {}   (slots: {})", fx.name, slots.join("/"));
             for p in fx.params {
-                print_param(p);
+                print_fx_param(fx, p);
             }
         }
     }
@@ -201,19 +223,20 @@ pub fn info(name: &str) -> Result<()> {
         }
     }
     for fx in param::EFFECTS {
-        for (pos, p) in fx.params.iter().enumerate() {
+        for p in fx.params {
             if hit(p.name) {
                 found = true;
-                println!(
-                    "{} / {}  (MIDI CC {}, {:?}, position {pos})",
-                    fx.name, p.name, p.cc, fx.placement
-                );
-                if fx.placement != param::Placement::Fixed {
-                    let mod_cc = param::slot_cc(param::Slot::Mod, pos);
-                    let fx1 = param::slot_cc(param::Slot::Fx1, pos);
-                    let fx2 = param::slot_cc(param::Slot::Fx2, pos);
-                    println!("  MIDI CC by slot:  Mod {mod_cc:?}  FX1 {fx1:?}  FX2 {fx2:?}");
-                }
+                let ccs = if fx.slots.len() == 1 {
+                    p.cc.first().map(u8::to_string).unwrap_or_default()
+                } else {
+                    fx.slots
+                        .iter()
+                        .zip(p.cc)
+                        .map(|(s, c)| format!("{}={c}", s.label()))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                println!("{} / {}  (MIDI CC {ccs})", fx.name, p.name);
                 describe_kind(p.kind);
             }
         }

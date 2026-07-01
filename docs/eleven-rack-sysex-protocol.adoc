@@ -267,13 +267,15 @@ The Eleven Rack has *two* parameter namespaces, and the catalog spans both:
   drives the CLI `list` / `info` commands. See *MIDI CC reference* below.
 +
 The base User Guide (v8.0.4) *predates the Expansion Pack (firmware 2.x)*, so its
-CC chart lacks the added amps and effects. The 7 Expansion effects the device
-reports in its `0x20` catalog (Multi Chorus, Parametric EQ, Dyn3 Compressor, White
-Boost, DC Distortion, Dyn Delay, EP Tape Echo) are in the catalog *by name* with
-their known BYPASS CC (`param::PARAMS_PENDING`); their remaining parameters and the
-Expansion amp models await the Expansion Pack documentation. The CC *scheme* is
-already known (positional slot CCs; amp CC slots), so those fill in mechanically
-once the chart is available.
+printed CC chart lacks the added amps and effects — but the unit's *on-device* MIDI
+CC Reference (User Options) is firmware-generated and includes them. It was
+transcribed from photographs of the screen: all *effects* (base + the Expansion
+Multi Chorus, Parametric EQ, Dyn3 Compressor, White Boost, DC Distortion, Dyn Delay)
+are fully catalogued with a **CC per slot** (the mapping is not a positional formula
+— Parametric EQ skips a slot and Multi Chorus's `Lo Cut`/`Width` share one CC across
+slots — so [`FxParam`] stores the CC for each of an effect's [`Effect::slots`]). The
+Expansion *amp* models (J45, Black SR/Vib, Blue Line Bass, MS-30, RB-01b, DC Bass, …)
+remain to be added from the same screens.
 . *SysEx addresses* (`11 <block> <index>`) — what the editor actually reads/writes.
   The block byte is *model/slot-specific* and the index is a small *sequential*
   offset; these are mapped by live capture (below), **not** derivable from the CC
