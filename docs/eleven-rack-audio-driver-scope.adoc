@@ -4,17 +4,21 @@ Scoping study for a Linux userspace driver that activates the Eleven Rack's
 proprietary USB audio session. Written 2026-07-02 from live-device descriptors
 (`0dba:b011`) and the editor USB captures (`11/eleven-save-*.pcapng`).
 
-== Why this matters (two payoffs from one project)
+== Status: the original motivation (editing) is MOOT — editing needs no audio
 
-1. *Parameter editing.* Host parameter writes (`00 11 <block> <index> <value>`,
-   format now known — see `eleven-rack-sysex-protocol.adoc`) are *rejected* unless
-   the unit is in an active editor session. Every MIDI-only reproduction has failed;
-   the one factor present the whole time the official editor's writes were accepted
-   is a *continuously running USB audio stream*. Leading theory (unproven but well
-   supported): **the unit gates host edits on an active audio session.** If true,
-   activating audio is the key that unlocks the whole GUI parameter editor.
-2. *Audio monitoring.* The same work gives Linux users the Eleven's USB audio
-   (guitar in / reamp / monitor), which no current Linux driver provides.
+CAUTION (2026-07-02): this doc was written believing host parameter edits were gated
+on an active audio session. *That was wrong* — host-set works over plain MIDI with the
+correct block address (see `eleven-rack-sysex-protocol.adoc`, "host parameter set
+WORKS"). The audio session is NOT required to edit. So this project is now only about:
+
+* *Audio monitoring.* Give Linux users the Eleven's USB audio (guitar in / reamp /
+  monitor), which no current driver provides — nice-to-have, no longer a blocker for
+  the GUI editor.
+
+The libusb activator + ISO streamer (`eleven-audio-probe`) already built for the
+disproven edit-gate test are the reusable starting point if/when Linux audio is
+pursued. The rest of this doc (USB topology, format, H1-H3 gate) stands as audio RE
+reference.
 
 == Why ALSA gives us nothing today
 

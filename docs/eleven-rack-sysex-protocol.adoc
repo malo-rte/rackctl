@@ -255,28 +255,31 @@ non-Digidesign SysEx the editor sends is the *standard Identity Request* (`F0 7E
 157 consecutive parameter sets with no interleaved reads, so once editing works you can
 blast sets.
 
-*Update (2026-07-02) — the write format is now known, and the gate is the audio
-session.* The editor's accepted parameter write is `F0 13 0B 0F 00 11 <block> <index>
-<4-byte value> F7`: opcode `0x00`, prefix `11`, block ∈ {`0x40,0x4E,0x5C,0x6A,0x78`}
-(step `0x0E`; `0x78` = amp), `<index>` in the live-index range `0x6F..0x7B` (the
-`scan amp` indices), then a 4-byte value. Our earlier `write_param` wrote block `0x21`
-with the value in the index slot — wrong on both counts. But sending the *correct*
-message (even a verbatim editor replay via `amidi`) still does nothing standalone:
-the blob is unchanged and `01 11 78 0D <idx>` reads a constant `00 00 00 00 10`.
+*RESOLVED (2026-07-02) — host parameter set WORKS; there is NO session gate.* The
+earlier "host-set is rejected / session-gated" conclusion was a **wrong-address
+artifact**: we addressed block `0x78`, which is not present in the loaded patch, so
+reads returned nothing and writes silently no-op'd. With a *valid* block the live
+parameter interface works over plain MIDI, nothing else running:
 
-Leading (well-supported) theory: **host edits are gated on an active USB audio
-session.** The editor always streams the unit's proprietary audio (continuous ISO on
-EP `0x81`/`0x83`) the whole time its writes are accepted; there is no discrete
-vendor/`SET_INTERFACE` "enable" message to replay. The Eleven's audio is *vendor
-class* (not UAC), so Linux exposes no PCM and cannot activate it today. => parameter
-editing and a Linux audio driver are the *same problem*. See
-`eleven-rack-audio-driver-scope.adoc` for the feasibility plan (a small libusb
-activator + a three-hypothesis edit-gate test).
+* Read:  `F0 13 0B 0F 01 11 <block> <index> F7` -> `12 11 <block> <index> <value>`.
+* Write: `F0 13 0B 0F 00 11 <block> <index> <4-byte value> F7`. Hardware-verified: the
+  value sticks (read-back shows it) *and* the captured aggregate blob changes (7 bytes
+  for one write) — so it lands in the **saveable** edit buffer. Read -> write ->
+  capture -> store persists an edit to a slot. (The trailing value byte is normalised
+  by the unit, e.g. writing `00` reads back as `0x10`.)
 
-Meanwhile, live parameter changes go through MIDI CC (`Bn <cc> <v>`) — but CC is
-*transient* (hardware-verified: it does not alter the captured blob, so it cannot be
-saved) — and a full patch change goes through the aggregate `0x01` write, which *is*
-saveable.
+`<block>` is one of the loaded patch's **active** blocks (e.g. `0x02..0x0c` for one
+patch, `0x40/0x4E/0x5C/0x6A/0x78` for another) — a block absent from the current patch
+gives no reply and no-ops on write. Enumerate a patch's live params by scanning
+`01 11 <block> <index>` and keeping the ones that answer.
+
+The whole "audio session gate" theory (and the `eleven-audio-probe` H1/H2 work) was
+chasing this false premise — the audio session is *not* required to edit. (The libusb
+ISO streamer remains useful for real Linux audio, task #66.)
+
+Note: MIDI CC (`Bn <cc> <v>`) is a *separate*, transient live control — it does NOT
+alter the captured blob, so CC changes are not saveable. Use the `00 11` write for
+editing that must persist.
 
 Requesting every populated block id (a *small paced batch* — not a flood) reads the
 whole patch without per-parameter polling. Other blocks seen on one patch: `0x05` name,
