@@ -27,12 +27,14 @@
 //! (`SUBSYSTEM=="usb", ATTR{idVendor}=="0dba", ATTR{idProduct}=="b011", MODE="0660",
 //! TAG+="uaccess"`). Run with `sudo` if it can't open the device.
 
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use std::thread::sleep;
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use clap::Parser;
-use rusb::{DeviceHandle, GlobalContext};
+use libusb1_sys as ffi;
+use rusb::{DeviceHandle, GlobalContext, UsbContext};
 
 /// Digidesign Eleven Rack.
 const VID: u16 = 0x0dba;
@@ -127,11 +129,6 @@ fn main() -> Result<()> {
     }
     println!("\nH1 active: audio interfaces activated + class control setup replayed.");
 
-    // --- H2 (optional): also push ISO packets so the unit sees a live stream ---
-    if cli.iso {
-        stream_iso(&handle)?;
-    }
-
     println!(
         "\n>>> While this holds the session, test the edit gate in another terminal:\n\
          >>>   rackctl-eleven --port hw:2,0 --midi-log /tmp/g.log set '11 78 0d' 3f\n\
@@ -139,7 +136,15 @@ fn main() -> Result<()> {
          Holding for {}s (Ctrl-C to stop early; cleanup still runs on normal exit)...",
         cli.hold
     );
-    sleep(Duration::from_secs(cli.hold));
+
+    // --- H2 (optional): stream ISO packets so the unit sees a live audio session;
+    // this also does the "hold" (it pumps libusb events for `hold` seconds) ---
+    if cli.iso {
+        println!("H2: streaming ISO silence on EP {ISO_OUT_EP:#04x}/{ISO_IN_EP:#04x} ...");
+        stream_iso(&handle, cli.hold);
+    } else {
+        sleep(Duration::from_secs(cli.hold));
+    }
 
     // --- cleanup: idle alt, release, reattach any kernel driver ---
     for &iface in claimed.iter().rev() {
@@ -151,23 +156,109 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Hypothesis **H2**: stream ISO packets so the unit sees a live audio session.
-///
-/// NOT IMPLEMENTED — `rusb`'s safe API has no isochronous support. To add it:
-///   * Preferred: use the `nusb` crate (pure-Rust, async, supports ISO transfers).
-///   * Or drop to `libusb1-sys` in `unsafe`: `libusb_alloc_transfer(n_pkts)` +
-///     `libusb_fill_iso_transfer` for EP `0x03` (OUT, silence buffer) and `0x83`
-///     (IN), `libusb_set_iso_packet_lengths(t, 416)`, submit, then pump
-///     `libusb_handle_events` in a loop.
-///   * Cadence: interval 1 at high speed = 8 packets/ms; start with all-zero
-///     (silence) payloads of [`ISO_PACKET_BYTES`] on [`ISO_OUT_EP`], and drain
-///     [`ISO_IN_EP`]. If the gate opens on silence, the audio content never needs
-///     decoding (that would only be H3 — a full driver).
-fn stream_iso(_handle: &DeviceHandle<GlobalContext>) -> Result<()> {
-    let _ = (ISO_OUT_EP, ISO_IN_EP, ISO_PACKET_BYTES);
-    bail!(
-        "--iso (H2) not implemented: rusb has no ISO API. Implement via nusb or \
-         libusb1-sys async ISO — see the stream_iso() doc-comment and \
-         docs/eleven-rack-audio-driver-scope.adoc"
+/// Isochronous packets per transfer, and outstanding transfers per direction.
+const ISO_PKTS: usize = 8;
+const ISO_DEPTH: usize = 8;
+
+/// True while streaming; the completion callback resubmits transfers until this
+/// clears, then lets them drain.
+static STREAMING: AtomicBool = AtomicBool::new(true);
+/// Count of transfers still owned by libusb (submitted, not yet finally completed).
+static IN_FLIGHT: AtomicUsize = AtomicUsize::new(0);
+/// Diagnostics: total completions seen, and completions whose status != COMPLETED.
+static COMPLETED: AtomicUsize = AtomicUsize::new(0);
+static ERRORED: AtomicUsize = AtomicUsize::new(0);
+static LAST_STATUS: AtomicI32 = AtomicI32::new(0);
+
+/// libusb completion callback: resubmit while streaming, else account it drained.
+extern "system" fn on_iso(transfer: *mut ffi::libusb_transfer) {
+    // SAFETY: `transfer` is a live libusb transfer libusb hands back on completion.
+    unsafe {
+        COMPLETED.fetch_add(1, Ordering::Relaxed);
+        let status = (*transfer).status;
+        if status != ffi::constants::LIBUSB_TRANSFER_COMPLETED {
+            ERRORED.fetch_add(1, Ordering::Relaxed);
+            LAST_STATUS.store(status, Ordering::Relaxed);
+        }
+        if STREAMING.load(Ordering::Relaxed) && ffi::libusb_submit_transfer(transfer) == 0 {
+            return;
+        }
+    }
+    IN_FLIGHT.fetch_sub(1, Ordering::Relaxed);
+}
+
+/// Hypothesis **H2**: stream ISO packets (silence out, drain in) so the unit sees a
+/// live audio session, pumping libusb events for `hold_secs`. If the edit gate opens
+/// while this runs, the audio *content* never needs decoding — that would be H3.
+fn stream_iso(handle: &DeviceHandle<GlobalContext>, hold_secs: u64) {
+    let raw = handle.as_raw();
+    // Keep the packet buffers alive for the whole stream (their pointers live in the
+    // transfers). Silence = zeros for OUT; a scratch sink for IN.
+    let mut buffers: Vec<Vec<u8>> = Vec::new();
+    let mut transfers: Vec<*mut ffi::libusb_transfer> = Vec::new();
+
+    for &(endpoint, _label) in &[(ISO_OUT_EP, "out"), (ISO_IN_EP, "in")] {
+        for _ in 0..ISO_DEPTH {
+            let mut buf = vec![0u8; ISO_PKTS * ISO_PACKET_BYTES];
+            // SAFETY: alloc a transfer with room for ISO_PKTS packet descriptors and
+            // fill the fields libusb needs (the C `fill_iso_transfer` inline).
+            let t = unsafe { ffi::libusb_alloc_transfer(ISO_PKTS as i32) };
+            assert!(!t.is_null(), "libusb_alloc_transfer failed");
+            unsafe {
+                (*t).dev_handle = raw;
+                (*t).endpoint = endpoint;
+                (*t).transfer_type = ffi::constants::LIBUSB_TRANSFER_TYPE_ISOCHRONOUS;
+                (*t).timeout = 1000;
+                (*t).buffer = buf.as_mut_ptr();
+                (*t).length = (ISO_PKTS * ISO_PACKET_BYTES) as i32;
+                (*t).num_iso_packets = ISO_PKTS as i32;
+                (*t).callback = on_iso;
+                let descs =
+                    std::slice::from_raw_parts_mut((*t).iso_packet_desc.as_mut_ptr(), ISO_PKTS);
+                for d in descs {
+                    d.length = ISO_PACKET_BYTES as u32;
+                }
+            }
+            buffers.push(buf);
+            transfers.push(t);
+        }
+    }
+
+    // Submit them all, then pump events for the hold window.
+    for &t in &transfers {
+        // SAFETY: `t` is a filled, not-yet-submitted transfer.
+        if unsafe { ffi::libusb_submit_transfer(t) } == 0 {
+            IN_FLIGHT.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+    println!("  {} ISO transfers submitted", IN_FLIGHT.load(Ordering::Relaxed));
+
+    let ctx = handle.context().as_raw();
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(hold_secs) {
+        let tv = libc::timeval { tv_sec: 0, tv_usec: 100_000 };
+        // SAFETY: valid context + timeval; drives the completion callbacks.
+        unsafe { ffi::libusb_handle_events_timeout_completed(ctx, &tv, std::ptr::null_mut()) };
+    }
+
+    // Stop: cancel outstanding transfers and drain their final callbacks, then free.
+    STREAMING.store(false, Ordering::Relaxed);
+    for &t in &transfers {
+        unsafe { ffi::libusb_cancel_transfer(t) };
+    }
+    let drain = std::time::Instant::now();
+    while IN_FLIGHT.load(Ordering::Relaxed) > 0 && drain.elapsed() < Duration::from_secs(2) {
+        let tv = libc::timeval { tv_sec: 0, tv_usec: 50_000 };
+        unsafe { ffi::libusb_handle_events_timeout_completed(ctx, &tv, std::ptr::null_mut()) };
+    }
+    for &t in &transfers {
+        unsafe { ffi::libusb_free_transfer(t) };
+    }
+    drop(buffers);
+    println!(
+        "  ISO stream stopped. completions={} errored={} last_status={}",
+        COMPLETED.load(Ordering::Relaxed),
+        ERRORED.load(Ordering::Relaxed),
+        LAST_STATUS.load(Ordering::Relaxed),
     );
 }

@@ -10,5 +10,9 @@ description = "libusb probe: activate the Eleven Rack audio session to test the 
 
 [dependencies]
 rusb = "0.9"
+# Same libusb backend rusb uses (0.9 -> libusb1-sys 0.7), so `DeviceHandle::as_raw()`
+# is compatible — used directly for isochronous transfers (H2), which rusb can't do.
+libusb1-sys = "0.7"
+libc = "0.2"
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"

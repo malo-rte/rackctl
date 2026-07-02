@@ -112,9 +112,21 @@ reset the device and drop the MIDI interface).
   ALSA MIDI coexist cleanly). But a verbatim editor param-write still changes
   nothing (blob 0 differing bytes, amp table unchanged). So arming the endpoints +
   control setup is not enough.
-* Remaining difference from a live editor session: **actual ISO audio flowing**. The
-  endpoints are armed but idle. => the gate almost certainly needs **H2** — submit
-  ISO URBs so audio is really streaming.
+* **H2 tested → also NOT sufficient.** The probe now streams ISO on EP `0x03`/`0x83`
+  via `libusb1-sys` async transfers; it verifiably flows (≈12,000 clean completions
+  in 6 s, only the shutdown cancels error). With silence streaming *and* audio
+  active, the editor param-write STILL doesn't stick, and `01 11 78 0D …` reads
+  return nothing — the same as with no audio, whereas the editor's session always
+  gets those reads answered. So streaming silence audio does not open the param
+  interface.
+* *Reassessment:* the audio-session theory is weakened — a fully-flowing (silent)
+  audio stream changes nothing. Either the gate needs **H3** (real, clock-locked
+  PCM, not silence — much harder and uncertain), or it is **not audio at all** but a
+  MIDI session-open we haven't identified. The doc note "the editor's session always
+  gets `01 11` reads answered" points at a MIDI-side opener; the cold-connect
+  capture's *MIDI* stream (not yet fully mined) is the next place to look, and is far
+  cheaper than H3. The libusb ISO streamer built here is reusable for H3 / Linux
+  audio regardless.
 
 == Concrete next steps
 

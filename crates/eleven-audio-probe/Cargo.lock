@@ -120,6 +120,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "libc",
+ "libusb1-sys",
  "rusb",
 ]
 
