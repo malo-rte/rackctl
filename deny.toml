@@ -27,6 +27,11 @@ ignore = [
     # semver-compatible patched release is reachable yet; drop this once eframe's
     # tree moves to a fixed quick-xml. https://rustsec.org/advisories/RUSTSEC-2026-0194
     "RUSTSEC-2026-0194",
+    # `quick-xml` NsReader unbounded namespace-declaration allocation (memory-exhaustion
+    # DoS). Same transitive GUI-only quick-xml as RUSTSEC-2026-0194 above (a11y +
+    # Wayland; we never feed it untrusted XML); no semver-compatible fix reachable yet.
+    # Drop with 0194 once eframe's tree updates. https://rustsec.org/advisories/RUSTSEC-2026-0195
+    "RUSTSEC-2026-0195",
 ]
 
 [licenses]

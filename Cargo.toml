@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
 members = ["crates/*"]
+# Throwaway libusb diagnostic (system libusb dep) — kept out of the gate/CI build.
+# Build it directly: `cargo run --manifest-path crates/eleven-audio-probe/Cargo.toml`.
+exclude = ["crates/eleven-audio-probe"]
 
 [workspace.package]
 version = "0.8.0"

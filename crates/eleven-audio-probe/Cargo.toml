@@ -1,0 +1,14 @@
+# Throwaway diagnostic — NOT a workspace member (see the root Cargo.toml `exclude`).
+# Needs system libusb-1.0. Build/run directly:
+#   cargo run --manifest-path crates/eleven-audio-probe/Cargo.toml -- --help
+[package]
+name = "eleven-audio-probe"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "libusb probe: activate the Eleven Rack audio session to test the parameter-edit gate."
+
+[dependencies]
+rusb = "0.9"
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
