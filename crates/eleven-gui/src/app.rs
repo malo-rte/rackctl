@@ -595,6 +595,13 @@ impl App {
             || self.scene_capture.is_some()
     }
 
+    /// One predicate for every device-touching control (GUI-30): connected AND no
+    /// background load/write in flight. Gating on this stops a UI action from
+    /// interleaving MIDI on the port with the background read/write thread.
+    fn editable(&self) -> bool {
+        self.connected && !self.busy()
+    }
+
     // ---- Presets ----
 
     fn load_presets(&mut self) {
@@ -926,7 +933,7 @@ impl eframe::App for App {
 impl App {
     /// The User-bank list: a row per slot with audition, name edit, and buttons.
     fn show_patch_list(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
-        let writable = self.connected && !self.busy();
+        let writable = self.editable();
         ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
@@ -998,7 +1005,7 @@ impl App {
             label = label.color(Color32::LIGHT_RED);
         }
         if ui
-            .add_enabled(self.connected, egui::Button::new(label).frame(false))
+            .add_enabled(writable, egui::Button::new(label).frame(false))
             .on_hover_text("Audition")
             .clicked()
         {
@@ -1028,13 +1035,16 @@ impl App {
 impl App {
     /// Read-only Factory-preset browser: audition, or copy one to the target User slot.
     fn show_presets(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        let live = self.editable();
         ui.horizontal(|ui| {
-            if action_button(ui, format!("{} Load names", icon::LOAD), ActionKind::Read)
-                .on_hover_text("Reads each factory slot's name (slow — also auditions each)")
-                .clicked()
-            {
-                actions.push(Action::LoadPresets);
-            }
+            ui.add_enabled_ui(live, |ui| {
+                if action_button(ui, format!("{} Load names", icon::LOAD), ActionKind::Read)
+                    .on_hover_text("Reads each factory slot's name (slow — also auditions each)")
+                    .clicked()
+                {
+                    actions.push(Action::LoadPresets);
+                }
+            });
             ui.separator();
             ui.label("Copy target:");
             target_slot_picker(ui, self.target_slot, actions);
@@ -1049,7 +1059,7 @@ impl App {
                     .show(ui, |ui| {
                         for (slot, name) in &self.presets {
                             if ui
-                                .add_enabled(self.connected, copy_btn())
+                                .add_enabled(live, copy_btn())
                                 .on_hover_text("Copy to the target User slot")
                                 .clicked()
                             {
@@ -1057,7 +1067,7 @@ impl App {
                             }
                             if ui
                                 .add_enabled(
-                                    self.connected,
+                                    live,
                                     egui::Button::new(
                                         RichText::new(format!("F{slot:03}")).monospace(),
                                     )
@@ -1095,6 +1105,7 @@ impl App {
                 });
             return;
         }
+        let live = self.editable();
         ui.horizontal(|ui| {
             ui.label("Save current as:");
             let mut n = self.save_name.clone();
@@ -1104,9 +1115,12 @@ impl App {
             {
                 actions.push(Action::SetSaveName(n));
             }
-            if action_button(ui, format!("{} Save", icon::SAVE), ActionKind::Commit).clicked() {
-                actions.push(Action::SaveCurrentAs);
-            }
+            // Captures the live sound off the unit — needs the device idle.
+            ui.add_enabled_ui(live, |ui| {
+                if action_button(ui, format!("{} Save", icon::SAVE), ActionKind::Commit).clicked() {
+                    actions.push(Action::SaveCurrentAs);
+                }
+            });
         });
         ui.horizontal(|ui| {
             ui.label("Import .tfx:");
@@ -1139,12 +1153,15 @@ impl App {
             left.label(RichText::new("Backups — loadable").strong());
             for name in &self.lib_backups {
                 left.horizontal(|ui| {
-                    if action_button(ui, format!("{} Load", icon::LOAD), ActionKind::Commit)
-                        .on_hover_text("Restore onto the target slot")
-                        .clicked()
-                    {
-                        actions.push(Action::LoadBackup(name.clone()));
-                    }
+                    // Load restores onto the unit — needs the device idle.
+                    ui.add_enabled_ui(live, |ui| {
+                        if action_button(ui, format!("{} Load", icon::LOAD), ActionKind::Commit)
+                            .on_hover_text("Restore onto the target slot")
+                            .clicked()
+                        {
+                            actions.push(Action::LoadBackup(name.clone()));
+                        }
+                    });
                     if action_button(ui, icon::DELETE, ActionKind::Destructive).clicked() {
                         actions.push(Action::DeleteBackup(name.clone()));
                     }
@@ -1169,6 +1186,7 @@ impl App {
 
     /// Whole-bank scene composer: capture the bank, save/load, apply to the unit.
     fn show_scene(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        let live = self.editable();
         ui.horizontal(|ui| {
             ui.label("Scene:");
             let mut n = self.compose_name.clone();
@@ -1181,16 +1199,23 @@ impl App {
             if action_button(ui, "New", ActionKind::Neutral).clicked() {
                 actions.push(Action::SceneNew);
             }
-            if action_button(ui, format!("{} Capture bank", icon::LOAD), ActionKind::Read).clicked()
-            {
-                actions.push(Action::SceneCapture);
-            }
+            // Capture reads the whole bank off the unit; Apply writes it back — both
+            // need the device idle.
+            ui.add_enabled_ui(live, |ui| {
+                if action_button(ui, format!("{} Capture bank", icon::LOAD), ActionKind::Read)
+                    .clicked()
+                {
+                    actions.push(Action::SceneCapture);
+                }
+            });
             if action_button(ui, format!("{} Save", icon::SAVE), ActionKind::Commit).clicked() {
                 actions.push(Action::SceneSave);
             }
-            if action_button(ui, "Apply to unit", ActionKind::Commit).clicked() {
-                actions.push(Action::SceneApply);
-            }
+            ui.add_enabled_ui(live, |ui| {
+                if action_button(ui, "Apply to unit", ActionKind::Commit).clicked() {
+                    actions.push(Action::SceneApply);
+                }
+            });
         });
         ui.horizontal_wrapped(|ui| {
             ui.label("Saved:");
@@ -1232,16 +1257,19 @@ impl App {
 
     /// Read-only patch inspector + live MIDI-CC quick-controls.
     fn show_inspect(&self, ui: &mut egui::Ui, actions: &mut Vec<Action>) {
+        let live = self.editable();
         ui.horizontal(|ui| {
-            if action_button(
-                ui,
-                format!("{} Capture current", icon::LOAD),
-                ActionKind::Read,
-            )
-            .clicked()
-            {
-                actions.push(Action::InspectCapture);
-            }
+            ui.add_enabled_ui(live, |ui| {
+                if action_button(
+                    ui,
+                    format!("{} Capture current", icon::LOAD),
+                    ActionKind::Read,
+                )
+                .clicked()
+                {
+                    actions.push(Action::InspectCapture);
+                }
+            });
         });
         ui.separator();
         if let Some(p) = &self.inspect {
@@ -1275,24 +1303,27 @@ impl App {
             ("Delay", "delay-bypass"),
             ("Reverb", "reverb-bypass"),
         ];
-        for (label, name) in bypasses {
+        // Every control here sends live MIDI to the unit — gate on the device idle.
+        ui.add_enabled_ui(live, |ui| {
+            for (label, name) in bypasses {
+                ui.horizontal(|ui| {
+                    ui.label(format!("{label}:"));
+                    if action_button(ui, "On", ActionKind::Neutral).clicked() {
+                        actions.push(Action::SendCc(name, None, 127));
+                    }
+                    if action_button(ui, "Off", ActionKind::Neutral).clicked() {
+                        actions.push(Action::SendCc(name, None, 0));
+                    }
+                });
+            }
             ui.horizontal(|ui| {
-                ui.label(format!("{label}:"));
-                if action_button(ui, "On", ActionKind::Neutral).clicked() {
-                    actions.push(Action::SendCc(name, None, 127));
-                }
-                if action_button(ui, "Off", ActionKind::Neutral).clicked() {
-                    actions.push(Action::SendCc(name, None, 0));
+                ui.label("Amp output:");
+                for v in [0u8, 32, 64, 96, 127] {
+                    if ui.button(format!("{v}")).clicked() {
+                        actions.push(Action::SendCc("amp-output", None, v));
+                    }
                 }
             });
-        }
-        ui.horizontal(|ui| {
-            ui.label("Amp output:");
-            for v in [0u8, 32, 64, 96, 127] {
-                if ui.button(format!("{v}")).clicked() {
-                    actions.push(Action::SendCc("amp-output", None, v));
-                }
-            }
         });
     }
 }
