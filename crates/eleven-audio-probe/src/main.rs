@@ -37,10 +37,31 @@ use rusb::{DeviceHandle, GlobalContext};
 /// Digidesign Eleven Rack.
 const VID: u16 = 0x0dba;
 const PID: u16 = 0xb011;
-/// The two vendor-class audio-streaming interfaces (playback, capture).
+/// The vendor audio-control interface (target of the class SET_CUR writes below)
+/// and the two audio-streaming interfaces (playback, capture).
+const CONTROL_IFACE: u8 = 1;
 const AUDIO_IFACES: [u8; 2] = [3, 4];
 /// The alt-setting that exposes each interface's ISO endpoint (alt 0 = idle).
 const ACTIVE_ALT: u8 = 1;
+
+/// Timeout for control transfers.
+const CTRL_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// The class-specific audio-control writes the Windows driver sends right after
+/// activating the streaming interfaces, transcribed verbatim from the cold-connect
+/// capture (`11/eleven-save-20260702-114348.pcapng`, t≈14.18 s). All are
+/// host→device class-interface requests (`bmRequestType 0x21`) to interface 1.
+/// `(bRequest, wValue, wIndex, data)`:
+///   * SET_CUR entity 0x80 = 01            (enable?)
+///   * SET_CUR entity 0x81 = 44 AC 00 00   (sample rate 0xAC44 = 44100 Hz)
+///   * SET_CUR entity 0x80 = 01
+///   * bReq 3  entity 0x20 = 02
+const CONTROL_WRITES: &[(u8, u16, u16, &[u8])] = &[
+    (0x01, 0x0100, 0x8001, &[0x01]),
+    (0x01, 0x0100, 0x8101, &[0x44, 0xAC, 0x00, 0x00]),
+    (0x01, 0x0100, 0x8001, &[0x01]),
+    (0x03, 0x0000, 0x2001, &[0x02]),
+];
 /// ISO endpoints and packet size, for H2. OUT = playback, IN = capture; 416-byte
 /// packets at interval 1 (8 packets/ms at high speed), 32-bit PCM.
 const ISO_OUT_EP: u8 = 0x03;
@@ -67,24 +88,44 @@ fn main() -> Result<()> {
     let handle = rusb::open_device_with_vid_pid(VID, PID).with_context(|| {
         format!("Eleven Rack {VID:04x}:{PID:04x} not found (or no USB permission — try sudo / a udev rule)")
     })?;
+    // Let libusb detach any kernel driver as we claim (harmless if none).
+    handle.set_auto_detach_kernel_driver(true).ok();
 
-    // --- H1: claim + activate the vendor audio interfaces (MIDI on iface 2 untouched) ---
+    // --- H1: replay the Windows driver's audio-activation sequence ---
+    // Claim the control interface (target of the class writes) and both streaming
+    // interfaces. The MIDI interface (2, hw:2,0) is left alone, so rackctl-eleven
+    // keeps working in parallel.
     let mut claimed: Vec<u8> = Vec::new();
+    for &iface in &[CONTROL_IFACE, AUDIO_IFACES[0], AUDIO_IFACES[1]] {
+        handle.detach_kernel_driver(iface).ok(); // ignore "no driver"
+        handle.claim_interface(iface).with_context(|| {
+            format!(
+                "claiming interface {iface}. If this is `Resource busy`, another userspace \
+                 process still holds the device — e.g. VirtualBox USB passthrough. Fully \
+                 release the Eleven from any VM / USB proxy so Linux owns it, then retry."
+            )
+        })?;
+        claimed.push(iface);
+    }
+    // Idle-reset then activate the streaming interfaces (mirrors the capture:
+    // SET_INTERFACE(3,0)/(4,0) then (3,1)/(4,1)).
     for &iface in &AUDIO_IFACES {
-        if handle.kernel_driver_active(iface).unwrap_or(false) {
-            // Shouldn't happen (vendor class, no kernel driver), but be safe.
-            handle.detach_kernel_driver(iface).ok();
-        }
-        handle
-            .claim_interface(iface)
-            .with_context(|| format!("claiming interface {iface}"))?;
+        handle.set_alternate_setting(iface, 0).ok();
+    }
+    for &iface in &AUDIO_IFACES {
         handle
             .set_alternate_setting(iface, ACTIVE_ALT)
             .with_context(|| format!("interface {iface} -> alt {ACTIVE_ALT}"))?;
-        claimed.push(iface);
-        println!("interface {iface}: claimed, alt {ACTIVE_ALT} (streaming endpoint active)");
+        println!("interface {iface}: alt {ACTIVE_ALT} (streaming endpoint active)");
     }
-    println!("\nH1 active: audio interfaces claimed and set to their streaming alt-setting.");
+    // The class audio-control setup (sample rate 44100 + enable flags).
+    for &(req, value, index, data) in CONTROL_WRITES {
+        handle
+            .write_control(0x21, req, value, index, data, CTRL_TIMEOUT)
+            .with_context(|| format!("class write bReq={req} wIndex={index:#06x}"))?;
+        println!("  class write bReq={req} wIndex={index:#06x} data={data:02x?} ok");
+    }
+    println!("\nH1 active: audio interfaces activated + class control setup replayed.");
 
     // --- H2 (optional): also push ISO packets so the unit sees a live stream ---
     if cli.iso {

@@ -87,16 +87,44 @@ before committing.
   endpoint; high-speed ISO scheduling from userspace (libusb async ISO); and the
   unknown cold-init control transfers (need a plug-in capture to see them).
 
-== Concrete first steps
+== The Windows activation sequence (from the cold-connect capture)
 
-. Capture a **cold connect**: unplug the Eleven, start a full usbmon capture, plug in
-  and launch the official editor. This records the enumeration + `SET_INTERFACE` +
-  any vendor control setup we currently miss (our captures began mid-session).
-. Write the minimal libusb activator (claim 3/4, alt 1, ISO URBs) as a throwaway
-  `eleven-audio-probe` binary.
-. Run H1 then H2 beside `rackctl-eleven`; after each, attempt a param-write +
-  read-back. Record which hypothesis (if any) opens the gate.
-. Decide Tier A vs B from the result.
+Decoded from `11/eleven-save-20260702-114348.pcapng` (power-cycle → capture →
+launch editor). At t≈14 s the editor brings audio up with exactly:
+
+  SET_CONFIGURATION(1)
+  SET_INTERFACE(3,0) (4,0)          # idle reset (sent twice)
+  SET_INTERFACE(3,1) (4,1)          # activate the ISO endpoints
+  # then class SET_CUR writes (bmRequestType 0x21) to interface 1:
+  bReq 1  wValue 0x0100 wIndex 0x8001  data 01            # entity 0x80 enable?
+  bReq 1  wValue 0x0100 wIndex 0x8101  data 44 AC 00 00   # 0xAC44 = 44100 Hz
+  bReq 1  wValue 0x0100 wIndex 0x8001  data 01
+  bReq 3  wValue 0x0000 wIndex 0x2001  data 02            # entity 0x20
+
+`eleven-audio-probe` replays all of this (minus `SET_CONFIGURATION`, which would
+reset the device and drop the MIDI interface).
+
+== Results so far
+
+* **H1 tested → NOT sufficient.** The probe activates interfaces 3/4 (alt 1) and
+  replays every class control write (all ACKed, sample rate set), *and* MIDI keeps
+  working alongside it (a `scan amp` read succeeds during the hold — libusb audio +
+  ALSA MIDI coexist cleanly). But a verbatim editor param-write still changes
+  nothing (blob 0 differing bytes, amp table unchanged). So arming the endpoints +
+  control setup is not enough.
+* Remaining difference from a live editor session: **actual ISO audio flowing**. The
+  endpoints are armed but idle. => the gate almost certainly needs **H2** — submit
+  ISO URBs so audio is really streaming.
+
+== Concrete next steps
+
+. Implement **H2**: submit ISO transfers on EP `0x03` (OUT) and `0x83` (IN). rusb has
+  no ISO API, so use `nusb` (pure-Rust async ISO — preferred, no `unsafe`) or
+  `libusb1-sys` async. Start with silence (all-zero 416-byte packets) at 8 pkts/ms.
+. Re-run the edit-gate test while H2 streams. If it opens → **Tier A done**: wire the
+  activator into `eleven-gui` so editing works while it holds the session.
+. If silence isn't enough, escalate to correctly-clocked / formatted PCM (**H3**,
+  Tier B — the full driver), which also yields Linux audio monitoring.
 
 Until this lands, the GUI stays at bank-level editing (capture / restore / copy /
 rename / scene — all working). See `eleven-rack-sysex-protocol.adoc` for the (now
