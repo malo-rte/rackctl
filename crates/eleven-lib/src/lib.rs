@@ -6,22 +6,23 @@
 //! both a CLI and a GUI need but neither should own privately.
 //!
 //! It provides `.tfx` patch import; the named on-disk libraries (patches, device-faithful
-//! **patch backups**, and whole-bank **scenes**, all via `rackctl-core`); and — with
-//! the `alsa` feature — the device-touching [`manage`] operations (capture / restore
-//! / bank backup / scene capture+restore / preset copy / named MIDI-CC) the CLI and
-//! GUI share.
+//! **patch backups**, and whole-bank **scenes**, all via `rackctl-core`); and the
+//! device-touching [`manage`] operations (capture / restore / bank backup / scene
+//! capture+restore / preset copy / named MIDI-CC) the CLI and GUI share, generic over
+//! [`ElevenDevice`] so they run on hardware or the in-memory [`MockEleven`].
 //!
 //! NOTE: Eleven Rack, Digidesign and Avid are trademarks of Avid Technology, Inc.
 //! This is an independent, unofficial project.
 #![forbid(unsafe_code)]
 
 pub mod format;
-#[cfg(feature = "alsa")]
 pub mod manage;
 
 use std::path::{Path, PathBuf};
 
 use rackctl_eleven::{Patch, PatchBackup};
+
+pub use rackctl_eleven::{ElevenDevice, MockEleven};
 
 pub use format::{Scene, parse_scene, patch_to_json};
 // Re-export the protocol crate so a frontend can depend on this one crate.

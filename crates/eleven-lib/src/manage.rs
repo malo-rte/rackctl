@@ -1,6 +1,6 @@
 //! Device-touching management operations, shared by the CLI and any GUI.
 //!
-//! These drive a live [`RawMidi`] (Program Change, block reads/writes, the store
+//! These drive an [`ElevenDevice`] (Program Change, block reads/writes, the store
 //! sequence, MIDI CC) and combine it with the on-disk library and the parameter
 //! catalog, so a frontend never reimplements capture/restore/backup/scene logic.
 //!
@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use rackctl_eleven::backup::AGGREGATE_BLOCK;
 use rackctl_eleven::param::{self, Kind, Slot};
-use rackctl_eleven::{BlockData, ParamRecord, PatchBackup, RawMidi, RestoreAction};
+use rackctl_eleven::{BlockData, ElevenDevice, ParamRecord, PatchBackup, RestoreAction};
 
 use crate::format::Scene;
 use crate::slot_label;
@@ -33,7 +33,7 @@ pub const USER_BANK: u8 = 0;
 pub const FACTORY_BANK: u8 = 1;
 
 /// Select `bank`/`slot` and wait for the unit to load it.
-fn select_settle(dev: &mut RawMidi, bank: u8, slot: u8) -> Result<(), String> {
+fn select_settle<D: ElevenDevice + ?Sized>(dev: &mut D, bank: u8, slot: u8) -> Result<(), String> {
     dev.select_rig(bank, slot)
         .map_err(|e| format!("selecting bank {bank} slot {slot}: {e}"))?;
     sleep(SETTLE);
@@ -44,7 +44,10 @@ fn select_settle(dev: &mut RawMidi, bank: u8, slot: u8) -> Result<(), String> {
 ///
 /// # Errors
 /// If selecting the slot or reading the unit fails.
-pub fn capture(dev: &mut RawMidi, slot: Option<u8>) -> Result<PatchBackup, String> {
+pub fn capture<D: ElevenDevice + ?Sized>(
+    dev: &mut D,
+    slot: Option<u8>,
+) -> Result<PatchBackup, String> {
     if let Some(s) = slot {
         select_settle(dev, USER_BANK, s)?;
     }
@@ -118,12 +121,16 @@ fn verify_blocks(patch: &PatchBackup, after: &PatchBackup) -> VerifyReport {
 }
 
 /// Restore `patch` into User `slot`, then re-read and verify. See
-/// [`RawMidi::restore_patch`] for the mechanism (a full aggregate-block write when
+/// [`ElevenDevice::restore_patch`] for the mechanism (a full aggregate-block write when
 /// the backup carries `0x01`, else a per-block replay).
 ///
 /// # Errors
 /// If any device operation fails.
-pub fn restore(dev: &mut RawMidi, slot: u8, patch: &PatchBackup) -> Result<VerifyReport, String> {
+pub fn restore<D: ElevenDevice + ?Sized>(
+    dev: &mut D,
+    slot: u8,
+    patch: &PatchBackup,
+) -> Result<VerifyReport, String> {
     select_settle(dev, USER_BANK, slot)?;
     dev.restore_patch(u16::from(slot), patch)
         .map_err(|e| format!("restoring to slot {slot}: {e}"))?;
@@ -150,8 +157,8 @@ pub fn restore(dev: &mut RawMidi, slot: u8, patch: &PatchBackup) -> Result<Verif
 ///
 /// # Errors
 /// If the capture or the library save fails.
-pub fn capture_to_library(
-    dev: &mut RawMidi,
+pub fn capture_to_library<D: ElevenDevice + ?Sized>(
+    dev: &mut D,
     name: &str,
     slot: Option<u8>,
 ) -> Result<PatchBackup, String> {
@@ -165,8 +172,8 @@ pub fn capture_to_library(
 ///
 /// # Errors
 /// If the backup is missing/unreadable, or a device operation fails.
-pub fn restore_from_library(
-    dev: &mut RawMidi,
+pub fn restore_from_library<D: ElevenDevice + ?Sized>(
+    dev: &mut D,
     name: &str,
     slot: u8,
 ) -> Result<(PatchBackup, VerifyReport), String> {
@@ -181,8 +188,8 @@ pub fn restore_from_library(
 /// # Errors
 /// Never returns `Err` for a non-answering slot (it is skipped); reserved for a
 /// hard link failure.
-pub fn patch_directory(
-    dev: &mut RawMidi,
+pub fn patch_directory<D: ElevenDevice + ?Sized>(
+    dev: &mut D,
     _bank: u8,
     count: u8,
 ) -> Result<Vec<(u8, String)>, String> {
@@ -203,8 +210,8 @@ pub fn patch_directory(
 ///
 /// # Errors
 /// If a device read or a library save fails.
-pub fn backup_bank(
-    dev: &mut RawMidi,
+pub fn backup_bank<D: ElevenDevice + ?Sized>(
+    dev: &mut D,
     count: u8,
     mut progress: impl FnMut(u8, &str),
 ) -> Result<u32, String> {
@@ -230,8 +237,8 @@ pub fn backup_bank(
 ///
 /// # Errors
 /// If a device read fails.
-pub fn capture_scene(
-    dev: &mut RawMidi,
+pub fn capture_scene<D: ElevenDevice + ?Sized>(
+    dev: &mut D,
     name: &str,
     count: u8,
     mut progress: impl FnMut(u8, &str),
@@ -257,8 +264,8 @@ pub fn capture_scene(
 ///
 /// # Errors
 /// If a device operation fails.
-pub fn restore_scene(
-    dev: &mut RawMidi,
+pub fn restore_scene<D: ElevenDevice + ?Sized>(
+    dev: &mut D,
     scene: &Scene,
     mut progress: impl FnMut(u8, &str),
 ) -> Result<VerifyReport, String> {
@@ -278,8 +285,8 @@ pub fn restore_scene(
 ///
 /// # Errors
 /// If any device operation fails.
-pub fn copy_slot(
-    dev: &mut RawMidi,
+pub fn copy_slot<D: ElevenDevice + ?Sized>(
+    dev: &mut D,
     from_bank: u8,
     from_slot: u8,
     to_slot: u8,
@@ -287,7 +294,7 @@ pub fn copy_slot(
     // Load the whole source sound into the edit buffer, then persist it to the
     // target with the device's native store — a *full* copy of every block, not the
     // restorable subset. (Store commits the current edit buffer; see
-    // [`RawMidi::store`].) Verified by re-reading the target's packed image.
+    // [`ElevenDevice::store`].) Verified by re-reading the target's packed image.
     select_settle(dev, from_bank, from_slot)?;
     let name = read_name(dev)?;
     let source = read_aggregate(dev)?;
@@ -304,7 +311,11 @@ pub fn copy_slot(
 const READ_TRIES: u32 = 4;
 
 /// Read one block, retrying on a dropped reply. `label` names it for the error.
-fn read_block_retry(dev: &mut RawMidi, addr: &[u8], label: &str) -> Result<Vec<u8>, String> {
+fn read_block_retry<D: ElevenDevice + ?Sized>(
+    dev: &mut D,
+    addr: &[u8],
+    label: &str,
+) -> Result<Vec<u8>, String> {
     let mut last = String::new();
     for _ in 0..READ_TRIES {
         match dev.read_block(addr) {
@@ -319,12 +330,12 @@ fn read_block_retry(dev: &mut RawMidi, addr: &[u8], label: &str) -> Result<Vec<u
 }
 
 /// Read the current edit buffer's name (block `0x05`).
-fn read_name(dev: &mut RawMidi) -> Result<String, String> {
+fn read_name<D: ElevenDevice + ?Sized>(dev: &mut D) -> Result<String, String> {
     read_block_retry(dev, &[NAME_BLOCK], "name block").map(|b| block_name(&b))
 }
 
 /// Read the current edit buffer's full packed patch image (aggregate block `0x01`).
-fn read_aggregate(dev: &mut RawMidi) -> Result<Vec<u8>, String> {
+fn read_aggregate<D: ElevenDevice + ?Sized>(dev: &mut D) -> Result<Vec<u8>, String> {
     read_block_retry(dev, &[AGGREGATE_BLOCK], "aggregate block")
 }
 
@@ -336,7 +347,9 @@ fn read_aggregate(dev: &mut RawMidi) -> Result<Vec<u8>, String> {
 ///
 /// # Errors
 /// If no parameter-table block can be read from the unit.
-pub fn amp_param_table(dev: &mut RawMidi) -> Result<(u8, Vec<ParamRecord>), String> {
+pub fn amp_param_table<D: ElevenDevice + ?Sized>(
+    dev: &mut D,
+) -> Result<(u8, Vec<ParamRecord>), String> {
     if let Ok(bytes) = read_block_retry(dev, &[0x21], "amp table")
         && let Some(recs) = (BlockData { id: 0x21, bytes }).param_records()
     {
@@ -360,7 +373,10 @@ pub fn amp_param_table(dev: &mut RawMidi) -> Result<(u8, Vec<ParamRecord>), Stri
 ///
 /// # Errors
 /// If the table cannot be read, or no parameter has that target.
-pub fn get_amp_param(dev: &mut RawMidi, target: u8) -> Result<(u8, ParamRecord), String> {
+pub fn get_amp_param<D: ElevenDevice + ?Sized>(
+    dev: &mut D,
+    target: u8,
+) -> Result<(u8, ParamRecord), String> {
     let (block, recs) = amp_param_table(dev)?;
     recs.into_iter()
         .find(|r| r.target == target)
@@ -374,8 +390,8 @@ pub fn get_amp_param(dev: &mut RawMidi, target: u8) -> Result<(u8, ParamRecord),
 ///
 /// # Errors
 /// If the table cannot be read, no parameter has that target, or the write fails.
-pub fn set_amp_param(
-    dev: &mut RawMidi,
+pub fn set_amp_param<D: ElevenDevice + ?Sized>(
+    dev: &mut D,
     target: u8,
     value: u8,
 ) -> Result<(u8, ParamRecord), String> {
@@ -417,8 +433,8 @@ fn verify_aggregate(source: &[u8], after: &[u8]) -> VerifyReport {
 ///
 /// # Errors
 /// If the amp / effect / control name cannot be resolved, or the send fails.
-pub fn send_named_cc(
-    dev: &mut RawMidi,
+pub fn send_named_cc<D: ElevenDevice + ?Sized>(
+    dev: &mut D,
     name: &str,
     value: u8,
     amp: Option<&str>,

@@ -38,6 +38,7 @@
 #![forbid(unsafe_code)]
 
 mod backend;
+mod bank;
 mod device;
 
 pub mod sysex;
@@ -52,5 +53,6 @@ pub use rackctl_eleven_model::{
 #[cfg(feature = "alsa")]
 pub use backend::RawMidi;
 pub use backend::{MockTransport, Transport};
+pub use bank::{ElevenDevice, MockEleven};
 pub use device::Eleven;
 pub use sysex::{DigiMessage, Identity};

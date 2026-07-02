@@ -562,3 +562,31 @@ impl Transport for RawMidi {
         Ok(self.collect_replies())
     }
 }
+
+/// Drive the real unit through the management-level [`ElevenDevice`](crate::ElevenDevice)
+/// interface, so
+/// the `manage` layer and a GUI treat hardware and [`MockEleven`](crate::MockEleven)
+/// alike. Each method delegates to the inherent [`RawMidi`] method of the same name.
+impl crate::bank::ElevenDevice for RawMidi {
+    fn select_rig(&mut self, bank: u8, slot: u8) -> Result<()> {
+        RawMidi::select_rig(self, bank, slot)
+    }
+    fn capture_patch(&mut self) -> Result<PatchBackup> {
+        RawMidi::capture_patch(self)
+    }
+    fn restore_patch(&mut self, slot: u16, patch: &PatchBackup) -> Result<()> {
+        RawMidi::restore_patch(self, slot, patch)
+    }
+    fn store(&mut self, slot: u16, name: &str) -> Result<()> {
+        RawMidi::store(self, slot, name)
+    }
+    fn read_block(&mut self, addr: &[u8]) -> Result<Vec<u8>> {
+        RawMidi::read_block(self, addr)
+    }
+    fn write_param(&mut self, addr: &[u8], value: u8) -> Result<()> {
+        RawMidi::write_param(self, addr, value)
+    }
+    fn send_cc(&mut self, channel: u8, cc: u8, value: u8) -> Result<()> {
+        RawMidi::send_cc(self, channel, cc, value)
+    }
+}
