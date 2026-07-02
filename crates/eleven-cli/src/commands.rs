@@ -7,6 +7,7 @@
 //! Parameter-level commands (`get`/`set`/`scan`) run on the mock or hardware; the
 //! patch/slot commands need a connected unit (`--port`).
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -182,6 +183,87 @@ pub fn scan(mock: bool, port: Option<&str>, prefix: &str, from: &str, to: &str) 
         );
     }
     Ok(())
+}
+
+/// Enumerate the current sound's live `11 <block> <index>` parameter space, listing
+/// the active (non-default) parameters. With `watch`, poll continuously and print any
+/// parameter that changes — move a knob on the unit to discover its address (the
+/// groundwork for the parameter catalog).
+pub fn params(
+    mock: bool,
+    port: Option<&str>,
+    blocks: &str,
+    indices: &str,
+    all: bool,
+    watch: bool,
+) -> Result<()> {
+    let block_max = parse_byte(blocks)?;
+    let index_max = parse_byte(indices)?;
+    let mut dev = open_device(mock, port)?;
+
+    if watch {
+        let mut prev = read_param_space(&mut dev, block_max, index_max)?;
+        println!(
+            "watching {} params (blocks 00..={block_max:02X}) — move a knob; Ctrl-C to stop",
+            prev.len()
+        );
+        loop {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            let cur = read_param_space(&mut dev, block_max, index_max)?;
+            for (&(block, index), value) in &cur {
+                if prev.get(&(block, index)) != Some(value) {
+                    let was = prev
+                        .get(&(block, index))
+                        .map_or_else(|| "--".to_owned(), |v| hex(v.as_bytes()));
+                    println!(
+                        "11 {block:02X} {index:02X}  {was}  ->  {}",
+                        hex(value.as_bytes())
+                    );
+                }
+            }
+            prev = cur;
+        }
+    }
+
+    let space = read_param_space(&mut dev, block_max, index_max)?;
+    let mut count = 0usize;
+    let mut shown_block: Option<u8> = None;
+    for (&(block, index), value) in &space {
+        if !all && value.as_bytes().iter().all(|&b| b == 0) {
+            continue; // padding
+        }
+        if shown_block != Some(block) {
+            println!("block {block:#04X}:");
+            shown_block = Some(block);
+        }
+        println!(
+            "  11 {block:02X} {index:02X}  {}  (word {:#x})",
+            hex(value.as_bytes()),
+            value.decode()
+        );
+        count += 1;
+    }
+    println!("{count} active parameters across blocks 00..={block_max:02X}");
+    Ok(())
+}
+
+/// Read `11 <block> <index>` for every block/index up to the maxima, as a sorted map.
+/// Reads one block per batch scan to keep each request burst small.
+fn read_param_space(
+    dev: &mut Eleven<Box<dyn Transport>>,
+    block_max: u8,
+    index_max: u8,
+) -> Result<BTreeMap<(u8, u8), RawValue>> {
+    let mut out = BTreeMap::new();
+    for block in 0..=block_max {
+        let addrs: Vec<Vec<u8>> = (0..=index_max).map(|i| vec![0x11, block, i]).collect();
+        for (addr, value) in dev.scan(&addrs)? {
+            if let [_, b, i] = addr.as_slice() {
+                out.insert((*b, *i), value);
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// Dump the current sound's live amp parameter table (target / value / live index).

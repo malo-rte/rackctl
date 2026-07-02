@@ -66,6 +66,24 @@ enum Command {
         #[arg(long, default_value = "7f")]
         to: String,
     },
+    /// Enumerate the live parameter space of the current sound: read
+    /// `11 <block> <index>` across a range and list the active (non-default) params.
+    /// With `--watch`, poll and print any parameter that changes — move a knob to
+    /// find its address (the basis for the parameter catalog).
+    Params {
+        /// Highest block byte to scan (hex), from `00`.
+        #[arg(long, default_value = "1f")]
+        blocks: String,
+        /// Highest index byte to scan per block (hex), from `00`.
+        #[arg(long, default_value = "20")]
+        indices: String,
+        /// Show every address, including default (`00…`) padding.
+        #[arg(long)]
+        all: bool,
+        /// Poll continuously and print parameters as they change (Ctrl-C to stop).
+        #[arg(long)]
+        watch: bool,
+    },
     /// Select a patch (Program Change); Factory bank with `--factory`.
     Select {
         /// Slot number (0-based).
@@ -228,6 +246,12 @@ fn main() -> Result<()> {
         Command::Get { addr } => commands::get(mock, port, &addr),
         Command::Set { addr, value } => commands::set(mock, port, &addr, &value),
         Command::Scan { prefix, from, to } => commands::scan(mock, port, &prefix, &from, &to),
+        Command::Params {
+            blocks,
+            indices,
+            all,
+            watch,
+        } => commands::params(mock, port, &blocks, &indices, all, watch),
         Command::Select { slot, factory } => commands::select(port, slot, factory),
         Command::Cc {
             name,
