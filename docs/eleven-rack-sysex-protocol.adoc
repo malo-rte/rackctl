@@ -255,14 +255,28 @@ non-Digidesign SysEx the editor sends is the *standard Identity Request* (`F0 7E
 157 consecutive parameter sets with no interleaved reads, so once editing works you can
 blast sets.
 
-The editor clearly does something more — precise request/response timing/order, or state
-we have not isolated — that a bare Program Change plus a replay of the captured MIDI does
-not reproduce (notably: on our sessions the unit never *replies* to `01 11 <block> <sub>`
-reads, which the editor's session always gets answered). Host-initiated parameter set
-remains *unresolved*; cracking it likely needs diffing the editor's *live* traffic against
-a working set in real time, or the editor DLL's logic. Live parameter changes go through
-MIDI CC (`Bn <cc> <v>`) and a full patch change through the aggregate `0x01` write — both
-hardware-verified.
+*Update (2026-07-02) — the write format is now known, and the gate is the audio
+session.* The editor's accepted parameter write is `F0 13 0B 0F 00 11 <block> <index>
+<4-byte value> F7`: opcode `0x00`, prefix `11`, block ∈ {`0x40,0x4E,0x5C,0x6A,0x78`}
+(step `0x0E`; `0x78` = amp), `<index>` in the live-index range `0x6F..0x7B` (the
+`scan amp` indices), then a 4-byte value. Our earlier `write_param` wrote block `0x21`
+with the value in the index slot — wrong on both counts. But sending the *correct*
+message (even a verbatim editor replay via `amidi`) still does nothing standalone:
+the blob is unchanged and `01 11 78 0D <idx>` reads a constant `00 00 00 00 10`.
+
+Leading (well-supported) theory: **host edits are gated on an active USB audio
+session.** The editor always streams the unit's proprietary audio (continuous ISO on
+EP `0x81`/`0x83`) the whole time its writes are accepted; there is no discrete
+vendor/`SET_INTERFACE` "enable" message to replay. The Eleven's audio is *vendor
+class* (not UAC), so Linux exposes no PCM and cannot activate it today. => parameter
+editing and a Linux audio driver are the *same problem*. See
+`eleven-rack-audio-driver-scope.adoc` for the feasibility plan (a small libusb
+activator + a three-hypothesis edit-gate test).
+
+Meanwhile, live parameter changes go through MIDI CC (`Bn <cc> <v>`) — but CC is
+*transient* (hardware-verified: it does not alter the captured blob, so it cannot be
+saved) — and a full patch change goes through the aggregate `0x01` write, which *is*
+saveable.
 
 Requesting every populated block id (a *small paced batch* — not a flood) reads the
 whole patch without per-parameter polling. Other blocks seen on one patch: `0x05` name,

@@ -1,0 +1,103 @@
+= Avid/Digidesign Eleven Rack — audio-session driver: feasibility scope
+
+Scoping study for a Linux userspace driver that activates the Eleven Rack's
+proprietary USB audio session. Written 2026-07-02 from live-device descriptors
+(`0dba:b011`) and the editor USB captures (`11/eleven-save-*.pcapng`).
+
+== Why this matters (two payoffs from one project)
+
+1. *Parameter editing.* Host parameter writes (`00 11 <block> <index> <value>`,
+   format now known — see `eleven-rack-sysex-protocol.adoc`) are *rejected* unless
+   the unit is in an active editor session. Every MIDI-only reproduction has failed;
+   the one factor present the whole time the official editor's writes were accepted
+   is a *continuously running USB audio stream*. Leading theory (unproven but well
+   supported): **the unit gates host edits on an active audio session.** If true,
+   activating audio is the key that unlocks the whole GUI parameter editor.
+2. *Audio monitoring.* The same work gives Linux users the Eleven's USB audio
+   (guitar in / reamp / monitor), which no current Linux driver provides.
+
+== Why ALSA gives us nothing today
+
+The Eleven exposes 5 USB interfaces (config has 5, all in one configuration):
+
+[cols="1,3,3",options="header"]
+|===
+| Intf | Class / subclass | Role
+| 0 | `0xFE` AppSpec / AudioControl | audio-control header (app-specific)
+| 1 | `0xFF` VENDOR / AudioControl, proto 32 | vendor audio-control topology (terminals/feature units in CS descriptors)
+| 2 | `0x01` Audio / *MIDIStreaming* | **standard USB-MIDI** — bulk EP `0x02` OUT / `0x82` IN. This is `hw:2,0`, what `rackctl-eleven` already uses.
+| 3 | `0xFF` VENDOR / AudioStreaming, proto 32 | **audio playback (host→unit)**. alt 0 = idle (no EP); alt 1 = ISO EP `0x03` OUT, 416 B/pkt, interval 1.
+| 4 | `0xFF` VENDOR / AudioStreaming, proto 32 | **audio capture (unit→host)**. alt 0 = idle; alt 1 = ISO EP `0x83` IN, 416 B/pkt, interval 1.
+|===
+
+Interfaces 3 and 4 are **vendor class (`0xFF`)**, not UAC (`0x01`/AudioStreaming).
+The kernel `snd-usb-audio` driver only binds standard UAC audio, so it ignores 3/4 —
+which is why card 2 has `midiC2D0` but **no `pcmC2*`**. Nothing on Linux ever opens
+the audio path.
+
+Audio format (from the alt-1 CS format descriptors, both directions):
+`06 24 02 01 04 20` = TYPE_I PCM, subframe `0x04` (4 bytes), `0x20` = 32-bit; ISO
+416 B/packet at interval 1 (8000 packets/s at high speed). Playback AS links to
+terminal 6, capture to terminal 8. Exact channel count / sample clock still to
+confirm from the terminal descriptors + a cold-connect capture.
+
+== Approach: libusb userspace driver (no kernel work)
+
+Because 3/4 are vendor class with **no kernel driver attached**, a userspace libusb
+program can claim them directly and coexist with MIDI (which stays on ALSA `hw:2,0`,
+interface 2 — a different interface, so no conflict). No kernel module, no
+`snd-usb-audio` quirk patch needed for the feasibility phase.
+
+Sketch: open `0dba:b011` → `claim_interface(3)`, `claim_interface(4)` →
+`set_interface_alt_setting(3,1)` and `(4,1)` → submit ISO transfers to `0x03` (OUT)
+and `0x83` (IN) on a steady cadence. Keep it running as a side process while the
+existing MIDI tooling talks to `hw:2,0`.
+
+== The feasibility gate (cheap, decisive — do this FIRST)
+
+The whole project pivots on *how much* audio the edit-gate actually needs. Test three
+escalating hypotheses, cheapest first, each a small addition to the libusb sketch.
+After each, send a known MIDI param-write and read it back (or diff the captured
+blob) to see if the write now *sticks*:
+
+[cols="1,3,2",options="header"]
+|===
+| H | What we activate | Effort if this is enough
+| H1 | `SET_INTERFACE(3,1)`+`(4,1)` only — interface active, no ISO data | ~½ day
+| H2 | H1 + submit ISO OUT/IN URBs with *silence / dummy* payloads at the right cadence | ~2–3 days
+| H3 | H2 but payloads must be *correctly formatted* PCM + honour the sync/clock | weeks (full RE)
+|===
+
+If **H1 or H2** opens the edit gate, we get parameter editing for a few days' work
+and *don't need to decode the audio content at all*. Only H3 requires the full
+proprietary-format reverse-engineering. This test tells us which world we're in
+before committing.
+
+== Effort tiers & risks
+
+* *Tier A — edit-gate only (H1/H2):* small libusb activator, run beside the GUI's
+  MIDI. Unlocks the parameter editor if the theory holds. Main risk: the gate needs
+  H3 (real audio), or needs the *cold-connect* control sequence we don't yet have
+  (our captures start mid-session — a fresh plug-in + editor-launch capture would
+  fill that gap).
+* *Tier B — working audio I/O (H3):* decode the ISO PCM format, channel map, and
+  feedback/clock; expose it as an ALSA loopback or JACK/PipeWire client. Weeks;
+  independent value (monitoring) even if editing needs more.
+* Risks: proprietary sync model; the 416 B/pkt cadence and any explicit-feedback
+  endpoint; high-speed ISO scheduling from userspace (libusb async ISO); and the
+  unknown cold-init control transfers (need a plug-in capture to see them).
+
+== Concrete first steps
+
+. Capture a **cold connect**: unplug the Eleven, start a full usbmon capture, plug in
+  and launch the official editor. This records the enumeration + `SET_INTERFACE` +
+  any vendor control setup we currently miss (our captures began mid-session).
+. Write the minimal libusb activator (claim 3/4, alt 1, ISO URBs) as a throwaway
+  `eleven-audio-probe` binary.
+. Run H1 then H2 beside `rackctl-eleven`; after each, attempt a param-write +
+  read-back. Record which hypothesis (if any) opens the gate.
+. Decide Tier A vs B from the result.
+
+Until this lands, the GUI stays at bank-level editing (capture / restore / copy /
+rename / scene — all working). See `eleven-rack-sysex-protocol.adoc` for the (now
+known) host-set message format that this session would make effective.
