@@ -6,6 +6,8 @@
 #   - smartcard runtime helpers (pcscd, pcsc-tools, yubikey-manager,
 #     pinentry-tty) for hands-on mpass YubiKey work
 #   - the age-plugin-yubikey runtime binary mpass shells out to
+#   - tshark: decodes the Eleven Rack USB captures (11/*.pcapng, usbmon)
+#     for audio-driver reverse-engineering
 #   - Claude Code CLI
 #
 # Anything actually needed to compile workspace crates or render the
@@ -30,6 +32,7 @@ ARG DEV_PACKAGES="\
     pcsc-tools \
     yubikey-manager \
     pinentry-tty \
+    tshark \
     gh \
 "
 
