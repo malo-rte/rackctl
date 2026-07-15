@@ -7,6 +7,15 @@ version.
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-07-15
+
+### Fixed
+
+- **Nix packaging** — the flake's eframe/winit build inputs use the top-level
+  `libxcb`/`libX11`/`libXcursor`/`libXi`/`libXrandr` names instead of the
+  `xorg.*` set that nixpkgs 26.05 deprecates and will remove, so `nix build` /
+  `nix run` no longer warn and keep working on newer nixpkgs.
+
 ## [0.9.0] - 2026-07-15
 
 This release adds the project's third device: the **Avid/Digidesign Eleven
@@ -371,7 +380,8 @@ only, via the `snd-usb-audio` driver.
 - The tools drive the DSP mixer control surface only; they do not stream audio.
   Capture to the computer is taken pre-DSP (the dry input).
 
-[Unreleased]: https://github.com/malo-rte/rackctl/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/malo-rte/rackctl/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/malo-rte/rackctl/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/malo-rte/rackctl/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/malo-rte/rackctl/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/malo-rte/rackctl/compare/v0.7.2...v0.7.3
