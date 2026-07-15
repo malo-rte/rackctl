@@ -7,6 +7,17 @@ version.
 
 ## [Unreleased]
 
+### Added
+
+- **Eleven Rack Linux audio driver (kernel quirk).** A `snd-usb-audio` quirk and
+  NixOS module in `contrib/eleven-rack-alsa-quirk/` that make the Eleven Rack
+  enumerate as a native ALSA soundcard — 8-in / 6-out, 24-bit,
+  44.1/48/88.2/96 kHz — by treating its vendor-class USB interfaces as the
+  standard UAC2 audio they actually are, so `snd-usb-audio` binds them. The patch
+  targets Linux 6.18 and is verified to apply. Includes the USB-capture analysis
+  it derives from (`docs/eleven-rack-audio-driver-scope.adoc`). This is a
+  contributed driver/patch; the shipped tools are unchanged.
+
 ## [0.9.1] - 2026-07-15
 
 ### Fixed

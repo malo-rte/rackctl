@@ -1,0 +1,54 @@
+From: Mats Loman <mats.loman@rte.se>
+Date: 2026-07-15
+Subject: [PATCH] ALSA: usb-audio: add UAC2 quirk for Avid/Digidesign Eleven Rack
+
+The Avid/Digidesign Eleven Rack (0dba:b011) exposes an audio function whose
+class-specific descriptors are standard USB Audio Class 2.0 -- standard
+AudioControl/AudioStreaming subclasses, UAC2 protocol (0x20), a standard clock
+model (clock selector 0x80 over sources 0x81/0x82/0x83), TYPE_I 32-bit PCM
+format descriptors, and playback slaved to capture via implicit feedback. The
+only non-standard detail is bInterfaceClass = 0xFF (vendor) on the audio
+interfaces, which prevents snd-usb-audio from binding, so the device has MIDI
+(hw:X,0) but no PCM on Linux.
+
+Add a composite quirk that claims the vendor-class interfaces and drives them
+through the standard UAC2 path: interface 1 as the mixer/clock/terminal control,
+interfaces 3 and 4 as the streaming interfaces (6-channel playback on EP 0x03,
+8-channel capture on EP 0x83, 32-bit, 44.1 kHz and up per the programmable
+clock). Interface 2 remains standard USB-MIDI; interface 0 (DFU) is ignored and
+left to userspace.
+
+Signed-off-by: <run `git commit -s` to add your Signed-off-by line>
+---
+ sound/usb/quirks-table.h | 20 ++++++++++++++++++++
+ 1 file changed, 20 insertions(+)
+
+diff --git a/sound/usb/quirks-table.h b/sound/usb/quirks-table.h
+--- a/sound/usb/quirks-table.h
++++ b/sound/usb/quirks-table.h
+@@ -3900,5 +3900,25 @@
+ QUIRK_RME_DIGIFACE(0x3f8c),
+ QUIRK_RME_DIGIFACE(0x3fa0),
+
++	/*
++	 * Avid/Digidesign Eleven Rack: UAC2 in all but bInterfaceClass (0xFF).
++	 * Force snd-usb-audio to claim + parse the vendor-class audio interfaces
++	 * as standard UAC2. See contrib/eleven-rack-alsa-quirk/ in the rackctl repo.
++	 */
++{
++	USB_DEVICE(0x0dba, 0xb011),
++	QUIRK_DRIVER_INFO {
++		.vendor_name = "Digidesign",
++		.product_name = "Eleven Rack",
++		QUIRK_DATA_COMPOSITE {
++			{ QUIRK_DATA_IGNORE(0) },
++			{ QUIRK_DATA_STANDARD_MIXER(1) },
++			{ QUIRK_DATA_STANDARD_MIDI(2) },
++			{ QUIRK_DATA_STANDARD_AUDIO(3) },
++			{ QUIRK_DATA_STANDARD_AUDIO(4) },
++			QUIRK_COMPOSITE_END
++		}
++	}
++},
+ #undef USB_DEVICE_VENDOR_SPEC
+ #undef USB_AUDIO_DEVICE

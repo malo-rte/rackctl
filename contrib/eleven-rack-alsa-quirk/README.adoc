@@ -1,0 +1,149 @@
+= Eleven Rack ALSA quirk (make Linux see it as a real UAC2 soundcard)
+
+A `snd-usb-audio` quirk that gives the Avid/Digidesign Eleven Rack (`0dba:b011`)
+a native ALSA PCM device: *8 capture channels / 6 playback channels, 24-bit
+audio in `S32_LE` slots, 44.1 / 48 / 88.2 / 96 kHz*. No proprietary-format
+reverse-engineering -- the device is standard USB Audio Class 2.0; only its
+`bInterfaceClass` is set to vendor (`0xFF`) so the stock driver skips it.
+
+Background and the full USB analysis:
+`../../docs/eleven-rack-audio-driver-scope.adoc` ("KEY FINDING").
+
+Base kernel for the patch: *Linux 6.18*.
+
+== What is here
+
+* `eleven-rack-uac2-quirk.patch` -- the kernel patch, generated against Linux
+  6.18 `sound/usb/quirks-table.h`. Applies with `git apply` or `patch -p1` from
+  the kernel source root, and is what the NixOS module below feeds to
+  `boot.kernelPatches`.
+* `nixos-eleven-rack.nix` -- a NixOS module that pins kernel 6.18 and applies the
+  patch. Import it and `nixos-rebuild switch`.
+* `quirk-entry.c` -- the raw entry (modern macro form + explicit fallback form)
+  with a comment explaining the per-interface disposition; reference / source of
+  truth for the patch.
+* `insert-quirk.py` -- regenerates the change against an arbitrary
+  `quirks-table.h` in place (idempotent; anchors on the end-of-list
+  `#undef USB_DEVICE_VENDOR_SPEC` marker). Use it to re-cut the patch for a
+  different kernel: run it on that tree's file and `git diff`.
+
+== Use it on NixOS (recommended path)
+
+[source,nix]
+----
+# in configuration.nix (or a flake NixOS module)
+imports = [ ./contrib/eleven-rack-alsa-quirk/nixos-eleven-rack.nix ];
+----
+
+That pins `boot.kernelPackages = pkgs.linuxPackages_6_18` and adds the patch via
+`boot.kernelPatches`. `nixos-rebuild switch` rebuilds the kernel (slow the first
+time) and, after reboot, the Eleven Rack enumerates as a normal ALSA card. To
+apply the quirk on top of a different kernel, change the `boot.kernelPackages`
+line and regenerate the patch with `insert-quirk.py` (see above).
+
+== Why it should work
+
+Interfaces 1 (AudioControl), 3 and 4 (AudioStreaming) carry standard UAC2
+descriptors: UAC2 protocol `0x20`, a standard clock model (selector `0x80` +
+sources `0x81`/`0x82`/`0x83`), TYPE_I 32-bit PCM format descriptors, and the
+playback OUT slaved to the capture IN by *implicit feedback* -- all of which the
+in-tree `snd-usb-audio` parser already handles. The quirk just tells the driver
+to claim the vendor-class interfaces and run its standard UAC2 path on them:
+
+[cols="1,4",options="header"]
+|===
+| Intf | Quirk disposition
+| 0 | `IGNORE` -- DFU, left to userspace `dfu-util`
+| 1 | `STANDARD_MIXER` -- terminals, clocks, mixer controls
+| 2 | `STANDARD_MIDI` -- USB-MIDI (this is today's `hw:2,0`, unchanged)
+| 3 | `STANDARD_AUDIO` -- playback, EP `0x03`, 6 ch
+| 4 | `STANDARD_AUDIO` -- capture, EP `0x83`, 8 ch
+|===
+
+== Build and test (single-module, fast iteration)
+
+You need the *source tree for your running kernel* (headers alone are not enough
+to rebuild an in-tree module) and a matching toolchain.
+
+. Get the kernel source matching `uname -r`.
++
+* Arch: `pacman -S linux-headers`, then obtain the matching source
+  (`pkgctl repo clone --protocol=https linux`, or the tarball from the Arch
+  package). Note the env here reports an Arch kernel; keep the source version
+  exactly equal to `uname -r`.
+* Debian/Ubuntu: `apt-get source linux-image-$(uname -r)` (or `linux-source`).
+* Fedora: `dnf download --source kernel` and unpack.
+
+. Configure the tree to match the running kernel (for a loadable `.ko` whose
+  vermagic matches), then prepare modules:
++
+[source,sh]
+----
+cd /path/to/linux-source
+zcat /proc/config.gz > .config    # or: cp /boot/config-$(uname -r) .config
+make olddefconfig
+make modules_prepare
+----
+
+. Insert the quirk and build just the module:
++
+[source,sh]
+----
+python3 /path/to/rackctl/contrib/eleven-rack-alsa-quirk/insert-quirk.py \
+        sound/usb/quirks-table.h
+make sound/usb/snd-usb-audio.ko
+----
+
+. Swap the module in (unbind the Eleven's MIDI first so the module can unload):
++
+[source,sh]
+----
+sudo rmmod snd_usb_audio
+sudo insmod sound/usb/snd-usb-audio.ko
+#   if vermagic mismatches (different build config), force it for the test:
+#   sudo insmod -f sound/usb/snd-usb-audio.ko
+----
+
+TIP: For a clean, reboot-persistent install use DKMS instead of `insmod`; it
+rebuilds against each kernel and sorts out vermagic. The single-module route
+above is only for the reverse-engineering test loop.
+
+== Verify
+
+[source,sh]
+----
+dmesg | tail -30                 # look for the Eleven attaching as a UAC2 card
+aplay -l ; arecord -l            # expect a new card: 6-out playback, 8-in capture
+cat /proc/asound/cards
+# exercise capture (guitar in) -- 8ch/32-bit/44.1k:
+arecord -D hw:Rack -f S32_LE -c 8 -r 44100 /tmp/rack.wav
+----
+
+`amidi -l` / `aplay -l` should still show the MIDI side; `rackctl-eleven` keeps
+working on `hw:2,0` in parallel.
+
+== If it does not just work (expected iteration points)
+
+* *`dmesg` shows a descriptor-parse error on interface 1.* The UAC2 topology uses
+  an EXTENSION_UNIT (id `0x20`) and mixer units with high entity IDs. If the
+  parser trips on the extension unit, the fix is small -- teach the parser to
+  skip it, or drop interface 1 to `STANDARD_AUDIO` and lose only the mixer
+  controls (streaming still comes up).
+* *Card appears but capture/playback stalls.* The one control write the Windows
+  editor sends that is not plain UAC2 is `bRequest 3` to extension unit `0x20`
+  (`wIndex 0x2001`, data `02`) -- possibly an Avid "enable audio" toggle. If
+  streams arm but no samples flow, replay that single write from userspace
+  (`eleven-audio-probe` already sends it) while the ALSA device is open, and if
+  that unblocks it, fold it into the quirk as a control-message quirk.
+* *Only 44.1 kHz shows up (or the clock fails to init).* The unit supports
+  44.1 / 48 / 88.2 / 96 kHz (all 24-bit, all fit the 416 B packet), and
+  `snd-usb-audio` learns that set by issuing UAC2 `GET RANGE` on clock `0x81`.
+  But the capture shows Avid's driver *never* queries `RANGE` -- it only
+  `SET_CUR`s -- so the firmware may not answer `RANGE`. If you see just one rate
+  or a clock error in `dmesg`, add a fixed-rate / rate-list quirk (e.g. the
+  `QUIRK_FLAG_FIXED_RATE` family) declaring the four rates. Test each rate:
+  `arecord -D hw:Rack -f S32_LE -c 8 -r 96000 /tmp/r96.wav`.
+
+Once it holds, clean it up (drop the `IGNORE(0)` if the DFU interface is happy
+either way, confirm the mixer controls are sane) and submit upstream to
+`alsa-devel` / `sound/usb/quirks-table.h`.

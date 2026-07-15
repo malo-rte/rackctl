@@ -20,6 +20,76 @@ disproven edit-gate test are the reusable starting point if/when Linux audio is
 pursued. The rest of this doc (USB topology, format, H1-H3 gate) stands as audio RE
 reference.
 
+== KEY FINDING (2026-07-15): the audio path is standard UAC2 wearing a vendor-class hat
+
+Full decode of the latest cold-connect capture (`11/eleven-save-20260702-114348.pcapng`,
+device address 108) settles every open question below. The decisive result: interfaces
+1/3/4 are *bit-for-bit USB Audio Class 2.0* -- standard AC/AS subclasses (`0x01`/`0x02`),
+UAC2 protocol (`bInterfaceProtocol 0x20 = IP_VERSION_02_00`), standard class-specific
+descriptors, a standard UAC2 clock model, and standard UAC2 control requests. The *only*
+non-standard byte is `bInterfaceClass = 0xFF` (vendor) instead of `0x01` (audio), which is
+exactly what stops `snd-usb-audio` from binding. Digidesign shipped a UAC2 interface and
+relabelled its class so only their driver would attach.
+
+Confirmed topology and format (all from the config descriptor + live ISO stream):
+
+[cols="1,4",options="header"]
+|===
+| Property | Confirmed value
+| Playback (host->unit), intf 3 alt 1, EP `0x03` OUT | 6 ch, `S32_LE` (4-byte subslot, `bBitResolution` 32), ISO async, 416 B max/pkt, interval 1
+| Capture (unit->host), intf 4 alt 1, EP `0x83` IN | 8 ch, `S32_LE` (4-byte subslot, `bBitResolution` 32), ISO async + *implicit feedback*, 416 B max/pkt, interval 1
+| Bit depth | Format descriptor declares 32-bit in a 4-byte subslot, but the Eleven's converters are *24-bit* (Avid spec) -- 24 significant bits carried in 32-bit slots. ALSA will still expose `S32_LE`; the low bits are just not meaningful.
+| Sample rates | Device supports *44.1 / 48 / 88.2 / 96 kHz*, all 24-bit, up to 8 ch (Avid spec). Only 44100 appears in the capture -- the editor `SET_CUR`s whichever rate the session uses. All four fit the 416 B packet (worst case 96 k x 8 ch x 4 B = 384 B/uframe). Rate is clock-programmable, not a format list.
+| Clock | UAC2 clock selector `0x80` -> 3 sources: `0x81` internal programmable (freq control r/w; the four internal rates), `0x82`/`0x83` external -- the AES/EBU and S/PDIF digital inputs, which can slave the unit. Editor selects `0x81`.
+| Sync model | Playback OUT is async and *slaved to the capture IN packet cadence* via implicit feedback (EP `0x83` `bmAttributes 0x25`). No separate feedback endpoint. `snd-usb-audio` handles this natively.
+|===
+
+The class-control bring-up the editor sends (interface 1, all standard UAC2) is:
+
+  SET_CUR  bReq 0x01  wValue 0x0100  wIndex 0x8001  data 01            # CLOCK_SELECTOR_CONTROL(sel 0x80) = source 1
+  SET_CUR  bReq 0x01  wValue 0x0100  wIndex 0x8101  data 44 AC 00 00   # SAM_FREQ_CONTROL(clock 0x81) = 44100
+  SET_CUR  bReq 0x01  wValue 0x0100  wIndex 0x8001  data 01            # (re-assert selector)
+  SET_CUR  bReq 0x03  wValue 0x0000  wIndex 0x2001  data 02            # extension unit 0x20 (Avid-specific; probably optional)
+
+Only the last write touches a non-UAC2 concept (the `0x09` EXTENSION_UNIT id `0x20`); a
+stock UAC2 driver ignores extension units and should still stream. Whether that write is
+required for audio to flow is the one thing left to test on hardware.
+
+=== What implementing a real soundcard driver now requires
+
+Two viable paths; do Path A first -- it is a few lines and is decisive.
+
+*Path A -- kernel quirk (recommended, least effort).* Add a `USB_DEVICE(0x0dba, 0xb011)`
+composite quirk to `sound/usb/quirks-table.h` that forces `snd-usb-audio` to claim
+interfaces 1/3/4 as `QUIRK_AUDIO_STANDARD_INTERFACE` (and leave interface 2 as
+`QUIRK_MIDI_STANDARD_INTERFACE`, interface 0 to DFU). Because the descriptors are already
+valid UAC2, the in-tree parser -- clocks, terminals, implicit feedback, rate setting --
+should light up an ALSA `pcmC2D0` with 8 in / 6 out at 44.1 kHz (and whatever else the
+clock's `RANGE` reports) with no format RE at all. This is the standard fix for
+"UAC-standard device mislabelled vendor-class." Risk: the parser may reject an
+Avid-specific quirk in an entity descriptor, or the unit needs the extension-unit write;
+both are quick to diagnose with `dmesg`. A third, rate-specific risk: `snd-usb-audio`
+enumerates the supported rates by issuing UAC2 `GET RANGE` on clock `0x81`, but the
+capture shows Avid's own driver *only ever `SET_CUR`s* the rate and never queries `RANGE`
+-- so whether the firmware answers `RANGE` at all is untested. If it stalls/errors, expect
+only 44.1 kHz (or a clock-init failure) and reach for a fixed-rate / rate-list quirk. All
+four rates (44.1/48/88.2/96) fit the endpoint, so this is a firmware-response question,
+not a bandwidth one. Deliverable: a kernel patch against Linux 6.18,
+then upstream to alsa-devel if it holds. The patch (`eleven-rack-uac2-quirk.patch`), a
+NixOS module that applies it (`nixos-eleven-rack.nix`, pins kernel 6.18), the entry
+source, a regenerator script, and the build/test/verify recipe are in
+`contrib/eleven-rack-alsa-quirk/`.
+
+*Path B -- userspace driver (fits this repo's libusb philosophy).* Grow
+`eleven-audio-probe` into a real UAC2 client: query the clock `RANGE`, `SET_CUR` the rate,
+select alt 1 on both AS interfaces, run async ISO OUT whose submission rate tracks the IN
+endpoint's implicit feedback, format real 32-bit PCM, and bridge to PipeWire/JACK (or an
+ALSA loopback). More work than Path A but needs no kernel patch and is distro-portable.
+Use `nusb` (pure-Rust async ISO) rather than fighting rusb's missing ISO API. The channel
+map (which of the 6 playback / 8 capture channels are guitar / dry / reamp / USB-return)
+still needs labelling from the terminal descriptors + listening tests, but that is cosmetic
+routing, not a blocker to first sound.
+
 == Why ALSA gives us nothing today
 
 The Eleven exposes 5 USB interfaces (config has 5, all in one configuration):
@@ -41,9 +111,10 @@ the audio path.
 
 Audio format (from the alt-1 CS format descriptors, both directions):
 `06 24 02 01 04 20` = TYPE_I PCM, subframe `0x04` (4 bytes), `0x20` = 32-bit; ISO
-416 B/packet at interval 1 (8000 packets/s at high speed). Playback AS links to
-terminal 6, capture to terminal 8. Exact channel count / sample clock still to
-confirm from the terminal descriptors + a cold-connect capture.
+416 B *max*/packet at interval 1 (8000 packets/s at high speed); the live stream runs
+~176 B/pkt (capture) and ~132 B/pkt (playback) at 44.1 kHz. Playback AS links to input
+terminal `0x00`, capture AS to output terminal `0x01`. Channel count and clock are now
+CONFIRMED -- see "KEY FINDING" above: 6-ch playback, 8-ch capture, 44100 Hz, UAC2 clock.
 
 == Approach: libusb userspace driver (no kernel work)
 
