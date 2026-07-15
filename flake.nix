@@ -25,16 +25,16 @@
         #   libgl1-mesa-dev  -> libGL
         #   libxkbcommon-dev -> libxkbcommon
         #   libwayland-dev   -> wayland
-        #   libxcb*-dev      -> xorg.libxcb
+        #   libxcb*-dev      -> libxcb
         guiLibs = with pkgs; [
           libGL
           libxkbcommon
           wayland
-          xorg.libxcb
-          xorg.libX11
-          xorg.libXcursor
-          xorg.libXi
-          xorg.libXrandr
+          libxcb
+          libX11
+          libXcursor
+          libXi
+          libXrandr
         ];
 
         # The whole suite in one derivation: every device's CLI + GUI built from
