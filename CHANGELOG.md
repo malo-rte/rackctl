@@ -7,6 +7,8 @@ version.
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-07-15
+
 ### Added
 
 - **Eleven Rack Linux audio driver (kernel quirk).** A `snd-usb-audio` quirk and
