@@ -7,6 +7,60 @@ version.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-15
+
+This release adds the project's third device: the **Avid/Digidesign Eleven
+Rack** guitar amp/effects processor, controlled over MIDI System Exclusive. It
+ships as a new CLI and a new GUI patch librarian, alongside the existing
+US-16x08 and GX-700 tools, which are unchanged.
+
+### Added
+
+- **Eleven Rack CLI — `rackctl-eleven`.** Command-line control over the unit's
+  MIDI SysEx interface: browse the User and Factory banks (`patches`), audition a
+  slot (`select`), inspect the current sound or a slot (`dump`), and read the live
+  parameter space (`scan`, `params`, `get`). Live remote control of a named
+  parameter over MIDI CC (`cc`), the unit's `monitor` change stream, and
+  `identity` probing.
+- **Eleven Rack librarian — save, restore, scenes.** `save`/`load` a captured
+  sound to and from the on-disk library, `backup` the whole User bank, `store`
+  and `rename` User slots, `copy` between slots (including Factory→User), and
+  whole-bank `scene save`/`restore`/`list` snapshots — mirroring the GX-700 CLI's
+  library model. Restores are byte-exact and read-back-verified.
+- **Eleven Rack `.tfx` import.** `import <file.tfx>` reads an Eleven Rack rig file
+  into the on-disk patch library (`--json` converts one to patch JSON on stdout);
+  `imports` lists the imported rigs.
+- **Eleven Rack parameter catalog.** Named amp models (including the Expansion
+  Pack amps), effects, cabinets, microphones and mic positions, and the per-slot
+  MIDI CC map from the on-device CC reference — so `cc`, `list` and `info` speak
+  in parameter names, kebab-cased to match the GX-700 tool.
+- **Eleven Rack GUI — `rackctl-eleven-gui`.** A patch librarian mirroring the
+  GX-700 editor's architecture and tabs: browse/audition/rename/copy/store the
+  User bank, the Factory presets, the on-disk library (device backups and `.tfx`
+  imports), and a whole-bank Scene composer. Runs fully on a built-in mock device
+  with `--mock`; device I/O runs off the UI thread and device-touching controls
+  are gated while a load or write is in flight. An Exit button and a `--midi-log`
+  option match the GX-700 GUI.
+- **Packaging — the Eleven Rack tools.** The suite tarball, Nix package, desktop
+  entries and shell completions now include `rackctl-eleven` and
+  `rackctl-eleven-gui`.
+
+### Changed
+
+- **Shared SysEx framer.** The generic System Exclusive framer is extracted into a
+  new `rackctl-sysex` crate and shared by the GX-700 and Eleven Rack codecs,
+  removing the duplicated framing logic.
+- **Fast Eleven Rack bank capture.** The whole-bank backup reads each slot's patch
+  directly (no per-slot Program Change), cutting a full-bank capture to seconds,
+  and the reads survive the unit's periodic mid-sweep stall by waiting on idle
+  time and retrying, instead of intermittently returning empty slots.
+
+### Fixed
+
+- **Eleven Rack slot store.** Fixed a byte-order bug where storing a patch could
+  silently overwrite User slot 0, and a patch-directory decode that dropped the
+  first two characters of each slot name.
+
 ## [0.8.0] - 2026-06-30
 
 ### Added
@@ -317,7 +371,9 @@ only, via the `snd-usb-audio` driver.
 - The tools drive the DSP mixer control surface only; they do not stream audio.
   Capture to the computer is taken pre-DSP (the dry input).
 
-[Unreleased]: https://github.com/malo-rte/rackctl/compare/v0.7.3...HEAD
+[Unreleased]: https://github.com/malo-rte/rackctl/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/malo-rte/rackctl/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/malo-rte/rackctl/compare/v0.7.3...v0.8.0
 [0.7.3]: https://github.com/malo-rte/rackctl/compare/v0.7.2...v0.7.3
 [0.7.2]: https://github.com/malo-rte/rackctl/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/malo-rte/rackctl/compare/v0.7.0...v0.7.1
