@@ -226,7 +226,7 @@ pub(crate) fn meter_bar(ui: &mut egui::Ui, fraction: f32, peak: PeakHold, now: f
         } else {
             egui::Color32::from_rgb(235, 225, 90)
         };
-        painter.hline(rect.x_range(), y, egui::Stroke::new(1.5, color));
+        painter.hline(rect.x_range(), y, egui::Stroke::new(1.5_f32, color));
     }
     // Clip: a red cap at the top, latched for a moment after a clip.
     if peak.clipping(now) {

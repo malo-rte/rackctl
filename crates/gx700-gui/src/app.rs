@@ -1465,8 +1465,8 @@ fn show_assign_schematic(
     let (resp, painter) = ui.allocate_painter(egui::vec2(w, 170.0), egui::Sense::hover());
     let rect = resp.rect;
     let v = ui.visuals();
-    let axis = egui::Stroke::new(1.0, v.text_color());
-    let refln = egui::Stroke::new(1.0, v.weak_text_color());
+    let axis = egui::Stroke::new(1.0_f32, v.text_color());
+    let refln = egui::Stroke::new(1.0_f32, v.weak_text_color());
     let accent = egui::Color32::from_rgb(90, 160, 230);
     let (txt, weak) = (v.text_color(), v.weak_text_color());
     let font = egui::FontId::proportional(11.0);
@@ -1517,7 +1517,7 @@ fn show_assign_schematic(
         let (top, bot) = (py(y_min).min(py(y_max)), py(y_min).max(py(y_max)));
         painter.line_segment(
             [egui::pos2(x, top), egui::pos2(x, bot)],
-            egui::Stroke::new(2.0, accent),
+            egui::Stroke::new(2.0_f32, accent),
         );
         let head = |tip: egui::Pos2, dy: f32| {
             egui::Shape::convex_polygon(
@@ -1565,7 +1565,7 @@ fn show_assign_schematic(
                 egui::pos2(px(hi_x), py(y_max)),
                 egui::pos2(px(1.0), py(y_max)),
             ],
-            egui::Stroke::new(2.5, accent),
+            egui::Stroke::new(2.5_f32, accent),
         ));
         lbl(
             egui::pos2(px(lo_x), plot.bottom() + 3.0),

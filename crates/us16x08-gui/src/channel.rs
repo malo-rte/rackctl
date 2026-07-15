@@ -471,7 +471,7 @@ fn comp_curve(app: &App, ui: &mut egui::Ui, ch: u32) {
             plot.line(
                 Line::new(PlotPoints::from(points))
                     .color(egui::Color32::from_rgb(90, 170, 220))
-                    .fill(-60.0),
+                    .fill(-60.0_f32),
             );
             // 1:1 reference diagonal (input == output), on top of the fill so it
             // stays visible.
