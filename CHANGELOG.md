@@ -7,6 +7,8 @@ version.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-16
+
 ### Added
 
 - **MIDI ports now carry device names, and `--port` matches by name.** The
