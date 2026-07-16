@@ -7,6 +7,20 @@ version.
 
 ## [Unreleased]
 
+## [0.9.3] - 2026-07-16
+
+### Changed
+
+- **Eleven Rack ALSA audio quirk** now describes the two USB audio streams with
+  fixed endpoints instead of forcing them through the standard UAC2 parser.
+  Hardware testing (kernel 6.18.38) showed the previous approach brought up the
+  card, mixer, and MIDI but registered no PCM — the streaming interfaces were
+  rejected because the unit's DFU interface enumerates first and captures the
+  control-interface role, so terminal and clock lookups searched the wrong
+  interface. The fixed-endpoint form builds the capture/playback PCMs directly,
+  bypassing that lookup. Candidate fix pending hardware confirmation; see
+  `contrib/eleven-rack-alsa-quirk/`.
+
 ## [0.9.2] - 2026-07-15
 
 ### Added
