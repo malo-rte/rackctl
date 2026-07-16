@@ -1,35 +1,50 @@
 /*
  * snd-usb-audio quirk entry for the Avid/Digidesign Eleven Rack (0dba:b011).
  *
- * This is NOT a standalone file -- it is the entry to add to the kernel's
- * `sound/usb/quirks-table.h`, inside the `usb_audio_ids[]` array, before the
- * terminating `{ }`. See README.adoc for how to insert, build and test it.
+ * Reference copy of the entry added to `sound/usb/quirks-table.h` by
+ * eleven-rack-uac2-quirk.patch. Not a standalone file. See README.adoc.
  *
- * Why this works (see docs/eleven-rack-audio-driver-scope.adoc "KEY FINDING"):
- * the Eleven's interfaces 1/3/4 are bit-for-bit USB Audio Class 2.0 -- standard
- * AC/AS subclasses, UAC2 protocol (0x20), standard clock/terminal descriptors,
- * standard control requests. The ONLY non-standard byte is bInterfaceClass=0xFF
- * (vendor) instead of 0x01 (audio), which is what stops snd-usb-audio binding.
- * This quirk forces the driver to claim those interfaces and parse them as
- * standard UAC2 -- no format reverse-engineering needed.
+ * Background (docs/eleven-rack-audio-driver-scope.adoc "KEY FINDING"): the
+ * unit's audio function is standard USB Audio Class 2.0, but its interfaces are
+ * marked vendor-class (bInterfaceClass 0xFF) so snd-usb-audio does not bind them.
  *
- * Interface disposition (from the 419-byte config descriptor):
- *   0  DFU (class 0xFE)                -> IGNORE, leave to userspace dfu-util
- *   1  AudioControl  (vendor/0x01/0x20)-> STANDARD_MIXER: terminals, clocks, mixer
- *   2  MIDIStreaming (audio/0x03)      -> STANDARD_MIDI  (this is today's hw:2,0)
- *   3  AudioStreaming (vendor/0x02/0x20)-> STANDARD_AUDIO: playback, EP 0x03, 6ch S32_LE
- *   4  AudioStreaming (vendor/0x02/0x20)-> STANDARD_AUDIO: capture,  EP 0x83, 8ch S32_LE
+ * v1 attempt (QUIRK_DATA_STANDARD_AUDIO on interfaces 3/4) was tested on real
+ * hardware (kernel 6.18.38): the card, mixer, and MIDI came up, but BOTH
+ * streaming interfaces were rejected:
+ *     usb 5-1: 3:1 : bogus bTerminalLink 0
+ *     usb 5-1: 4:1 : bogus bTerminalLink 1
+ *     usb 5-1: 64:1: cannot get min/max values for control 7..14 (id 64)
+ * so no PCM was registered.
  *
- * Format is 4-byte subslot (S32_LE); the converters are 24-bit (Avid spec), so
- * 24 significant bits ride in 32-bit slots. Rate is clock-programmable (UAC2
- * clock 0x81): 44.1 / 48 / 88.2 / 96 kHz, all within the 416 B packet. The
- * driver sets it via SAM_FREQ the normal way -- but note Avid's driver never
- * issues GET RANGE, so if the firmware does not answer it snd-usb-audio may see
- * only one rate (a fixed-rate quirk fixes that). Playback OUT (0x03) is async
- * and slaved to capture IN (0x83) via implicit feedback -- handled natively.
+ * Root cause (confirmed against 6.18 source): the DFU interface (0) enumerates
+ * first and becomes chip->ctrl_intf. The composite quirk's STANDARD_AUDIO path
+ * calls snd_usb_parse_audio_interface() directly without registering a
+ * per-interface control link, so snd_usb_find_ctrl_interface() falls back to
+ * that DFU interface for interfaces 3/4. Terminal-link AND clock resolution then
+ * search the DFU interface (no audio descriptors) and fail. The mixer's min/max
+ * GETs miss for the same reason. (The card.c comment at the chip->ctrl_intf
+ * assignment even says "we might need a more specific check here in the future".)
+ *
+ * Fix (this entry): describe the two streams with fixed audioformats
+ * (QUIRK_AUDIO_FIXED_ENDPOINT). create_fixed_stream_quirk() builds the PCMs
+ * directly -- no terminal parsing -- and ignores rate-init failures, so the PCMs
+ * register regardless of the ctrl_intf issue; generic implicit-feedback
+ * detection links the async playback EP to the capture interface.
+ *
+ * Interface disposition:
+ *   0  DFU (0xFE)                 -> IGNORE (left to userspace dfu-util)
+ *   1  AudioControl  (0xFF/01/20) -> STANDARD_MIXER (mixer + clock descriptors)
+ *   2  MIDIStreaming (0x01/03)    -> STANDARD_MIDI  (hw:X,0, unchanged)
+ *   3  AudioStreaming(0xFF/02/20) -> fixed audioformat: playback EP 0x03, 6ch
+ *   4  AudioStreaming(0xFF/02/20) -> fixed audioformat: capture  EP 0x83, 8ch
+ *
+ * Format is S32_LE (4-byte slots) carrying 24-bit audio (Avid spec).
+ * Rates 44.1/48/88.2/96 kHz. NOTE: rate SET_CUR also goes through ctrl_intf, so
+ * until the ctrl_intf issue is fixed upstream the on-device rate may not follow
+ * the host request -- set the rate on the unit's front panel to be sure (or it
+ * stays at its 44.1 kHz power-on default).
  */
 
-/* --- Preferred form: modern QUIRK_DATA_* macros (kernels ~6.1+). --- */
 {
 	USB_DEVICE(0x0dba, 0xb011),
 	QUIRK_DRIVER_INFO {
@@ -39,32 +54,57 @@
 			{ QUIRK_DATA_IGNORE(0) },
 			{ QUIRK_DATA_STANDARD_MIXER(1) },
 			{ QUIRK_DATA_STANDARD_MIDI(2) },
-			{ QUIRK_DATA_STANDARD_AUDIO(3) },
-			{ QUIRK_DATA_STANDARD_AUDIO(4) },
+			{
+				/* playback: host -> unit, EP 0x03, 6ch */
+				QUIRK_DATA_AUDIOFORMAT(3) {
+					.formats = SNDRV_PCM_FMTBIT_S32_LE,
+					.channels = 6,
+					.fmt_bits = 24,
+					.iface = 3,
+					.altsetting = 1,
+					.altset_idx = 1,
+					.endpoint = 0x03,
+					.ep_attr = USB_ENDPOINT_XFER_ISOC |
+						   USB_ENDPOINT_SYNC_ASYNC,
+					.rates = SNDRV_PCM_RATE_44100 |
+						 SNDRV_PCM_RATE_48000 |
+						 SNDRV_PCM_RATE_88200 |
+						 SNDRV_PCM_RATE_96000,
+					.rate_min = 44100,
+					.rate_max = 96000,
+					.nr_rates = 4,
+					.rate_table = (unsigned int[]) {
+						44100, 48000, 88200, 96000
+					},
+					.clock = 0x81,
+				},
+			},
+			{
+				/* capture: unit -> host, EP 0x83, 8ch, implicit fb */
+				QUIRK_DATA_AUDIOFORMAT(4) {
+					.formats = SNDRV_PCM_FMTBIT_S32_LE,
+					.channels = 8,
+					.fmt_bits = 24,
+					.iface = 4,
+					.altsetting = 1,
+					.altset_idx = 1,
+					.endpoint = 0x83,
+					.ep_attr = USB_ENDPOINT_XFER_ISOC |
+						   USB_ENDPOINT_SYNC_ASYNC,
+					.rates = SNDRV_PCM_RATE_44100 |
+						 SNDRV_PCM_RATE_48000 |
+						 SNDRV_PCM_RATE_88200 |
+						 SNDRV_PCM_RATE_96000,
+					.rate_min = 44100,
+					.rate_max = 96000,
+					.nr_rates = 4,
+					.rate_table = (unsigned int[]) {
+						44100, 48000, 88200, 96000
+					},
+					.clock = 0x81,
+				},
+			},
 			QUIRK_COMPOSITE_END
 		}
 	}
 },
-
-#if 0
-/* --- Fallback form: explicit driver_info, compiles on any kernel that has
- *     the composite quirk (i.e. essentially all of them). Use this instead of
- *     the macro form above if your tree predates the QUIRK_DATA_* macros. --- */
-{
-	USB_DEVICE(0x0dba, 0xb011),
-	.driver_info = (unsigned long) &(const struct snd_usb_audio_quirk) {
-		.vendor_name = "Digidesign",
-		.product_name = "Eleven Rack",
-		.ifnum = QUIRK_ANY_INTERFACE,
-		.type = QUIRK_COMPOSITE,
-		.data = &(const struct snd_usb_audio_quirk[]) {
-			{ .ifnum = 0, .type = QUIRK_IGNORE_INTERFACE },
-			{ .ifnum = 1, .type = QUIRK_AUDIO_STANDARD_MIXER },
-			{ .ifnum = 2, .type = QUIRK_MIDI_STANDARD_INTERFACE },
-			{ .ifnum = 3, .type = QUIRK_AUDIO_STANDARD_INTERFACE },
-			{ .ifnum = 4, .type = QUIRK_AUDIO_STANDARD_INTERFACE },
-			{ .ifnum = -1 }
-		}
-	}
-},
-#endif

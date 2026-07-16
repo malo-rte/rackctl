@@ -11,6 +11,28 @@ Background and the full USB analysis:
 
 Base kernel for the patch: *Linux 6.18*.
 
+== Status (2026-07-16)
+
+Tested on real hardware (kernel 6.18.38). *v1* (force interfaces 3/4 through
+the standard UAC2 parser with `QUIRK_DATA_STANDARD_AUDIO`) brought up the card,
+mixer, and MIDI but registered *no PCM*: both streaming interfaces were rejected
+with `bogus bTerminalLink`.
+
+Root cause (confirmed against the 6.18 source): the DFU interface (0) enumerates
+first and becomes `chip->ctrl_intf`. The composite quirk's `STANDARD_AUDIO` path
+calls `snd_usb_parse_audio_interface()` directly *without* registering a
+per-interface control link, so `snd_usb_find_ctrl_interface()` falls back to the
+DFU interface for interfaces 3/4. Terminal-link *and* clock resolution then
+search the DFU interface's (audio-less) descriptors and fail -- and the mixer's
+`cannot get min/max` spam is the same misdirection. (The `card.c` comment at the
+`chip->ctrl_intf` assignment even says "we might need a more specific check here
+in the future".)
+
+*v2* (this patch) describes the two streams with fixed audioformats
+(`QUIRK_AUDIO_FIXED_ENDPOINT`), which build the PCMs directly and skip terminal
+parsing. This is a *candidate fix pending the next hardware build* -- see
+"Residual caveat" below.
+
 == What is here
 
 * `eleven-rack-uac2-quirk.patch` -- the kernel patch, generated against Linux
@@ -19,9 +41,8 @@ Base kernel for the patch: *Linux 6.18*.
   `boot.kernelPatches`.
 * `nixos-eleven-rack.nix` -- a NixOS module that pins kernel 6.18 and applies the
   patch. Import it and `nixos-rebuild switch`.
-* `quirk-entry.c` -- the raw entry (modern macro form + explicit fallback form)
-  with a comment explaining the per-interface disposition; reference / source of
-  truth for the patch.
+* `quirk-entry.c` -- the raw entry with a comment explaining the hardware result,
+  root cause, and per-interface disposition; readable reference for the patch.
 * `insert-quirk.py` -- regenerates the change against an arbitrary
   `quirks-table.h` in place (idempotent; anchors on the end-of-list
   `#undef USB_DEVICE_VENDOR_SPEC` marker). Use it to re-cut the patch for a
@@ -41,24 +62,24 @@ time) and, after reboot, the Eleven Rack enumerates as a normal ALSA card. To
 apply the quirk on top of a different kernel, change the `boot.kernelPackages`
 line and regenerate the patch with `insert-quirk.py` (see above).
 
-== Why it should work
-
-Interfaces 1 (AudioControl), 3 and 4 (AudioStreaming) carry standard UAC2
-descriptors: UAC2 protocol `0x20`, a standard clock model (selector `0x80` +
-sources `0x81`/`0x82`/`0x83`), TYPE_I 32-bit PCM format descriptors, and the
-playback OUT slaved to the capture IN by *implicit feedback* -- all of which the
-in-tree `snd-usb-audio` parser already handles. The quirk just tells the driver
-to claim the vendor-class interfaces and run its standard UAC2 path on them:
+== How it works (v2)
 
 [cols="1,4",options="header"]
 |===
 | Intf | Quirk disposition
 | 0 | `IGNORE` -- DFU, left to userspace `dfu-util`
-| 1 | `STANDARD_MIXER` -- terminals, clocks, mixer controls
+| 1 | `STANDARD_MIXER` -- mixer + clock descriptors (parses on its own interface)
 | 2 | `STANDARD_MIDI` -- USB-MIDI (this is today's `hw:2,0`, unchanged)
-| 3 | `STANDARD_AUDIO` -- playback, EP `0x03`, 6 ch
-| 4 | `STANDARD_AUDIO` -- capture, EP `0x83`, 8 ch
+| 3 | fixed `AUDIOFORMAT` -- playback, EP `0x03`, 6 ch, `S32_LE`
+| 4 | fixed `AUDIOFORMAT` -- capture, EP `0x83`, 8 ch, `S32_LE`, implicit fb
 |===
+
+`create_fixed_stream_quirk()` builds each PCM straight from the declared
+audioformat (channels, format, rates, endpoint), so it never does the
+terminal-link lookup that v1 tripped on. `add_audio_stream_from_fixed_fmt()`
+calls the generic implicit-feedback detector, which links the async playback
+endpoint (interface 3) to the capture interface (4) automatically. The mixer and
+MIDI still parse on their own interfaces, exactly as in v1.
 
 == Build and test (single-module, fast iteration)
 
@@ -108,42 +129,55 @@ TIP: For a clean, reboot-persistent install use DKMS instead of `insmod`; it
 rebuilds against each kernel and sorts out vermagic. The single-module route
 above is only for the reverse-engineering test loop.
 
-== Verify
+== Verify the card comes up with PCM
 
 [source,sh]
 ----
-dmesg | tail -30                 # look for the Eleven attaching as a UAC2 card
-aplay -l ; arecord -l            # expect a new card: 6-out playback, 8-in capture
-cat /proc/asound/cards
-# exercise capture (guitar in) -- 8ch/32-bit/44.1k:
-arecord -D hw:Rack -f S32_LE -c 8 -r 44100 /tmp/rack.wav
+dmesg | tail -30                 # no more "bogus bTerminalLink"; streams attach
+aplay -l ; arecord -l            # expect card "Rack": 6-out playback, 8-in capture
+cat /proc/asound/cards ; cat /proc/asound/pcm
 ----
 
-`amidi -l` / `aplay -l` should still show the MIDI side; `rackctl-eleven` keeps
-working on `hw:2,0` in parallel.
+`amidi -l` should still show the MIDI side; `rackctl-eleven` keeps working on the
+MIDI card in parallel.
 
-== If it does not just work (expected iteration points)
+== Residual caveat: sample rate (the `ctrl_intf` issue is not fully fixed)
 
-* *`dmesg` shows a descriptor-parse error on interface 1.* The UAC2 topology uses
-  an EXTENSION_UNIT (id `0x20`) and mixer units with high entity IDs. If the
-  parser trips on the extension unit, the fix is small -- teach the parser to
-  skip it, or drop interface 1 to `STANDARD_AUDIO` and lose only the mixer
-  controls (streaming still comes up).
-* *Card appears but capture/playback stalls.* The one control write the Windows
-  editor sends that is not plain UAC2 is `bRequest 3` to extension unit `0x20`
-  (`wIndex 0x2001`, data `02`) -- possibly an Avid "enable audio" toggle. If
-  streams arm but no samples flow, replay that single write from userspace
-  (`eleven-audio-probe` already sends it) while the ALSA device is open, and if
-  that unblocks it, fold it into the quirk as a control-message quirk.
-* *Only 44.1 kHz shows up (or the clock fails to init).* The unit supports
-  44.1 / 48 / 88.2 / 96 kHz (all 24-bit, all fit the 416 B packet), and
-  `snd-usb-audio` learns that set by issuing UAC2 `GET RANGE` on clock `0x81`.
-  But the capture shows Avid's driver *never* queries `RANGE` -- it only
-  `SET_CUR`s -- so the firmware may not answer `RANGE`. If you see just one rate
-  or a clock error in `dmesg`, add a fixed-rate / rate-list quirk (e.g. the
-  `QUIRK_FLAG_FIXED_RATE` family) declaring the four rates. Test each rate:
-  `arecord -D hw:Rack -f S32_LE -c 8 -r 96000 /tmp/r96.wav`.
+The fixed audioformat gets the PCMs registered, but sample-*rate* control still
+goes through `snd_usb_find_ctrl_interface()`, which -- until the root cause is
+fixed upstream -- resolves to the DFU interface for interfaces 3/4. So the
+`SET_CUR SAM_FREQ` may not actually change the unit's rate.
+`create_fixed_stream_quirk()` ignores the rate-init result, so the PCM still
+registers, but the *device* stays at its power-on rate (44.1 kHz).
 
-Once it holds, clean it up (drop the `IGNORE(0)` if the DFU interface is happy
-either way, confirm the mixer controls are sane) and submit upstream to
-`alsa-devel` / `sound/usb/quirks-table.h`.
+Practical consequence and workaround:
+
+* 44.1 kHz should just work (host and device agree at the default).
+* For 48 / 88.2 / 96 kHz, *set the rate on the unit's front panel*
+  (`EDIT/BACK` -> Digital Clock/Input -> CLOCK SOURCE -> `Int 96 kHz`), then open
+  the ALSA device at the matching rate. This is also the honest capture rate for
+  black-box measurement of the unit.
+
+Two ways to fix the rate path properly, for the upstream submission:
+
+* *Upstream kernel fix (preferred).* Make `chip->ctrl_intf` (or the per-interface
+  control link) resolve to the real AudioControl interface (1) even when a
+  non-audio interface (DFU) enumerates first -- the `card.c` comment invites
+  exactly this. That also makes the simpler `STANDARD_AUDIO` form of the quirk
+  work and fixes the mixer `min/max` errors.
+* *Quirk-local.* If the firmware honours `SET_CUR` addressed to interface 1
+  regardless, a targeted control-message quirk could set the rate directly.
+
+== Verify each rate on hardware
+
+[source,sh]
+----
+arecord -D hw:Rack -f S32_LE -c 8 -r 44100 /tmp/r44.wav   # expect: works
+# set the unit to Int 96k on its front panel first, then:
+arecord -D hw:Rack -f S32_LE -c 8 -r 96000 /tmp/r96.wav
+speaker-test -D hw:Rack -c 6 -r 44100 -F S32_LE           # playback path
+----
+
+Once v2 holds, clean it up (confirm the mixer controls are sane, decide whether
+to also land the `ctrl_intf` kernel fix) and submit upstream to `alsa-devel` /
+`sound/usb/quirks-table.h`.

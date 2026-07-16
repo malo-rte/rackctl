@@ -90,6 +90,32 @@ map (which of the 6 playback / 8 capture channels are guitar / dry / reamp / USB
 still needs labelling from the terminal descriptors + listening tests, but that is cosmetic
 routing, not a blocker to first sound.
 
+== Hardware result (2026-07-16): quirk binds; v1 no PCM; v2 candidate
+
+Path A was built (patch against 6.18, deployed on a NixOS test VM, kernel 6.18.38)
+and tested on the real unit.
+
+* *v1 (`QUIRK_DATA_STANDARD_AUDIO` on interfaces 3/4)*: the card, `usbmixer`, and MIDI
+  come up, but *no PCM* -- both streaming interfaces are rejected:
+  `3:1 : bogus bTerminalLink 0`, `4:1 : bogus bTerminalLink 1`, plus
+  `64:1: cannot get min/max values for control 7..14`.
+* *Root cause (confirmed against 6.18 source)*: the DFU interface (0) enumerates first
+  and becomes `chip->ctrl_intf`. The composite quirk's `STANDARD_AUDIO` path calls
+  `snd_usb_parse_audio_interface()` directly *without* registering a per-interface
+  control link, so `snd_usb_find_ctrl_interface()` falls back to the DFU interface for
+  interfaces 3/4. Terminal-link *and* clock resolution (both use that interface's
+  descriptors) then fail; the mixer `min/max` errors are the same misdirection. The
+  `sound/usb/card.c` comment at the `chip->ctrl_intf` assignment literally anticipates
+  this ("we might need a more specific check here in the future").
+* *v2 (fixed-endpoint `QUIRK_AUDIO_FIXED_ENDPOINT`)*: describe the two streams with
+  explicit audioformats so `create_fixed_stream_quirk()` builds the PCMs directly,
+  skipping terminal parsing; generic implicit-feedback detection links playback to the
+  capture interface. This is the candidate fix (in `contrib/eleven-rack-alsa-quirk/`),
+  pending the next hardware build. Residual: rate `SET_CUR` still routes through
+  `ctrl_intf`, so non-default rates may not take -- set the rate on the unit's front
+  panel until an upstream `ctrl_intf` fix lands. The full-fix option is a small kernel
+  patch making `ctrl_intf` resolve to the real AudioControl interface (1).
+
 == Why ALSA gives us nothing today
 
 The Eleven exposes 5 USB interfaces (config has 5, all in one configuration):

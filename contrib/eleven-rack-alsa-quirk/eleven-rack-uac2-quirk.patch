@@ -1,39 +1,50 @@
 From: Mats Loman <mats.loman@rte.se>
-Date: 2026-07-15
-Subject: [PATCH] ALSA: usb-audio: add UAC2 quirk for Avid/Digidesign Eleven Rack
+Date: 2026-07-16
+Subject: [PATCH] ALSA: usb-audio: add fixed-endpoint quirk for Avid Eleven Rack
 
-The Avid/Digidesign Eleven Rack (0dba:b011) exposes an audio function whose
-class-specific descriptors are standard USB Audio Class 2.0 -- standard
-AudioControl/AudioStreaming subclasses, UAC2 protocol (0x20), a standard clock
-model (clock selector 0x80 over sources 0x81/0x82/0x83), TYPE_I 32-bit PCM
-format descriptors, and playback slaved to capture via implicit feedback. The
-only non-standard detail is bInterfaceClass = 0xFF (vendor) on the audio
-interfaces, which prevents snd-usb-audio from binding, so the device has MIDI
-(hw:X,0) but no PCM on Linux.
+The Avid/Digidesign Eleven Rack (0dba:b011) exposes a standard USB Audio
+Class 2.0 function, but marks its AudioControl/AudioStreaming interfaces
+vendor-class (bInterfaceClass 0xFF) so snd-usb-audio does not bind them.
 
-Add a composite quirk that claims the vendor-class interfaces and drives them
-through the standard UAC2 path: interface 1 as the mixer/clock/terminal control,
-interfaces 3 and 4 as the streaming interfaces (6-channel playback on EP 0x03,
-8-channel capture on EP 0x83, 32-bit, 44.1 kHz and up per the programmable
-clock). Interface 2 remains standard USB-MIDI; interface 0 (DFU) is ignored and
-left to userspace.
+Forcing the interfaces to standard UAC2 parsing is not enough: the unit's
+first interface is DFU (interface 0), which enumerates first and becomes
+chip->ctrl_intf. The composite quirk's streaming path does not register a
+per-interface control link, so snd_usb_find_ctrl_interface() falls back to
+that DFU interface for interfaces 3 and 4. Terminal-link and clock lookups
+then search the DFU interface's (audio-less) descriptors and fail:
+
+  usb 5-1: 3:1 : bogus bTerminalLink 0
+  usb 5-1: 4:1 : bogus bTerminalLink 1
+
+so no PCM is registered even though a mixer and MIDI come up.
+
+Describe the two streams (6-channel playback on EP 0x03, 8-channel capture
+on EP 0x83, S32_LE carrying 24-bit audio, 44.1/48/88.2/96 kHz) with fixed
+audioformats. create_fixed_stream_quirk() then builds the PCMs directly,
+without terminal parsing, and generic implicit-feedback detection links the
+async playback endpoint to the capture interface. The result is an ALSA PCM
+device (8 in / 6 out) for the unit; the mixer and MIDI are unchanged.
 
 Signed-off-by: <run `git commit -s` to add your Signed-off-by line>
 ---
- sound/usb/quirks-table.h | 20 ++++++++++++++++++++
- 1 file changed, 20 insertions(+)
+ sound/usb/quirks-table.h | 73 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 73 insertions(+)
 
-diff --git a/sound/usb/quirks-table.h b/sound/usb/quirks-table.h
 --- a/sound/usb/quirks-table.h
 +++ b/sound/usb/quirks-table.h
-@@ -3900,5 +3900,25 @@
+@@ -3900,5 +3900,78 @@
  QUIRK_RME_DIGIFACE(0x3f8c),
  QUIRK_RME_DIGIFACE(0x3fa0),
-
+ 
 +	/*
-+	 * Avid/Digidesign Eleven Rack: UAC2 in all but bInterfaceClass (0xFF).
-+	 * Force snd-usb-audio to claim + parse the vendor-class audio interfaces
-+	 * as standard UAC2. See contrib/eleven-rack-alsa-quirk/ in the rackctl repo.
++	 * Avid/Digidesign Eleven Rack: the audio function is standard UAC2 but
++	 * marked vendor-class (0xFF). The DFU interface (0) enumerates first and
++	 * becomes chip->ctrl_intf, so terminal-link + clock resolution for the
++	 * streaming interfaces (which follows ctrl_intf) misfires -- interfaces
++	 * 3/4 report 'bogus bTerminalLink' and no PCM is built. Describe the two
++	 * streams with fixed audioformats so the PCMs are created directly,
++	 * bypassing terminal parsing. Mixer + MIDI parse on their own interfaces.
++	 * See contrib/eleven-rack-alsa-quirk/ in the rackctl repo.
 +	 */
 +{
 +	USB_DEVICE(0x0dba, 0xb011),
@@ -44,8 +55,56 @@ diff --git a/sound/usb/quirks-table.h b/sound/usb/quirks-table.h
 +			{ QUIRK_DATA_IGNORE(0) },
 +			{ QUIRK_DATA_STANDARD_MIXER(1) },
 +			{ QUIRK_DATA_STANDARD_MIDI(2) },
-+			{ QUIRK_DATA_STANDARD_AUDIO(3) },
-+			{ QUIRK_DATA_STANDARD_AUDIO(4) },
++			{
++				/* playback: host -> unit: EP 0x03, 6ch, 24-bit in S32_LE slots */
++				QUIRK_DATA_AUDIOFORMAT(3) {
++					.formats = SNDRV_PCM_FMTBIT_S32_LE,
++					.channels = 6,
++					.fmt_bits = 24,
++					.iface = 3,
++					.altsetting = 1,
++					.altset_idx = 1,
++					.endpoint = 0x03,
++					.ep_attr = USB_ENDPOINT_XFER_ISOC |
++						   USB_ENDPOINT_SYNC_ASYNC,
++					.rates = SNDRV_PCM_RATE_44100 |
++						 SNDRV_PCM_RATE_48000 |
++						 SNDRV_PCM_RATE_88200 |
++						 SNDRV_PCM_RATE_96000,
++					.rate_min = 44100,
++					.rate_max = 96000,
++					.nr_rates = 4,
++					.rate_table = (unsigned int[]) {
++						44100, 48000, 88200, 96000
++					},
++					.clock = 0x81,
++				},
++			},
++			{
++				/* capture: unit -> host, implicit fb: EP 0x83, 8ch, 24-bit in S32_LE slots */
++				QUIRK_DATA_AUDIOFORMAT(4) {
++					.formats = SNDRV_PCM_FMTBIT_S32_LE,
++					.channels = 8,
++					.fmt_bits = 24,
++					.iface = 4,
++					.altsetting = 1,
++					.altset_idx = 1,
++					.endpoint = 0x83,
++					.ep_attr = USB_ENDPOINT_XFER_ISOC |
++						   USB_ENDPOINT_SYNC_ASYNC,
++					.rates = SNDRV_PCM_RATE_44100 |
++						 SNDRV_PCM_RATE_48000 |
++						 SNDRV_PCM_RATE_88200 |
++						 SNDRV_PCM_RATE_96000,
++					.rate_min = 44100,
++					.rate_max = 96000,
++					.nr_rates = 4,
++					.rate_table = (unsigned int[]) {
++						44100, 48000, 88200, 96000
++					},
++					.clock = 0x81,
++				},
++			},
 +			QUIRK_COMPOSITE_END
 +		}
 +	}
