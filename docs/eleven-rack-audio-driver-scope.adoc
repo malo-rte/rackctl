@@ -136,11 +136,21 @@ on the silence right after a test tone ended. The scope's correct-frequency
 result disproves the rate/channel theories -- the device is genuinely 6-channel
 playback at 48 kHz. Expect clean playback on bare metal.
 
-*Userspace note:* the kernel driver is validated; the PipeWire path still needs
-tuning (an async device that PipeWire must resample; node volume defaulted to 0;
-`pw-play` routing). `contrib/eleven-rack-alsa-quirk/wireplumber-eleven-rack.{conf,nix}`
-is a baseline (no node suspend so the clock lock holds; Main as FL/FR, rest
-discrete AUX; the channel map above).
+*Userspace note (open, parked for bare metal):* the kernel driver is validated,
+but `pw-play`/PipeWire playback to the Rack is broken on the test VM (scope reads
+~100-180 mV noise floor, not a clean sine), while raw ALSA `aplay` to the same
+device is clean. Debugged extensively: links, volume, mute, resampler (1:1), and
+PCM state are all correct, and `pw-play` is perfect on the emulated Intel HDA --
+so it is not a routing/config bug. It fails identically on BOTH QEMU passthrough
+controllers (XHCI and EHCI both tested), so it is not controller-specific; the
+difference is that PipeWire's fine-grained isochronous quanta don't survive the
+passthrough where `aplay`'s bulk blocking writes do. Whether that is (1) any-QEMU-
+passthrough jitter (VM-only) or (2) a real PipeWire<->async-USB-device issue can
+only be settled on *bare metal* -- plug the Rack directly into a Linux box and
+repeat the `pw-play` + scope measurement. Parked until then.
+`contrib/eleven-rack-alsa-quirk/wireplumber-eleven-rack.{conf,nix}` is a baseline
+(no node suspend so the clock lock holds; Main as FL/FR, rest discrete AUX; the
+channel map above).
 
 === Earlier attempts (superseded): quirk binds; v1 no PCM; v2 no stream
 
