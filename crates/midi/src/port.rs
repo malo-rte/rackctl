@@ -32,6 +32,17 @@ fn alsa_err(e: ::alsa::Error) -> MidiError {
     MidiError::Io(e.to_string())
 }
 
+/// A connectable MIDI endpoint discovered on the system: its `hw:CARD,DEV`
+/// [`open`][MidiPort::open] address and a human-readable device name (the ALSA
+/// card name, e.g. `"Eleven Rack"`), for display and name-based matching.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MidiPortInfo {
+    /// `hw:CARD,DEV` address, suitable for [`MidiPort::open`].
+    pub addr: String,
+    /// Human-readable device name (the ALSA card name).
+    pub name: String,
+}
+
 /// Whether a read error just means "no data available yet" on a non-blocking
 /// endpoint. ALSA reports `EAGAIN` with its negative-errno convention (`-11`),
 /// which `io::Error::kind()` does not map to [`WouldBlock`][std::io::ErrorKind],
@@ -41,29 +52,54 @@ fn is_would_block(e: &std::io::Error) -> bool {
 }
 
 impl MidiPort {
-    /// Enumerate the ALSA rawmidi ports available on the system, as `hw:CARD,DEV`
-    /// strings suitable for [`Self::open`].
+    /// Enumerate the connectable MIDI ports on the system: their `hw:CARD,DEV`
+    /// addresses (suitable for [`Self::open`]) paired with the device name.
     ///
     /// # Errors
     /// [`MidiError::Io`] if ALSA reports an error while iterating cards or devices.
-    pub fn list_ports() -> Result<Vec<String>, MidiError> {
+    pub fn list_ports() -> Result<Vec<MidiPortInfo>, MidiError> {
         let mut ports = Vec::new();
         for card in ::alsa::card::Iter::new() {
             let card = card.map_err(alsa_err)?;
             let index = card.get_index();
+            // A name-getter failure on one card must not abort the whole scan.
+            let name = card.get_name().unwrap_or_else(|_| format!("hw:{index}"));
             let ctl = Ctl::new(&format!("hw:{index}"), false).map_err(alsa_err)?;
             for info in RawmidiIter::new(&ctl) {
                 let info = info.map_err(alsa_err)?;
                 // Each output device gives one addressable endpoint; list those.
                 if info.get_stream() == Direction::Playback {
-                    let port = format!("hw:{index},{}", info.get_device());
-                    if !ports.contains(&port) {
-                        ports.push(port);
+                    let addr = format!("hw:{index},{}", info.get_device());
+                    if !ports.iter().any(|p: &MidiPortInfo| p.addr == addr) {
+                        ports.push(MidiPortInfo {
+                            addr,
+                            name: name.clone(),
+                        });
                     }
                 }
             }
         }
         Ok(ports)
+    }
+
+    /// Find the ports matching a `spec`: an exact `hw:CARD,DEV` address (at most
+    /// one match), or a case-insensitive substring of a device name (e.g.
+    /// `"eleven"`), which may match several — every matching endpoint is returned
+    /// so the caller can pick one when more than one device is connected.
+    ///
+    /// # Errors
+    /// [`MidiError::Io`] if enumerating ports fails.
+    pub fn find_ports(spec: &str) -> Result<Vec<MidiPortInfo>, MidiError> {
+        let ports = Self::list_ports()?;
+        // An exact address is unambiguous.
+        if let Some(p) = ports.iter().find(|p| p.addr == spec) {
+            return Ok(vec![p.clone()]);
+        }
+        let needle = spec.to_lowercase();
+        Ok(ports
+            .into_iter()
+            .filter(|p| p.name.to_lowercase().contains(&needle))
+            .collect())
     }
 
     /// Open the rawmidi port at `port` (a `hw:CARD,DEV` address) for both input and

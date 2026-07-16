@@ -23,7 +23,9 @@ struct Cli {
     #[arg(long, global = true)]
     mock: bool,
 
-    /// ALSA rawmidi port (`hw:CARD,DEV`) of the "Eleven Rack Rig" port; see `ports`.
+    /// Which MIDI port: a `hw:CARD,DEV` address or a device-name substring (e.g.
+    /// `eleven`); see `ports`. Omit to auto-detect the Eleven Rack. If more than
+    /// one device matches, they are listed so you can pick one.
     #[arg(long, global = true)]
     port: Option<String>,
 
@@ -37,7 +39,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// List the available ALSA rawmidi ports.
+    /// List the available MIDI ports (address and device name).
     Ports,
     /// Read a value: a single-byte amp-parameter `target` (e.g. `get 0B`, resolved
     /// via the live table — see `scan amp`), or a raw 3-byte address (`get "11 21 0D"`).

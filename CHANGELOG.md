@@ -7,6 +7,17 @@ version.
 
 ## [Unreleased]
 
+### Added
+
+- **MIDI ports now carry device names, and `--port` matches by name.** The
+  `ports` command lists each port's `hw:CARD,DEV` address alongside its device
+  name (e.g. `Eleven Rack`). `--port` accepts either an address or a
+  case-insensitive device-name substring, and the Eleven tools auto-detect the
+  Eleven Rack when `--port` is omitted. When more than one connected device
+  matches, the candidates are listed and you are asked to select one with
+  `--port <hw:CARD,DEV>` rather than one being chosen silently. Applies to
+  `rackctl-eleven`, `rackctl-gx700`, and the Eleven Rack GUI.
+
 ## [0.9.5] - 2026-07-16
 
 ### Added

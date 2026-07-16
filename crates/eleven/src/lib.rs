@@ -51,6 +51,8 @@ pub use rackctl_eleven_model::{
 };
 
 #[cfg(feature = "alsa")]
+pub use backend::MidiPortInfo;
+#[cfg(feature = "alsa")]
 pub use backend::RawMidi;
 pub use backend::{MockTransport, Transport};
 pub use bank::{ElevenDevice, MockEleven};

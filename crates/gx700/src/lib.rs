@@ -58,6 +58,8 @@ pub use rackctl_gx700_model::{
 pub use rackctl_gx700_model::{error, param, patch, scene, typed, units};
 
 #[cfg(feature = "alsa")]
+pub use backend::MidiPortInfo;
+#[cfg(feature = "alsa")]
 pub use backend::RawMidi;
 pub use backend::{MockTransport, Transport};
 pub use device::Gx700;

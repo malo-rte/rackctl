@@ -13,9 +13,14 @@ use std::sync::OnceLock;
 
 use anyhow::{Context, Result};
 
-#[cfg(feature = "alsa")]
-use rackctl_eleven::RawMidi;
 use rackctl_eleven::{Eleven, MockTransport, RawValue, Transport};
+#[cfg(feature = "alsa")]
+use rackctl_eleven::{MidiPortInfo, RawMidi};
+
+/// The Eleven Rack's ALSA card name, matched to auto-detect its port when
+/// `--port` is omitted.
+#[cfg(feature = "alsa")]
+const ELEVEN_MATCH: &str = "Eleven Rack";
 
 // ---- device opening ----
 
@@ -39,16 +44,53 @@ fn open_raw(port: &str) -> Result<RawMidi> {
     Ok(dev)
 }
 
+/// Resolve `--port` to a concrete `hw:CARD,DEV` address. An explicit `hw:…`
+/// address is used verbatim; anything else is a device-name substring matched
+/// against the connected devices; when omitted, the Eleven Rack is auto-detected
+/// by name. If more than one device matches, the candidates are listed and the
+/// user is asked to pick one with `--port` — nothing is chosen silently.
+#[cfg(feature = "alsa")]
+fn resolve_port(port: Option<&str>) -> Result<String> {
+    if let Some(spec) = port {
+        if spec.starts_with("hw:") {
+            return Ok(spec.to_owned());
+        }
+        return Ok(select_one(RawMidi::find(spec)?, spec)?.addr);
+    }
+    let chosen = select_one(RawMidi::find(ELEVEN_MATCH)?, ELEVEN_MATCH)?;
+    eprintln!("using {} ({})", chosen.addr, chosen.name);
+    Ok(chosen.addr)
+}
+
+/// Pick exactly one port from the `spec` matches, or fail with guidance: none
+/// found, or several found (list them and ask the user to select with `--port`).
+#[cfg(feature = "alsa")]
+fn select_one(mut matches: Vec<MidiPortInfo>, spec: &str) -> Result<MidiPortInfo> {
+    match matches.len() {
+        0 => anyhow::bail!("no MIDI device matches {spec:?} (run `ports`, or use --mock)"),
+        1 => Ok(matches.remove(0)),
+        _ => {
+            let list = matches
+                .iter()
+                .map(|p| format!("  {}  {}", p.addr, p.name))
+                .collect::<Vec<_>>()
+                .join("\n");
+            anyhow::bail!(
+                "several devices match {spec:?}; select one with --port <hw:CARD,DEV>:\n{list}"
+            )
+        }
+    }
+}
+
 /// Open the device for parameter-level commands: the mock (`--mock`) or the
-/// hardware port (`--port`).
+/// hardware port (`--port`, or the auto-detected Eleven Rack).
 fn open_device(mock: bool, port: Option<&str>) -> Result<Eleven<Box<dyn Transport>>> {
     if mock {
         return Ok(Eleven::new(Box::new(MockTransport::new())));
     }
     #[cfg(feature = "alsa")]
     {
-        let port = port.context("no --port given (run `ports`, or use --mock)")?;
-        Ok(Eleven::new(Box::new(open_raw(port)?)))
+        Ok(Eleven::new(Box::new(open_raw(&resolve_port(port)?)?)))
     }
     #[cfg(not(feature = "alsa"))]
     {
@@ -60,8 +102,7 @@ fn open_device(mock: bool, port: Option<&str>) -> Result<Eleven<Box<dyn Transpor
 /// Open a real unit for hardware-only commands (no mock equivalent).
 #[cfg(feature = "alsa")]
 fn open_rawmidi(port: Option<&str>) -> Result<RawMidi> {
-    let port = port.context("this command needs --port (a connected unit)")?;
-    open_raw(port)
+    open_raw(&resolve_port(port)?)
 }
 
 // ---- parameter commands (mock or hardware) ----
@@ -721,11 +762,16 @@ pub fn identity(port: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// List the available ALSA rawmidi ports.
+/// List the available MIDI ports: their `hw:CARD,DEV` address and device name.
 #[cfg(feature = "alsa")]
 pub fn ports() -> Result<()> {
-    for p in RawMidi::ports()? {
-        println!("{p}");
+    let ports = RawMidi::ports()?;
+    if ports.is_empty() {
+        eprintln!("no MIDI ports found");
+        return Ok(());
+    }
+    for p in ports {
+        println!("{}  {}", p.addr, p.name);
     }
     Ok(())
 }

@@ -15,6 +15,8 @@ pub use mock::MockTransport;
 #[cfg(feature = "alsa")]
 mod rawmidi;
 #[cfg(feature = "alsa")]
+pub use rackctl_midi::MidiPortInfo;
+#[cfg(feature = "alsa")]
 pub use rawmidi::RawMidi;
 
 use crate::error::Result;

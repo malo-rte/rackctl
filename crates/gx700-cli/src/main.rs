@@ -36,7 +36,9 @@ struct Cli {
     #[arg(long, global = true)]
     mock: bool,
 
-    /// ALSA rawmidi port (`hw:CARD,DEV`); see the `ports` command.
+    /// Which MIDI port: a `hw:CARD,DEV` address or a device-name substring (the
+    /// GX-700 rides an external interface); see the `ports` command. If more than
+    /// one device matches, they are listed so you can pick one.
     #[arg(long, global = true)]
     port: Option<String>,
 
@@ -58,7 +60,7 @@ const HELP_STYLES: Styles = Styles::styled()
 /// Examples shown at the foot of `rackctl-gx700 --help`.
 const EXAMPLES: &str = "\
 Examples:
-  rackctl-gx700 ports                          List ALSA rawmidi ports
+  rackctl-gx700 ports                          List MIDI ports (address + name)
   rackctl-gx700 list                           List every parameter key
   rackctl-gx700 info preamp-gain               Explain one parameter
   rackctl-gx700 --port hw:1,0 get preamp-gain  Read a value
@@ -73,7 +75,7 @@ Examples:
 
 #[derive(Subcommand)]
 enum Command {
-    /// List the ALSA rawmidi ports available on the system.
+    /// List the MIDI ports available on the system (address and device name).
     Ports,
     /// List every parameter with its key, block, kind, and address.
     List,
@@ -292,10 +294,10 @@ fn list_ports() -> Result<()> {
     {
         let ports = RawMidi::ports()?;
         if ports.is_empty() {
-            eprintln!("no rawmidi ports found");
+            eprintln!("no MIDI ports found");
         }
         for port in ports {
-            println!("{port}");
+            println!("{}  {}", port.addr, port.name);
         }
         Ok(())
     }
@@ -348,12 +350,39 @@ fn open_device(mock: bool, port: Option<&str>) -> Result<Device> {
     {
         let port =
             port.ok_or_else(|| anyhow::anyhow!("no --port given (run `ports`, or use --mock)"))?;
-        Ok(Device::Alsa(Gx700::open(port)?))
+        Ok(Device::Alsa(Gx700::open(&resolve_port(port)?)?))
     }
     #[cfg(not(feature = "alsa"))]
     {
         let _ = port;
         anyhow::bail!("built without ALSA support; re-run with --mock")
+    }
+}
+
+/// Resolve `--port` to a concrete `hw:CARD,DEV` address. An explicit `hw:…`
+/// address is used verbatim; anything else is a device-name substring matched
+/// against the connected MIDI interfaces (the GX-700 is reached through one).
+/// If more than one interface matches, the candidates are listed and the user is
+/// asked to pick one — nothing is chosen silently.
+#[cfg(feature = "alsa")]
+fn resolve_port(spec: &str) -> Result<String> {
+    if spec.starts_with("hw:") {
+        return Ok(spec.to_owned());
+    }
+    let mut matches = RawMidi::find(spec)?;
+    match matches.len() {
+        0 => anyhow::bail!("no MIDI device matches {spec:?} (run `ports`, or use --mock)"),
+        1 => Ok(matches.remove(0).addr),
+        _ => {
+            let list = matches
+                .iter()
+                .map(|p| format!("  {}  {}", p.addr, p.name))
+                .collect::<Vec<_>>()
+                .join("\n");
+            anyhow::bail!(
+                "several devices match {spec:?}; select one with --port <hw:CARD,DEV>:\n{list}"
+            )
+        }
     }
 }
 

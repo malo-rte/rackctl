@@ -14,7 +14,7 @@ use std::path::Path;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
-use rackctl_midi::MidiPort;
+use rackctl_midi::{MidiPort, MidiPortInfo};
 
 use super::Transport;
 use crate::sysex::{self, CHANGE_REPORT, Framer, Identity, READ_REPLY};
@@ -162,13 +162,24 @@ pub struct RawMidi {
 }
 
 impl RawMidi {
-    /// Enumerate the ALSA rawmidi ports available on the system, as
-    /// `hw:CARD,DEV` strings suitable for [`Self::open`].
+    /// Enumerate the connectable MIDI ports on the system (each with its
+    /// `hw:CARD,DEV` address and device name), suitable for [`Self::open`] or the
+    /// `ports` command.
     ///
     /// # Errors
     /// [`Error::Transport`] if ALSA reports an error while iterating ports.
-    pub fn ports() -> Result<Vec<String>> {
+    pub fn ports() -> Result<Vec<MidiPortInfo>> {
         MidiPort::list_ports().map_err(midi_err)
+    }
+
+    /// Find the ports matching `spec` — an exact `hw:CARD,DEV` address, or a
+    /// case-insensitive device-name substring (e.g. `"eleven"`). Several may match
+    /// when more than one such device is connected; the caller picks one.
+    ///
+    /// # Errors
+    /// [`Error::Transport`] if ALSA reports an error while iterating ports.
+    pub fn find(spec: &str) -> Result<Vec<MidiPortInfo>> {
+        MidiPort::find_ports(spec).map_err(midi_err)
     }
 
     /// Open the rawmidi port at `port` (a `hw:CARD,DEV` address) for both input

@@ -11,7 +11,7 @@
 use std::thread::sleep;
 use std::time::Duration;
 
-use rackctl_midi::MidiPort;
+use rackctl_midi::{MidiPort, MidiPortInfo};
 
 use super::Transport;
 use crate::error::{Error, Result};
@@ -70,14 +70,25 @@ pub struct RawMidi {
 }
 
 impl RawMidi {
-    /// Enumerate the ALSA rawmidi ports available on the system, as
-    /// `hw:CARD,DEV` strings suitable for [`Self::open`].
+    /// Enumerate the connectable MIDI ports on the system, each with its
+    /// `hw:CARD,DEV` address (suitable for [`Self::open`]) and device name.
     ///
     /// # Errors
     /// [`Error::Transport`] if ALSA reports an error while iterating cards or
     /// devices.
-    pub fn ports() -> Result<Vec<String>> {
+    pub fn ports() -> Result<Vec<MidiPortInfo>> {
         MidiPort::list_ports().map_err(midi_err)
+    }
+
+    /// Find the ports matching `spec` — an exact `hw:CARD,DEV` address, or a
+    /// case-insensitive device-name substring. The GX-700 is reached through a
+    /// separate MIDI interface, so match that interface's name here. Several may
+    /// match; the caller picks one.
+    ///
+    /// # Errors
+    /// [`Error::Transport`] if ALSA reports an error while iterating ports.
+    pub fn find(spec: &str) -> Result<Vec<MidiPortInfo>> {
+        MidiPort::find_ports(spec).map_err(midi_err)
     }
 
     /// Open the rawmidi port at `port` (a `hw:CARD,DEV` address) for both input

@@ -13,6 +13,8 @@ pub use mock::MockTransport;
 #[cfg(feature = "alsa")]
 mod rawmidi;
 #[cfg(feature = "alsa")]
+pub use rackctl_midi::MidiPortInfo;
+#[cfg(feature = "alsa")]
 pub use rawmidi::RawMidi;
 
 use rackctl_eleven_model::error::Result;

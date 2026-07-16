@@ -1,8 +1,9 @@
 //! `rackctl-midi` — the byte-level MIDI link for the Rackctl suite.
 //!
 //! A [`MidiPort`] is a raw `hw:CARD,DEV` ALSA rawmidi endpoint: open it, send and
-//! (non-blocking) receive **bytes**, list the available ports, and exclude other
-//! rackctl processes from the same interface via a [`PortLock`]. It is
+//! (non-blocking) receive **bytes**, list the available ports (each a
+//! [`MidiPortInfo`] with address and device name) or find one by name, and
+//! exclude other rackctl processes from the same interface via a [`PortLock`]. It is
 //! manufacturer-independent — a device crate layers its own protocol (Roland `SysEx`
 //! for the GX-700, …) on top, building and framing messages from these bytes.
 //!
@@ -16,7 +17,7 @@ mod lock;
 mod port;
 
 pub use lock::PortLock;
-pub use port::MidiPort;
+pub use port::{MidiPort, MidiPortInfo};
 
 use thiserror::Error;
 

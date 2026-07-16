@@ -19,7 +19,8 @@ struct Cli {
     /// Use an in-memory mock device instead of real hardware.
     #[arg(long)]
     mock: bool,
-    /// ALSA rawmidi port of the Eleven Rack (`hw:CARD,DEV`); see `rackctl-eleven ports`.
+    /// Which MIDI port: a `hw:CARD,DEV` address or a device-name substring; see
+    /// `rackctl-eleven ports`. Omit to auto-detect the Eleven Rack.
     #[arg(long)]
     port: Option<String>,
     /// Start without connecting to the unit — browse the library and compose scenes
