@@ -7,6 +7,21 @@ version.
 
 ## [Unreleased]
 
+## [0.9.5] - 2026-07-16
+
+### Added
+
+- **Eleven Rack driver: lab validation and a WirePlumber baseline.** The ALSA
+  driver in `contrib/eleven-rack-alsa-quirk/` is now validated end-to-end with
+  lab instruments (signal generator on the guitar input, oscilloscope on the
+  headphone output): capture is pitch-accurate and playback reads as a clean
+  1 kHz sine with no dropouts. The confirmed channel map (dry guitar on ch1,
+  wet Rig on ch3-4, etc.) is documented, and two earlier apparent playback
+  faults are identified as USB-passthrough artifacts of the test VM rather than
+  driver bugs. Adds `wireplumber-eleven-rack.{conf,nix}` — a userspace baseline
+  that keeps the async node from suspending and exposes a sensible channel
+  layout.
+
 ## [0.9.4] - 2026-07-16
 
 ### Changed
