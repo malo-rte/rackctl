@@ -7,6 +7,8 @@ version.
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-07-16
+
 ### Changed
 
 - **Eleven Rack ALSA driver now works on real hardware.** The kernel patch in
