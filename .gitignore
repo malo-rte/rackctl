@@ -5,6 +5,9 @@
 # Rust workspace
 /target
 
+# Packaged release artifacts (cargo build --release bundle + tarball)
+/dist
+
 # Rendered documentation (docs/build.sh output)
 /build
 
