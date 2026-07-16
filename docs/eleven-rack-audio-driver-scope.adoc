@@ -108,6 +108,40 @@ addresses three device non-conformances across five files:
 
 The sections below record the earlier (superseded) attempts and the RE that led here.
 
+=== Lab validation (2026-07-16): scope + signal generator
+
+Validated end-to-end with instruments (Rigol DG1062Z generator on the guitar
+input, Rigol MSO4014 scope on the headphone/Main output), driven over raw-TCP
+SCPI:
+
+* *Capture is pitch-accurate.* A 1 kHz sine into the guitar jack is captured at
+  ~1000 Hz on ch1 and ch3 (zero-crossing), with exact per-second frame counts.
+* *Playback is clean.* A 1 kHz tone played over USB reads on the scope as a
+  clean sine: frequency 999 Hz (sd 7), Vpp 464 mV (sd 5), stable Vrms, 0
+  dropouts over the run. So the driver clocks playback at exactly 48 kHz and
+  produces a correct waveform.
+* *Channel map (confirmed):*
+  capture ch1 = Guitar In (dry DI), ch2 = Mic In, ch3-4 = Eleven Rig L/R (wet),
+  ch5-6 = Digital In L/R, ch7-8 = Line In L/R;
+  playback ch1-2 = Main Out L/R (mirrored to Phones), ch3-4 = ReAmp L/R,
+  ch5-6 = Digital Out L/R. Guitar (ch1, dry) and Rig (ch3-4, wet) are the same
+  source at two taps -- the dry/wet pair for modelling.
+
+*Two red herrings, resolved by the scope:* the earlier "playback runs 1.5x slow
+/ is really 4-channel" and "choppy/garbled" conclusions were artifacts, not
+driver bugs. The unit is on a QEMU virtual XHCI (USB passthrough), which forwards
+isochronous IN (capture) faithfully but backpressures/jitters isochronous OUT
+(playback), polluting `aplay` wall-clock timing; and several scope reads landed
+on the silence right after a test tone ended. The scope's correct-frequency
+result disproves the rate/channel theories -- the device is genuinely 6-channel
+playback at 48 kHz. Expect clean playback on bare metal.
+
+*Userspace note:* the kernel driver is validated; the PipeWire path still needs
+tuning (an async device that PipeWire must resample; node volume defaulted to 0;
+`pw-play` routing). `contrib/eleven-rack-alsa-quirk/wireplumber-eleven-rack.{conf,nix}`
+is a baseline (no node suspend so the clock lock holds; Main as FL/FR, rest
+discrete AUX; the channel map above).
+
 === Earlier attempts (superseded): quirk binds; v1 no PCM; v2 no stream
 
 Path A was built (patch against 6.18, deployed on a NixOS test VM, kernel 6.18.38)

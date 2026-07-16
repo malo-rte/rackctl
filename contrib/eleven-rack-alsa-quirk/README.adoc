@@ -9,14 +9,24 @@ Background and the full USB analysis:
 
 Base kernel: *Linux 6.18*.
 
-== Status: WORKING (verified on hardware 2026-07-16)
+== Status: WORKING, lab-validated (2026-07-16)
 
 Confirmed on a real unit (kernel 6.18.38): capture and playback both stream real
 audio, full-duplex, at 48 kHz and 96 kHz with *zero xruns*; `arecord -l` / `aplay
 -l` list `card: Rack [Eleven Rack]`. Capture is clock master, so the exact
 byte counts (96 kHz capture -> exactly 96000x8x4 bytes/s) prove the device is
-genuinely clocking at the requested rate. The mixer (master/PCM/capture volume,
-clock source, extension-unit switch) and MIDI work in parallel.
+genuinely clocking at the requested rate. The mixer and MIDI work in parallel.
+
+Validated with lab instruments (Rigol signal generator on the guitar input, Rigol
+scope on the headphone output, over raw-TCP SCPI): capture is pitch-accurate
+(1 kHz in -> ~1000 Hz on ch1/ch3), and playback reads on the scope as a clean
+1 kHz sine (freq 999 Hz sd 7, Vpp 464 mV sd 5, no dropouts). See the "Lab
+validation" section in `../../docs/eleven-rack-audio-driver-scope.adoc` for the
+full channel map and the resolution of the earlier VM-passthrough red herrings.
+
+*Userspace:* the kernel driver is validated; the PipeWire experience still needs
+tuning. `wireplumber-eleven-rack.{conf,nix}` here is a baseline (no node suspend,
+Main as FL/FR + discrete AUX, documented channel map).
 
 == The device's three non-conformances, and the fix
 
