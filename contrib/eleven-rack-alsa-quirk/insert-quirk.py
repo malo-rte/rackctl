@@ -20,48 +20,14 @@ from pathlib import Path
 
 MARKER = "0x0dba, 0xb011"
 
-
-def _audioformat(ifno: int, ep: int, channels: int, role: str) -> str:
-    """One fixed-endpoint audioformat streaming entry (tab-indented, 3 levels)."""
-    return (
-        f"\t\t\t{{\n"
-        f"\t\t\t\t/* {role}: EP {ep:#04x}, {channels}ch, 24-bit in S32_LE slots */\n"
-        f"\t\t\t\tQUIRK_DATA_AUDIOFORMAT({ifno}) {{\n"
-        f"\t\t\t\t\t.formats = SNDRV_PCM_FMTBIT_S32_LE,\n"
-        f"\t\t\t\t\t.channels = {channels},\n"
-        f"\t\t\t\t\t.fmt_bits = 24,\n"
-        f"\t\t\t\t\t.iface = {ifno},\n"
-        f"\t\t\t\t\t.altsetting = 1,\n"
-        f"\t\t\t\t\t.altset_idx = 1,\n"
-        f"\t\t\t\t\t.endpoint = {ep:#04x},\n"
-        f"\t\t\t\t\t.ep_attr = USB_ENDPOINT_XFER_ISOC |\n"
-        f"\t\t\t\t\t\t   USB_ENDPOINT_SYNC_ASYNC,\n"
-        f"\t\t\t\t\t.rates = SNDRV_PCM_RATE_44100 |\n"
-        f"\t\t\t\t\t\t SNDRV_PCM_RATE_48000 |\n"
-        f"\t\t\t\t\t\t SNDRV_PCM_RATE_88200 |\n"
-        f"\t\t\t\t\t\t SNDRV_PCM_RATE_96000,\n"
-        f"\t\t\t\t\t.rate_min = 44100,\n"
-        f"\t\t\t\t\t.rate_max = 96000,\n"
-        f"\t\t\t\t\t.nr_rates = 4,\n"
-        f"\t\t\t\t\t.rate_table = (unsigned int[]) {{\n"
-        f"\t\t\t\t\t\t44100, 48000, 88200, 96000\n"
-        f"\t\t\t\t\t}},\n"
-        f"\t\t\t\t\t.clock = 0x81,\n"
-        f"\t\t\t\t}},\n"
-        f"\t\t\t}},\n"
-    )
-
-
+# NOTE: this regenerates ONLY the quirks-table.h hunk of the driver. The full,
+# working fix (eleven-rack-uac2-quirk.patch) also patches card.c, format.c,
+# pcm.c and quirks.c -- this entry alone will not produce a working PCM.
 ENTRY = (
     "\t/*\n"
-    "\t * Avid/Digidesign Eleven Rack: the audio function is standard UAC2 but\n"
-    "\t * marked vendor-class (0xFF). The DFU interface (0) enumerates first and\n"
-    "\t * becomes chip->ctrl_intf, so terminal-link + clock resolution for the\n"
-    "\t * streaming interfaces (which follows ctrl_intf) misfires -- interfaces\n"
-    "\t * 3/4 report 'bogus bTerminalLink' and no PCM is built. Describe the two\n"
-    "\t * streams with fixed audioformats so the PCMs are created directly,\n"
-    "\t * bypassing terminal parsing. Mixer + MIDI parse on their own interfaces.\n"
-    "\t * See contrib/eleven-rack-alsa-quirk/ in the rackctl repo.\n"
+    "\t * Avid/Digidesign Eleven Rack: standard UAC2 marked vendor-class (0xFF).\n"
+    "\t * Force standard parsing of the audio interfaces (needs the companion\n"
+    "\t * card.c/format.c/pcm.c/quirks.c changes -- see the .patch).\n"
     "\t */\n"
     "{\n"
     "\tUSB_DEVICE(0x0dba, 0xb011),\n"
@@ -72,9 +38,9 @@ ENTRY = (
     "\t\t\t{ QUIRK_DATA_IGNORE(0) },\n"
     "\t\t\t{ QUIRK_DATA_STANDARD_MIXER(1) },\n"
     "\t\t\t{ QUIRK_DATA_STANDARD_MIDI(2) },\n"
-    + _audioformat(3, 0x03, 6, "playback: host -> unit")
-    + _audioformat(4, 0x83, 8, "capture: unit -> host, implicit fb")
-    + "\t\t\tQUIRK_COMPOSITE_END\n"
+    "\t\t\t{ QUIRK_DATA_STANDARD_AUDIO(3) },\n"
+    "\t\t\t{ QUIRK_DATA_STANDARD_AUDIO(4) },\n"
+    "\t\t\tQUIRK_COMPOSITE_END\n"
     "\t\t}\n"
     "\t}\n"
     "},\n"

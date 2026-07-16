@@ -7,6 +7,18 @@ version.
 
 ## [Unreleased]
 
+### Changed
+
+- **Eleven Rack ALSA driver now works on real hardware.** The kernel patch in
+  `contrib/eleven-rack-alsa-quirk/` gives the Eleven Rack a native ALSA
+  soundcard — 8-channel capture / 6-channel playback, 24-bit,
+  44.1/48/88.2/96 kHz, full-duplex — verified on a real unit (zero xruns).
+  It supersedes the earlier non-streaming attempt: standard UAC2 parsing plus
+  fixes for the device's three non-conformances (vendor-class interfaces, the
+  DFU interface capturing the control-interface role, and the missing SAM_FREQ
+  RANGE / a read-only pitch control the firmware NAKs). Now a five-file patch
+  across `card.c`, `format.c`, `pcm.c`, `quirks.c` and `quirks-table.h`.
+
 ## [0.9.3] - 2026-07-16
 
 ### Changed

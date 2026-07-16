@@ -1,183 +1,90 @@
-= Eleven Rack ALSA quirk (make Linux see it as a real UAC2 soundcard)
+= Eleven Rack ALSA driver (native UAC2 soundcard for the Avid Eleven Rack)
 
-A `snd-usb-audio` quirk that gives the Avid/Digidesign Eleven Rack (`0dba:b011`)
-a native ALSA PCM device: *8 capture channels / 6 playback channels, 24-bit
-audio in `S32_LE` slots, 44.1 / 48 / 88.2 / 96 kHz*. No proprietary-format
-reverse-engineering -- the device is standard USB Audio Class 2.0; only its
-`bInterfaceClass` is set to vendor (`0xFF`) so the stock driver skips it.
+A `snd-usb-audio` patch that gives the Avid/Digidesign Eleven Rack (`0dba:b011`)
+a native ALSA soundcard: *8 capture channels / 6 playback channels, 24-bit in
+`S32_LE` slots, 44.1 / 48 / 88.2 / 96 kHz*, full-duplex, plus its mixer and MIDI.
 
 Background and the full USB analysis:
-`../../docs/eleven-rack-audio-driver-scope.adoc` ("KEY FINDING").
+`../../docs/eleven-rack-audio-driver-scope.adoc`.
 
-Base kernel for the patch: *Linux 6.18*.
+Base kernel: *Linux 6.18*.
 
-== Status (2026-07-16)
+== Status: WORKING (verified on hardware 2026-07-16)
 
-Tested on real hardware (kernel 6.18.38). *v1* (force interfaces 3/4 through
-the standard UAC2 parser with `QUIRK_DATA_STANDARD_AUDIO`) brought up the card,
-mixer, and MIDI but registered *no PCM*: both streaming interfaces were rejected
-with `bogus bTerminalLink`.
+Confirmed on a real unit (kernel 6.18.38): capture and playback both stream real
+audio, full-duplex, at 48 kHz and 96 kHz with *zero xruns*; `arecord -l` / `aplay
+-l` list `card: Rack [Eleven Rack]`. Capture is clock master, so the exact
+byte counts (96 kHz capture -> exactly 96000x8x4 bytes/s) prove the device is
+genuinely clocking at the requested rate. The mixer (master/PCM/capture volume,
+clock source, extension-unit switch) and MIDI work in parallel.
 
-Root cause (confirmed against the 6.18 source): the DFU interface (0) enumerates
-first and becomes `chip->ctrl_intf`. The composite quirk's `STANDARD_AUDIO` path
-calls `snd_usb_parse_audio_interface()` directly *without* registering a
-per-interface control link, so `snd_usb_find_ctrl_interface()` falls back to the
-DFU interface for interfaces 3/4. Terminal-link *and* clock resolution then
-search the DFU interface's (audio-less) descriptors and fail -- and the mixer's
-`cannot get min/max` spam is the same misdirection. (The `card.c` comment at the
-`chip->ctrl_intf` assignment even says "we might need a more specific check here
-in the future".)
+== The device's three non-conformances, and the fix
 
-*v2* (this patch) describes the two streams with fixed audioformats
-(`QUIRK_AUDIO_FIXED_ENDPOINT`), which build the PCMs directly and skip terminal
-parsing. This is a *candidate fix pending the next hardware build* -- see
-"Residual caveat" below.
-
-== What is here
-
-* `eleven-rack-uac2-quirk.patch` -- the kernel patch, generated against Linux
-  6.18 `sound/usb/quirks-table.h`. Applies with `git apply` or `patch -p1` from
-  the kernel source root, and is what the NixOS module below feeds to
-  `boot.kernelPatches`.
-* `nixos-eleven-rack.nix` -- a NixOS module that pins kernel 6.18 and applies the
-  patch. Import it and `nixos-rebuild switch`.
-* `quirk-entry.c` -- the raw entry with a comment explaining the hardware result,
-  root cause, and per-interface disposition; readable reference for the patch.
-* `insert-quirk.py` -- regenerates the change against an arbitrary
-  `quirks-table.h` in place (idempotent; anchors on the end-of-list
-  `#undef USB_DEVICE_VENDOR_SPEC` marker). Use it to re-cut the patch for a
-  different kernel: run it on that tree's file and `git diff`.
-
-== Use it on NixOS (recommended path)
-
-[source,nix]
-----
-# in configuration.nix (or a flake NixOS module)
-imports = [ ./contrib/eleven-rack-alsa-quirk/nixos-eleven-rack.nix ];
-----
-
-That pins `boot.kernelPackages = pkgs.linuxPackages_6_18` and adds the patch via
-`boot.kernelPatches`. `nixos-rebuild switch` rebuilds the kernel (slow the first
-time) and, after reboot, the Eleven Rack enumerates as a normal ALSA card. To
-apply the quirk on top of a different kernel, change the `boot.kernelPackages`
-line and regenerate the patch with `insert-quirk.py` (see above).
-
-== How it works (v2)
+The Eleven Rack is standard USB Audio Class 2.0, but deviates in three ways that
+each needed a fix. The patch (`eleven-rack-uac2-quirk.patch`) touches five files:
 
 [cols="1,4",options="header"]
 |===
-| Intf | Quirk disposition
-| 0 | `IGNORE` -- DFU, left to userspace `dfu-util`
-| 1 | `STANDARD_MIXER` -- mixer + clock descriptors (parses on its own interface)
-| 2 | `STANDARD_MIDI` -- USB-MIDI (this is today's `hw:2,0`, unchanged)
-| 3 | fixed `AUDIOFORMAT` -- playback, EP `0x03`, 6 ch, `S32_LE`
-| 4 | fixed `AUDIOFORMAT` -- capture, EP `0x83`, 8 ch, `S32_LE`, implicit fb
+| File | Why
+| `sound/usb/quirks-table.h` | The audio interfaces are marked *vendor-class* (`0xFF`) so the stock driver skips them. A composite quirk forces standard UAC2 parsing: `IGNORE(0)` (DFU), `STANDARD_MIXER(1)`, `STANDARD_MIDI(2)`, `STANDARD_AUDIO(3)` playback, `STANDARD_AUDIO(4)` capture.
+| `sound/usb/card.c` | The *DFU interface (0) enumerates first* and became `chip->ctrl_intf`, so terminal/clock lookups for the streaming interfaces searched an audio-less interface and failed ("bogus bTerminalLink"). Fix: pick a real AudioControl interface for `chip->ctrl_intf`.
+| `sound/usb/format.c` | The firmware *does not answer the UAC2 SAM_FREQ RANGE* request, so standard rate enumeration finds no rates -> no PCM. Fix: a fixed-rate-list fallback (44.1/48/88.2/96 kHz) for the device.
+| `sound/usb/pcm.c` | The endpoints declare a *read-only PITCH control that the firmware NAKs on enable*, which was fatal. Fix: under `QUIRK_FLAG_IGNORE_CTL_ERROR`, treat a failed PITCH enable as non-fatal.
+| `sound/usb/quirks.c` | `QUIRK_FLAG_IGNORE_CTL_ERROR` for the device (covers the read-only pitch and the mixer-unit min/max the firmware does not answer).
 |===
 
-`create_fixed_stream_quirk()` builds each PCM straight from the declared
-audioformat (channels, format, rates, endpoint), so it never does the
-terminal-link lookup that v1 tripped on. `add_audio_stream_from_fixed_fmt()`
-calls the generic implicit-feedback detector, which links the async playback
-endpoint (interface 3) to the capture interface (4) automatically. The mixer and
-MIDI still parse on their own interfaces, exactly as in v1.
+Implicit feedback (playback slaved to capture) is set up automatically by standard
+parsing from the CS endpoint descriptors -- no manual sync wiring needed.
 
-== Build and test (single-module, fast iteration)
+== Persistent install (NixOS)
 
-You need the *source tree for your running kernel* (headers alone are not enough
-to rebuild an in-tree module) and a matching toolchain.
+`nixos-eleven-rack.nix` applies the patch via `boot.kernelPatches` on Linux 6.18:
 
-. Get the kernel source matching `uname -r`.
-+
-* Arch: `pacman -S linux-headers`, then obtain the matching source
-  (`pkgctl repo clone --protocol=https linux`, or the tarball from the Arch
-  package). Note the env here reports an Arch kernel; keep the source version
-  exactly equal to `uname -r`.
-* Debian/Ubuntu: `apt-get source linux-image-$(uname -r)` (or `linux-source`).
-* Fedora: `dnf download --source kernel` and unpack.
-
-. Configure the tree to match the running kernel (for a loadable `.ko` whose
-  vermagic matches), then prepare modules:
-+
-[source,sh]
+[source,nix]
 ----
-cd /path/to/linux-source
-zcat /proc/config.gz > .config    # or: cp /boot/config-$(uname -r) .config
-make olddefconfig
-make modules_prepare
+imports = [ ./contrib/eleven-rack-alsa-quirk/nixos-eleven-rack.nix ];
 ----
 
-. Insert the quirk and build just the module:
-+
-[source,sh]
-----
-python3 /path/to/rackctl/contrib/eleven-rack-alsa-quirk/insert-quirk.py \
-        sound/usb/quirks-table.h
-make sound/usb/snd-usb-audio.ko
-----
+`nixos-rebuild switch` rebuilds the kernel (slow, once) and the Rack comes up as a
+soundcard after reboot. On other distros, apply `eleven-rack-uac2-quirk.patch`
+(`git apply` / `patch -p1`) to the 6.18 source and rebuild `snd-usb-audio`.
 
-. Swap the module in (unbind the Eleven's MIDI first so the module can unload):
-+
-[source,sh]
-----
-sudo rmmod snd_usb_audio
-sudo insmod sound/usb/snd-usb-audio.ko
-#   if vermagic mismatches (different build config), force it for the test:
-#   sudo insmod -f sound/usb/snd-usb-audio.ko
-----
+== Fast iteration (module-only rebuild + hot reload)
 
-TIP: For a clean, reboot-persistent install use DKMS instead of `insmod`; it
-rebuilds against each kernel and sorts out vermagic. The single-module route
-above is only for the reverse-engineering test loop.
-
-== Verify the card comes up with PCM
+For developing the patch without a full kernel rebuild, build just
+`snd-usb-audio.ko` against the stock kernel's build tree and hot-swap it (see the
+NixOS test-VM setup in `nixos-cfg/hosts/vm/eleven-rack/`: `module-only.nix` builds
+the module via `nix build .#eleven-snd-usb`, `eleven-mod.sh` rebuilds + reloads it
+with no reboot). The general recipe on any distro with the matching kernel source:
 
 [source,sh]
 ----
-dmesg | tail -30                 # no more "bogus bTerminalLink"; streams attach
-aplay -l ; arecord -l            # expect card "Rack": 6-out playback, 8-in capture
-cat /proc/asound/cards ; cat /proc/asound/pcm
+# patched sound/usb copied to $M, kernel build tree at $KBUILD
+make -C "$KBUILD" M="$M/sound/usb" modules
+sudo rmmod snd_usb_audio && sudo insmod "$M/sound/usb/snd-usb-audio.ko"
 ----
 
-`amidi -l` should still show the MIDI side; `rackctl-eleven` keeps working on the
-MIDI card in parallel.
-
-== Residual caveat: sample rate (the `ctrl_intf` issue is not fully fixed)
-
-The fixed audioformat gets the PCMs registered, but sample-*rate* control still
-goes through `snd_usb_find_ctrl_interface()`, which -- until the root cause is
-fixed upstream -- resolves to the DFU interface for interfaces 3/4. So the
-`SET_CUR SAM_FREQ` may not actually change the unit's rate.
-`create_fixed_stream_quirk()` ignores the rate-init result, so the PCM still
-registers, but the *device* stays at its power-on rate (44.1 kHz).
-
-Practical consequence and workaround:
-
-* 44.1 kHz should just work (host and device agree at the default).
-* For 48 / 88.2 / 96 kHz, *set the rate on the unit's front panel*
-  (`EDIT/BACK` -> Digital Clock/Input -> CLOCK SOURCE -> `Int 96 kHz`), then open
-  the ALSA device at the matching rate. This is also the honest capture rate for
-  black-box measurement of the unit.
-
-Two ways to fix the rate path properly, for the upstream submission:
-
-* *Upstream kernel fix (preferred).* Make `chip->ctrl_intf` (or the per-interface
-  control link) resolve to the real AudioControl interface (1) even when a
-  non-audio interface (DFU) enumerates first -- the `card.c` comment invites
-  exactly this. That also makes the simpler `STANDARD_AUDIO` form of the quirk
-  work and fixes the mixer `min/max` errors.
-* *Quirk-local.* If the firmware honours `SET_CUR` addressed to interface 1
-  regardless, a targeted control-message quirk could set the rate directly.
-
-== Verify each rate on hardware
+== Verify
 
 [source,sh]
 ----
-arecord -D hw:Rack -f S32_LE -c 8 -r 44100 /tmp/r44.wav   # expect: works
-# set the unit to Int 96k on its front panel first, then:
-arecord -D hw:Rack -f S32_LE -c 8 -r 96000 /tmp/r96.wav
-speaker-test -D hw:Rack -c 6 -r 44100 -F S32_LE           # playback path
+arecord -l ; aplay -l ; cat /proc/asound/cards            # expect "Rack [Eleven Rack]"
+cat /proc/asound/card1/stream0                            # 6-out / 8-in, 4 rates, 24-bit
+arecord -D hw:1,0 -f S32_LE -c 8 -r 96000 -d 2 /tmp/r.wav # 8-ch capture at 96 kHz
+speaker-test -D hw:1,0 -c 6 -r 48000 -F S32_LE -l 1       # playback
 ----
 
-Once v2 holds, clean it up (confirm the mixer controls are sane, decide whether
-to also land the `ctrl_intf` kernel fix) and submit upstream to `alsa-devel` /
-`sound/usb/quirks-table.h`.
+== Known limitations (not blockers)
+
+* The 8 "Analog In Volume" mixer controls (mixer unit `0x40`) read as
+  non-functional -- the firmware does not answer their min/max request. The
+  main volume/switch controls work; input gain is also settable on the unit /
+  over MIDI. `IGNORE_CTL_ERROR` silences the errors.
+* Channel names are generic (FL/FR/...) rather than labelled guitar/dry/reamp/
+  USB-return -- cosmetic routing, addable later from the terminal descriptors.
+
+== Upstreaming
+
+The patch is structured for `alsa-devel` submission. Before sending, generalise
+the `format.c` fallback (it currently piggybacks the `line6_...` rate-quirk helper)
+and add your `Signed-off-by`.

@@ -90,7 +90,25 @@ map (which of the 6 playback / 8 capture channels are guitar / dry / reamp / USB
 still needs labelling from the terminal descriptors + listening tests, but that is cosmetic
 routing, not a blocker to first sound.
 
-== Hardware result (2026-07-16): quirk binds; v1 no PCM; v2 candidate
+== RESOLVED (2026-07-16): working driver
+
+The driver is *working* on real hardware (kernel 6.18.38): 8-ch capture / 6-ch
+playback, 24-bit, 44.1/48/88.2/96 kHz, full-duplex, zero xruns; mixer + MIDI too.
+The final fix (in `contrib/eleven-rack-alsa-quirk/eleven-rack-uac2-quirk.patch`)
+addresses three device non-conformances across five files:
+
+* *quirks-table.h* -- composite quirk forcing standard UAC2 parsing on the
+  vendor-class (0xFF) interfaces (mixer/MIDI/streaming).
+* *card.c* -- pick a real AudioControl interface for `chip->ctrl_intf` (the DFU
+  interface 0 enumerates first and otherwise breaks terminal/clock lookups).
+* *format.c* -- fixed rate-list fallback (the firmware does not answer SAM_FREQ
+  RANGE).
+* *pcm.c* + *quirks.c* -- `QUIRK_FLAG_IGNORE_CTL_ERROR` + non-fatal PITCH enable
+  (the endpoints declare a read-only pitch control the firmware NAKs).
+
+The sections below record the earlier (superseded) attempts and the RE that led here.
+
+=== Earlier attempts (superseded): quirk binds; v1 no PCM; v2 no stream
 
 Path A was built (patch against 6.18, deployed on a NixOS test VM, kernel 6.18.38)
 and tested on the real unit.
