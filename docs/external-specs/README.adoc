@@ -138,6 +138,25 @@ the SHA-256.
   presets 1-20 are factory (Lukather/Holdsworth/Rocktron). Implication: a `pro-gap`
   target needs *no reverse engineering to control* (the CC map is published), but the
   unit can never report state or dump presets, so a librarian must be *host-side only*.
-  NB this is v1; the later Pro GAP v2 and PROGAP Ultra may differ. +
+  NB this is v1 (no SysEx); the *PROGAP Ultra* below is a different, more capable unit
+  that DOES have a documented SysEx dump. +
   SHA-256: `59872f2539d99604028aac02d1c3e194e5b791469f8e97c2fe9e556dea3b85ca`
+
+| `Rocktron-ProGAP-Ultra-Manual.pdf`
+| https://www.rocktronusa.com/uploads/2/2/2/5/22258814/progapultra.pdf.zip (official,
+  zipped; also on ManualsLib, manual #1320960)
+| Rocktron *PROGAP Ultra Owner's Manual* (chart v1.0, dated Jan 14 1993, 52 pp, scanned).
+  A separate, more capable unit than the base Pro GAP above and the strongest candidate
+  in this manifest: it gives *both* live CC control *and* a fully documented SysEx
+  read/write, so a `pro-gap-ultra` crate would be a *read-the-spec* job with *no reverse
+  engineering*. It adds a *MIDI OUT (5-pin)* alongside MIDI IN (7-pin); the chart shows
+  *System Exclusive O/O ("For Bulk Dump/Load and Preset Dump/Load")*, Control Change
+  recognized, Program Change O/O; 128 presets. Chapter 11 gives the complete byte format:
+  a *38-byte preset dump/load* (`F0`, manufacturer id `00 00 41` decimal, product id `5`,
+  command `40`, then 17 parameter bytes -- incl. a Rectifier-type param
+  S.STATE/5Y3/5U4/5AR4 -- 12 title chars, XOR checksum, `F7`) and a *134-string bulk
+  dump/load* (strings 1-128 presets, 129 controller mappings + limits, 130-133 program
+  mapping, 134 misc; command byte `42` first / `43` continued). Parameter values decode
+  via look-up Tables 1-9 printed in the manual. +
+  SHA-256: `157fb7312980608596c379c2e2318e6122ec4060e12707dc73358f428347069a`
 |===
