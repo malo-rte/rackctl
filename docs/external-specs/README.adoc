@@ -120,4 +120,24 @@ the SHA-256.
   reverse-engineer the small bulk-dump byte format, then read/edit/reload whole banks
   (the same bulk-load model as the GX-700), not live parameter control. +
   SHA-256: `32235dfeaf64e64dbada294e5b01173ac17ac824e3059b0e17915c0cf8943823`
+
+| `Rocktron-ProGAP-Manual.pdf`
+| https://www.rocktronusa.com/uploads/2/2/2/5/22258814/progap.pdf.zip (official, zipped;
+  also on ManualsLib, manual #1000994)
+| Rocktron *Pro G.A.P. (PROGAP) Instruction Manual* (v1.0, software 1.0, Apr 1989, 24 pp,
+  scanned). Programmable valve-voiced preamp with HUSH/AGX; a candidate for a future
+  `pro-gap` crate, and the *mirror image* of the JMP-1 above. Its MIDI is *write-only*:
+  connectors are *MIDI IN + THRU only, no MIDI OUT*, and the implementation chart is
+  RECOGNIZED-only. It recalls presets *1-128* via *Program Change* (optional program
+  mapping), and -- unlike the JMP-1 -- gives *full real-time per-parameter control via a
+  fully documented CC map* (CC0 Pre-EQ Level, 1 Pre-EQ Freq, 2 Gain, 3 Bass, 4 Post-EQ
+  Level, 5 Post-EQ Freq, 6 Treble, 7 Hush Threshold, 8 Output Level, 9 Loop, 10/11
+  Control 1/2), plus user controller-mapping (any CC 0-120 -> a parameter). There is *no
+  System Exclusive at all*. A preset is 9 adjustable parameters (64 values each:
+  1LEVEL/1FREQ/GAIN/BASS/2LEVEL/2FREQ/TREBLE/HUSH/OUTLEV) plus Loop + 2 control relays;
+  presets 1-20 are factory (Lukather/Holdsworth/Rocktron). Implication: a `pro-gap`
+  target needs *no reverse engineering to control* (the CC map is published), but the
+  unit can never report state or dump presets, so a librarian must be *host-side only*.
+  NB this is v1; the later Pro GAP v2 and PROGAP Ultra may differ. +
+  SHA-256: `59872f2539d99604028aac02d1c3e194e5b791469f8e97c2fe9e556dea3b85ca`
 |===
