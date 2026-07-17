@@ -61,4 +61,44 @@ the SHA-256.
   `../eleven-rack-sysex-protocol.adoc`; the rig file format in
   `../eleven-rack-rig-format.adoc`). +
   SHA-256: `e6bb6e8554d09aabe46f6542c42b0717b3b1cb00da952c47abbefca3cabffb5b`
+
+| `user-manual-30336_(manymanuals.com).pdf`
+| https://toneprints.com/media/216833/tc_electronic_g-system_manual_english.pdf
+  (official TC English manual; this local copy came via manymanuals.com doc #30336)
+| TC Electronic *G-System User's Manual* (v2.04, 81 pp). The G-System's rack unit is
+  model *GFX01*; a candidate device for a future `g-system` crate. The MIDI menu and
+  the one-page *MIDI Implementation Chart (v1.0)* are the useful part, and they show a
+  *preset-recall + bulk-backup only* MIDI model: it responds to *Program Change* (with
+  *CC#0* bank-select MSB -- value 0 = 100 factory, 1 = user 1-100, 2 = user 101-200 --
+  then PC 0-99) to recall presets; it *sends* PC out (plus an optional remappable Prg.
+  Map) and lets footswitches transmit assignable *CC 0-119*; *SysEx is bulk-dump only*
+  (Utility -> Dump System / Dump Bank, `SysEx ID` 0-126) with *no per-parameter
+  get/set*. Real-time parameter control is via *expression pedals wired locally to the
+  GFX01* (default assign Input Gain / Volume), not over MIDI. 100 factory + 200 user
+  presets. Pitch Bend / Notes / Aftertouch unsupported. +
+  SHA-256: `cefa203b78223b8b910a4dce992595114bf2587efd7254e2a0b7345daa0db64e`
+
+| `G-SYSTEM-Tips.pdf`
+| Psicraft *Vyzor G-System* editor/librarian, distributed with the software (TC
+  Electronic). Filename is misleading -- it is the Vyzor guide, not a TC tips sheet.
+| *Vyzor G-System User's Guide* (Psicraft, 25 pp). Despite the local filename this is
+  the manual for a *third-party editor/librarian*, and it is significant because it is
+  proof that *full per-parameter editing of the G-System over MIDI is possible* --
+  contradicting the limited picture in the v2.04 user manual above. Vyzor *GET*s all
+  data from the unit over MIDI In/Out, edits *every preset parameter in real-time* into
+  the G-System's temporary edit buffer, and *SYNC*s presets/banks back. It requires
+  G-System firmware *>= 4.02 R1737* (newer than the v2.04 manual's chart), i.e. the
+  deep-edit MIDI capability arrived in later firmware. The editor's parameter groups
+  (*Filter, Dyn|EQ, Mod, Pitch, Delay, Reverb, Modifier*) map the preset structure.
+  Vyzor is *not* G-System-specific: it is a generic Psicraft editor/librarian engine
+  skinned per device via a device profile/mapping (same engine as *Vyzor Evolver* for
+  the DSI Evolver and the *Vyzex* line for Line 6 PODs, etc.), so the G-System parameter
+  map lives in a per-device profile plus parseable user-data files (`.SQS` = a full
+  device backup Set, `.SQC` = the whole Collection). The wire protocol is *undocumented*
+  (proprietary), so a `g-system` editor crate would require *reverse engineering* --
+  either extracting that device profile or parsing `.SQS`/`.SQC` dumps, then validating
+  against MIDI traffic, the same approach used for the Eleven Rack. (Note: Vyzor's "CC
+  Learn" maps control-surface CCs to editor controls; that is a host feature, not a
+  G-System protocol capability.) +
+  SHA-256: `02e3d039ea0d805b8f20c1746ca3e40c00926a86fa68042dd433d77b2d0c36c8`
 |===
