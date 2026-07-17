@@ -101,4 +101,23 @@ the SHA-256.
   Learn" maps control-surface CCs to editor controls; that is a host feature, not a
   G-System protocol capability.) +
   SHA-256: `02e3d039ea0d805b8f20c1746ca3e40c00926a86fa68042dd433d77b2d0c36c8`
+
+| `JMP1_OM_MARSHALL_EN.pdf`
+| https://archive.org/download/manual_JMP1_OM_MARSHALL_EN/JMP1_OM_MARSHALL_EN.pdf
+  (also on ManualsLib, manual #524754)
+| Marshall *JMP-1 Valve MIDI Pre-amp Handbook* (12 pp). All-valve 2U MIDI preamp; a
+  candidate device for a future `jmp-1` crate. Its MIDI is *patch recall + bulk backup
+  only*: it responds to *Program Change* to recall one of *100 patches* (00-99; 26
+  factory presets), with an *Input/Output MIDI Mapping* table transposing incoming PC
+  0-127 -> patch 0-99 and emitting a mapped outgoing PC per patch. *System Exclusive is
+  bulk-only* -- one dump carries all patches + the mapping table (transmit with
+  PATCH+VOLUME; receive needs Memory Lock off and *rewrites everything*); there is *no
+  per-parameter SysEx*. The MIDI Implementation Chart confirms *Control Change is
+  neither transmitted nor recognized* (X/X), so there is *no real-time parameter control
+  over MIDI* at all. A patch is a small parameter set (mode OD1/OD2/Clean1/Clean2 +
+  bass-shift variants, Gain 0-20, Volume 0-20, Bass/Middle/Treble/Presence, Effect mix
+  0-20, plus bright/deep switches). Implication: an editor is feasible only *offline* --
+  reverse-engineer the small bulk-dump byte format, then read/edit/reload whole banks
+  (the same bulk-load model as the GX-700), not live parameter control. +
+  SHA-256: `32235dfeaf64e64dbada294e5b01173ac17ac824e3059b0e17915c0cf8943823`
 |===
