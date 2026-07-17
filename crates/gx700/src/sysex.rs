@@ -1,13 +1,15 @@
 //! Pure Roland/BOSS System Exclusive codec, with no I/O.
 //!
-//! The manufacturer-independent framing ([`Framer`], `SYSEX_START`/`SYSEX_END`)
-//! lives in the shared [`rackctl_sysex`] crate and is re-exported here so the rest
-//! of this crate can keep using `crate::sysex::Framer`. What remains is Roland-
-//! specific: [`build_dt1`] / [`build_rq1`] / [`parse_roland`] and the `ROLAND_*` /
-//! model constants — the `F0 41 <dev> 79 <cmd> <addr..> <data..> <checksum> F7`
-//! frame with the Roland one-byte checksum.
+//! The manufacturer-independent parts — the framing ([`Framer`],
+//! `SYSEX_START`/`SYSEX_END`) and the Roland-lineage [`checksum`]
+//! (`rackctl_sysex::checksum::roland_sum0`) — live in the shared [`rackctl_sysex`]
+//! crate and are re-exported here so the rest of this crate can keep using
+//! `crate::sysex::{Framer, checksum}`. What remains is Roland-specific:
+//! [`build_dt1`] / [`build_rq1`] / [`parse_roland`] and the `ROLAND_*` / model
+//! constants — the `F0 41 <dev> 79 <cmd> <addr..> <data..> <checksum> F7` frame.
 
 use crate::error::{Error, Result};
+pub use rackctl_sysex::checksum::roland_sum0 as checksum;
 pub use rackctl_sysex::{Framer, SYSEX_END, SYSEX_START};
 
 /// Roland's MIDI manufacturer id.
@@ -18,19 +20,6 @@ pub const GX700_MODEL_ID: u8 = 0x79;
 pub const DT1: u8 = 0x12;
 /// Roland "Data Request 1" command: request data from an address.
 pub const RQ1: u8 = 0x11;
-
-/// Compute the Roland one-byte checksum over `body` (address plus data).
-///
-/// Roland defines the checksum as `(128 - sum % 128) % 128`. The two's
-/// complement identity `(-sum) & 0x7f` computes the same value while staying in
-/// `u8`, avoiding any `as` cast.
-#[must_use]
-pub fn checksum(body: &[u8]) -> u8 {
-    body.iter()
-        .fold(0u8, |a, &b| a.wrapping_add(b))
-        .wrapping_neg()
-        & 0x7f
-}
 
 /// Build a Roland DT1 (set) message: `F0 41 <dev> 79 12 <addr..> <data..>
 /// <checksum> F7`. The checksum covers the address and data bytes.
@@ -141,15 +130,6 @@ pub fn parse_roland(msg: &[u8]) -> Result<RolandMessage> {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
-
-    #[test]
-    fn checksum_known_vectors() {
-        assert_eq!(checksum(&[0x40]), 0x40);
-        assert_eq!(checksum(&[0x7f]), 0x01);
-        assert_eq!(checksum(&[0]), 0);
-        // Sum 0 across several bytes still checksums to 0.
-        assert_eq!(checksum(&[]), 0);
-    }
 
     #[test]
     fn dt1_round_trips_through_parse() {

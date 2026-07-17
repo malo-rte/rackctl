@@ -58,6 +58,49 @@ impl Framer {
     }
 }
 
+/// Manufacturer-independent System Exclusive **checksum** strategies.
+///
+/// A device codec picks the one its manufacturer specifies and computes it over the
+/// payload region the manufacturer defines (typically address-plus-data). The
+/// strategies live here, not in a device crate, because several manufacturers share
+/// them — Roland (GX-700) and, in the same shape, the other address-mapped units.
+pub mod checksum {
+    /// Compute the Roland one-byte checksum over `body`: `(128 - sum % 128) % 128`,
+    /// i.e. the value that makes `body`-plus-checksum sum to zero mod 128.
+    ///
+    /// The two's-complement identity `(-sum) & 0x7f` computes the same value while
+    /// staying in `u8`, avoiding any `as` cast. Used by the Roland/BOSS DT1/RQ1
+    /// frame and other address-mapped codecs of the same lineage.
+    #[must_use]
+    pub fn roland_sum0(body: &[u8]) -> u8 {
+        body.iter()
+            .fold(0u8, |a, &b| a.wrapping_add(b))
+            .wrapping_neg()
+            & 0x7f
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn roland_sum0_known_vectors() {
+            assert_eq!(roland_sum0(&[0x40]), 0x40);
+            assert_eq!(roland_sum0(&[0x7f]), 0x01);
+            assert_eq!(roland_sum0(&[0]), 0);
+            // Sum 0 across several bytes still checksums to 0.
+            assert_eq!(roland_sum0(&[]), 0);
+            // Address-plus-checksum must sum to zero mod 128.
+            let body = [0x12u8, 0x34, 0x56];
+            let sum = body
+                .iter()
+                .fold(0u8, |a, &b| a.wrapping_add(b))
+                .wrapping_add(roland_sum0(&body));
+            assert_eq!(sum & 0x7f, 0);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
